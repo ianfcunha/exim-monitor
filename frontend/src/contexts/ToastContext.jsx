@@ -1,8 +1,10 @@
 /**
  * Toast global — identidade AVILI light.
+ * Escuta o evento customizado `api:rate-limited` disparado pelo client.js
+ * para exibir aviso de 429 automaticamente em qualquer tela.
  */
 import { CheckCircle2, X, XCircle } from 'lucide-react'
-import { createContext, useCallback, useContext, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 
 const ToastContext = createContext(null)
 let _id = 0
@@ -17,6 +19,13 @@ export function ToastProvider({ children }) {
   }, [])
 
   const remove = useCallback((id) => setToasts(p => p.filter(t => t.id !== id)), [])
+
+  // Captura 429 disparado pelo interceptor do Axios
+  useEffect(() => {
+    const handler = (e) => add({ type: 'error', msg: e.detail?.msg ?? 'Muitas requisições. Aguarde um momento.', duration: 6000 })
+    window.addEventListener('api:rate-limited', handler)
+    return () => window.removeEventListener('api:rate-limited', handler)
+  }, [add])
 
   return (
     <ToastContext.Provider value={add}>

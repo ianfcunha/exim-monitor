@@ -1,7 +1,8 @@
 /**
  * Cliente Axios pre-configurado.
  * Injeta Bearer token em toda requisicao autenticada.
- * Em caso de 401, limpa o token e forca recarregar a pagina (volta ao login).
+ * - 401: limpa token e forca reload (volta ao login)
+ * - 429: Too Many Requests — dispara evento global para exibir toast
  */
 import axios from 'axios'
 
@@ -19,10 +20,22 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
+    const status = err.response?.status
+
+    if (status === 401) {
       localStorage.removeItem('exim_token')
       window.location.reload()
     }
+
+    if (status === 429) {
+      // Dispara evento customizado — capturado pelo ToastProvider em App.jsx
+      const retryAfter = err.response?.headers?.['retry-after']
+      const msg = retryAfter
+        ? `Muitas requisições. Aguarde ${retryAfter}s antes de tentar novamente.`
+        : 'Muitas requisições. Aguarde um momento antes de tentar novamente.'
+      window.dispatchEvent(new CustomEvent('api:rate-limited', { detail: { msg } }))
+    }
+
     return Promise.reject(err)
   }
 )
