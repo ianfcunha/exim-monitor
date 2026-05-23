@@ -1,0 +1,235 @@
+"""
+Sistema de alertas do EXIM Monitor.
+
+Canais suportados:
+  - E-mail via Resend API (preferencial — basta configurar resend_api_key)
+  - E-mail via SMTP (fallback — SendGrid, Mailgun, Gmail, qualquer provedor)
+  - Telegram via Bot API
+
+Logica de disparo:
+  1. Severidade sobe para nivel >= threshold  (OK->HIGH, OK->CRITICAL, HIGH->CRITICAL)
+  2. Fila ultrapassa queue_threshold (se > 0)
+  3. Cooldown por tipo de alerta evita flood no mesmo evento
+
+Toda IO de rede e executada em thread separada (asyncio.to_thread) para
+nao bloquear o event loop.
+"""
+import asyncio
+import json
+import logging
+import smtplib
+import urllib.request
+from datetime import datetime, timedelta
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from typing import Optional
+
+from .database import AlertSettings, SessionLocal, get_alert_settings
+
+logger = logging.getLogger(__name__)
+
+# ── Ranking de severidade ──────────────────────────────────────────────────
+_SEV_RANK = {"OK": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
+
+# ── Estado de debounce em memoria ──────────────────────────────────────────
+_state: dict = {
+    "last_severity": "OK",
+    "email_sent_at": None,      # datetime da ultima notificacao por email
+    "telegram_sent_at": None,   # datetime da ultima notificacao por telegram
+}
+
+
+# ── Helpers de envio (bloqueantes — rodam em thread) ──────────────────────
+
+def _email_body_html(severity: str, problem: str, queue_total: int, hostname: str) -> str:
+    color = {"CRITICAL": "#A32D2D", "HIGH": "#854F0B"}.get(severity, "#185FA5")
+    badge_bg = {"CRITICAL": "#FCEBEB", "HIGH": "#FAEEDA"}.get(severity, "#E6F1FB")
+    return f"""
+<!DOCTYPE html><html><body style="font-family:sans-serif;background:#f8f8f6;margin:0;padding:24px">
+<div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;
+            border:0.5px solid #d3d1c7;overflow:hidden">
+  <div style="background:{color};padding:20px 28px">
+    <h1 style="color:#fff;margin:0;font-size:18px">
+      EXIM Monitor — Alerta de {severity}
+    </h1>
+  </div>
+  <div style="padding:24px 28px">
+    <p style="margin:0 0 16px;color:#2c2c2a;font-size:15px">
+      Um evento foi detectado no servidor <strong>{hostname}</strong>:
+    </p>
+    <table style="width:100%;border-collapse:collapse;font-size:14px">
+      <tr>
+        <td style="padding:8px 0;color:#888;border-bottom:0.5px solid #eee">Severidade</td>
+        <td style="padding:8px 0;border-bottom:0.5px solid #eee">
+          <span style="background:{badge_bg};color:{color};padding:2px 10px;
+                       border-radius:20px;font-weight:600">{severity}</span>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:8px 0;color:#888;border-bottom:0.5px solid #eee">Problema</td>
+        <td style="padding:8px 0;border-bottom:0.5px solid #eee;font-weight:600">{problem}</td>
+      </tr>
+      <tr>
+        <td style="padding:8px 0;color:#888">Fila atual</td>
+        <td style="padding:8px 0;font-weight:600">{queue_total} mensagens</td>
+      </tr>
+    </table>
+    <p style="margin:20px 0 0;color:#888;font-size:12px">
+      Abra o dashboard para tomar uma acao corretiva.
+    </p>
+  </div>
+  <div style="background:#f8f8f6;padding:12px 28px;font-size:11px;color:#aaa">
+    EXIM Monitor &mdash; enviado automaticamente em {datetime.utcnow().strftime("%d/%m/%Y %H:%M")} UTC
+  </div>
+</div>
+</body></html>"""
+
+
+def _send_email_resend(cfg: AlertSettings, severity: str, problem: str,
+                       queue_total: int) -> None:
+    """Envia e-mail via Resend API (preferencial quando resend_api_key esta configurado)."""
+    import resend
+    resend.api_key = cfg.resend_api_key
+
+    hostname = "servidor EXIM"
+    subject  = f"[EXIM Monitor] Alerta {severity}: {problem}"
+    body     = _email_body_html(severity, problem, queue_total, hostname)
+
+    resend.Emails.send({
+        "from":    cfg.smtp_from or "EXIM Monitor <alertas@resend.dev>",
+        "to":      [cfg.email_to],
+        "subject": subject,
+        "html":    body,
+    })
+    logger.info("Alerta por e-mail (Resend) enviado para %s", cfg.email_to)
+
+
+def _send_email_smtp(cfg: AlertSettings, severity: str, problem: str,
+                     queue_total: int) -> None:
+    """Envia e-mail via SMTP (fallback quando resend_api_key nao esta configurado)."""
+    hostname = "servidor EXIM"
+    subject  = f"[EXIM Monitor] Alerta {severity}: {problem}"
+    body     = _email_body_html(severity, problem, queue_total, hostname)
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"]    = cfg.smtp_from
+    msg["To"]      = cfg.email_to
+    msg.attach(MIMEText(body, "html", "utf-8"))
+
+    with smtplib.SMTP(cfg.smtp_host, cfg.smtp_port, timeout=15) as server:
+        server.ehlo()
+        if cfg.smtp_tls:
+            server.starttls()
+            server.ehlo()
+        if cfg.smtp_user and cfg.smtp_password:
+            server.login(cfg.smtp_user, cfg.smtp_password)
+        server.sendmail(cfg.smtp_from, cfg.email_to, msg.as_string())
+    logger.info("Alerta por e-mail (SMTP) enviado para %s", cfg.email_to)
+
+
+def _send_email_sync(cfg: AlertSettings, severity: str, problem: str,
+                     queue_total: int) -> None:
+    """Roteador: usa Resend se disponivel, senao SMTP."""
+    if cfg.resend_api_key:
+        _send_email_resend(cfg, severity, problem, queue_total)
+    else:
+        _send_email_smtp(cfg, severity, problem, queue_total)
+
+
+def _send_telegram_sync(cfg: AlertSettings, severity: str, problem: str,
+                        queue_total: int) -> None:
+    icon = {"CRITICAL": "🔴", "HIGH": "🟠"}.get(severity, "🟡")
+    text = (
+        f"{icon} <b>EXIM Monitor — {severity}</b>\n\n"
+        f"<b>Problema:</b> <code>{problem}</code>\n"
+        f"<b>Fila:</b> {queue_total} mensagens\n"
+        f"<b>Hora:</b> {datetime.utcnow().strftime('%d/%m/%Y %H:%M')} UTC\n\n"
+        f"Acesse o dashboard para corrigir."
+    )
+    url = f"https://api.telegram.org/bot{cfg.telegram_bot_token}/sendMessage"
+    payload = json.dumps({
+        "chat_id": cfg.telegram_chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+    }).encode()
+    req = urllib.request.Request(
+        url, data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    urllib.request.urlopen(req, timeout=10)
+    logger.info("Alerta Telegram enviado para chat %s", cfg.telegram_chat_id)
+
+
+# ── API publica ────────────────────────────────────────────────────────────
+
+async def check_and_alert(severity: str, problem: str, queue_total: int) -> None:
+    """
+    Chamado apos cada coleta completa (full).
+    Verifica se deve disparar alertas e os envia de forma assincrona.
+    """
+    db = SessionLocal()
+    try:
+        cfg = get_alert_settings(db)
+        now = datetime.utcnow()
+        cooldown = timedelta(minutes=cfg.cooldown_minutes)
+
+        prev_rank = _SEV_RANK.get(_state["last_severity"], 0)
+        curr_rank = _SEV_RANK.get(severity, 0)
+        thr_rank  = _SEV_RANK.get(cfg.severity_threshold, 3)
+
+        # Dispara se:
+        #   (a) severidade subiu e esta acima do threshold, ou
+        #   (b) fila ultrapassou queue_threshold (se habilitado)
+        severity_trigger = (curr_rank >= thr_rank and curr_rank > prev_rank)
+        queue_trigger = (
+            cfg.queue_threshold > 0
+            and queue_total >= cfg.queue_threshold
+            and (prev_rank < thr_rank)   # nao duplicar com severity_trigger
+        )
+
+        _state["last_severity"] = severity
+
+        if not (severity_trigger or queue_trigger):
+            return
+
+        # ── E-mail ────────────────────────────────────────────────────
+        if cfg.email_enabled and cfg.email_to and cfg.smtp_password:
+            last = _state["email_sent_at"]
+            if last is None or (now - last) >= cooldown:
+                try:
+                    await asyncio.to_thread(
+                        _send_email_sync, cfg, severity, problem, queue_total
+                    )
+                    _state["email_sent_at"] = now
+                except Exception as exc:
+                    logger.error("Falha ao enviar e-mail: %s", exc)
+
+        # ── Telegram ──────────────────────────────────────────────────
+        if cfg.telegram_enabled and cfg.telegram_bot_token and cfg.telegram_chat_id:
+            last = _state["telegram_sent_at"]
+            if last is None or (now - last) >= cooldown:
+                try:
+                    await asyncio.to_thread(
+                        _send_telegram_sync, cfg, severity, problem, queue_total
+                    )
+                    _state["telegram_sent_at"] = now
+                except Exception as exc:
+                    logger.error("Falha ao enviar Telegram: %s", exc)
+
+    finally:
+        db.close()
+
+
+async def send_test_email(cfg: AlertSettings) -> None:
+    """Envia e-mail de teste — usado pelo endpoint POST /api/settings/test/email."""
+    await asyncio.to_thread(
+        _send_email_sync, cfg, "HIGH", "TESTE_ALERTA", 42
+    )
+
+
+async def send_test_telegram(cfg: AlertSettings) -> None:
+    """Envia mensagem de teste no Telegram."""
+    await asyncio.to_thread(
+        _send_telegram_sync, cfg, "HIGH", "TESTE_ALERTA", 42
+    )

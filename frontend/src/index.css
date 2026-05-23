@@ -1,0 +1,113 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Variáveis de cor AVILI — tema light ────────────────────────────────── */
+:root {
+  --sky:    #0EA5E9;
+  --cyan:   #22D3EE;
+  --night:  #0F1A2E;
+  --navy:   #1E3A5F;
+  --cloud:  #EEF2F7;
+  --text:   #0F1A2E;
+  --muted:  rgba(15,26,46,0.55);
+  --dim:    rgba(15,26,46,0.35);
+}
+
+@layer base {
+  body {
+    @apply antialiased;
+    color: var(--text);
+    background-color: var(--cloud);
+
+    /* Orbs sky-blue suaves — visíveis sobre fundo claro */
+    background-image:
+      radial-gradient(ellipse 900px 650px at 10%  -5%,  rgba(14,165,233,0.18) 0%, transparent 65%),
+      radial-gradient(ellipse 700px 500px at 92%  95%,  rgba(34,211,238,0.14) 0%, transparent 60%),
+      radial-gradient(ellipse 500px 350px at 55%  50%,  rgba(14,165,233,0.07) 0%, transparent 55%);
+    background-attachment: fixed;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar        { @apply w-1.5 h-1.5; }
+  ::-webkit-scrollbar-track  { background: rgba(14,165,233,0.06); }
+  ::-webkit-scrollbar-thumb  { background: rgba(14,165,233,0.30); @apply rounded-full; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(14,165,233,0.55); }
+}
+
+@layer utilities {
+
+  /* ── Card glass — AVILI light ──────────────────────────────────────────── */
+  .card {
+    background:  rgba(255, 255, 255, 0.65);
+    border:      1px solid rgba(255, 255, 255, 0.88);
+    border-radius: 16px;
+    padding:     16px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow:
+      0 4px 24px rgba(14, 100, 180, 0.08),
+      0 1px  3px rgba(14, 100, 180, 0.04),
+      inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  }
+
+  /* Metric cards: hover eleva com glow suave */
+  .card-interactive {
+    transition: border-color 0.22s ease, box-shadow 0.22s ease, transform 0.18s ease;
+  }
+  .card-interactive:hover {
+    border-color: rgba(14, 165, 233, 0.45);
+    box-shadow:
+      0 8px 36px rgba(14, 100, 180, 0.14),
+      0 0  18px rgba(14, 165, 233, 0.10),
+      inset 0 1px 0 rgba(255, 255, 255, 0.98);
+    transform: translateY(-1px);
+  }
+
+  /* Label de seção — estilo AVILI */
+  .section-label {
+    font-size: 10px;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    color: var(--sky);
+    font-weight: 600;
+  }
+
+  /* Accent line no topo do header */
+  .header-accent::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(14,165,233,0.55) 30%,
+      rgba(34,211,238,0.80) 50%,
+      rgba(14,165,233,0.55) 70%,
+      transparent 100%
+    );
+  }
+
+  /* Divider AVILI */
+  .avili-divider {
+    height: 1px;
+    background: rgba(14,165,233,0.12);
+  }
+}
+
+/* ─── Animações ──────────────────────────────────────────────────────────── */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(16px) scale(0.96); }
+  to   { opacity: 1; transform: translateX(0)    scale(1);    }
+}
+.animate-toast-in {
+  animation: toast-in 0.18s ease-out forwards;
+}
+
+@keyframes pulse-sky {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+.animate-pulse-sky {
+  animation: pulse-sky 2s ease-in-out infinite;
+}

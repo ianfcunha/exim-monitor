@@ -1,0 +1,64 @@
+version: '3.9'
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       exim_monitor
+      POSTGRES_USER:     exim
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-exim}   # sobrescreva no .env
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"   # apenas localhost — nao exposto na internet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U exim -d exim_monitor"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Tuning minimo de performance para workload de serie temporal:
+    # max_connections limitado (app usa pool de 5+10)
+    # shared_buffers = 25% da RAM disponivel para o container
+    command: >
+      postgres
+        -c max_connections=50
+        -c shared_buffers=128MB
+        -c effective_cache_size=512MB
+        -c work_mem=4MB
+        -c checkpoint_completion_target=0.9
+        -c wal_buffers=16MB
+        -c random_page_cost=1.1
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy   # aguarda PG estar pronto
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./backend:/app               # permite editar uwsgi.ini sem rebuild
+      - ~/.ssh:/root/.ssh:ro         # chave SSH do host para acesso ao EXIM
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://exim:${POSTGRES_PASSWORD:-exim}@postgres:5432/exim_monitor
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  pg_data:    # dados do PostgreSQL persistidos entre restarts

@@ -1,0 +1,268 @@
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  .kit { background: #EEF2F7; border-radius: 20px; overflow: hidden; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; color: #0F1A2E; }
+  .sec { padding: 48px 40px; }
+  .sec-label { font-size: 10px; letter-spacing: 0.35em; text-transform: uppercase; color: #0EA5E9; margin-bottom: 28px; }
+  .divider { height: 1px; background: rgba(14,165,233,0.12); }
+  .glass {
+    background: rgba(255,255,255,0.6);
+    border: 1px solid rgba(255,255,255,0.85);
+    border-radius: 16px;
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    box-shadow: 0 4px 24px rgba(14,100,180,0.07), 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .glass-blue {
+    background: rgba(14,165,233,0.08);
+    border: 1px solid rgba(14,165,233,0.22);
+    border-radius: 16px;
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+  }
+  .btn-primary { width: 100%; padding: 13px; border-radius: 10px; background: #0EA5E9; border: none; color: white; font-size: 13px; font-weight: 600; letter-spacing: 0.04em; cursor: pointer; }
+  .btn-ghost { width: 100%; padding: 12px; border-radius: 10px; background: rgba(14,165,233,0.1); border: 1px solid rgba(14,165,233,0.3); color: #0369A1; font-size: 13px; font-weight: 500; letter-spacing: 0.04em; cursor: pointer; }
+</style>
+
+<div class="kit">
+
+  <!-- HERO -->
+  <div style="padding: 72px 40px 56px; text-align: center; position: relative; overflow: hidden; background: linear-gradient(160deg, #EEF2F7 0%, #E2EBF6 50%, #EEF2F7 100%);">
+    <!-- orbs de luz -->
+    <div style="position:absolute;top:-80px;left:50%;transform:translateX(-50%);width:560px;height:280px;background:radial-gradient(ellipse,rgba(14,165,233,0.18) 0%,transparent 70%);pointer-events:none;"></div>
+    <div style="position:absolute;bottom:-40px;left:20%;width:200px;height:200px;background:radial-gradient(circle,rgba(34,211,238,0.12) 0%,transparent 70%);pointer-events:none;"></div>
+    <div style="position:absolute;bottom:-40px;right:15%;width:180px;height:180px;background:radial-gradient(circle,rgba(14,165,233,0.10) 0%,transparent 70%);pointer-events:none;"></div>
+    <div style="position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:320px;height:1px;background:linear-gradient(90deg,transparent,rgba(14,165,233,0.35),transparent);"></div>
+
+    <!-- Logo -->
+    <div style="display:inline-flex;align-items:center;gap:18px;margin-bottom:28px;">
+      <div class="glass" style="width:64px;height:64px;display:flex;align-items:center;justify-content:center;border-radius:16px;flex-shrink:0;">
+        <svg width="38" height="38" viewBox="0 0 60 60" fill="none">
+          <path d="M10 46 L30 16 L50 46" fill="none" stroke="#0F1A2E" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M18 36 L30 26 L42 36" fill="none" stroke="#0EA5E9" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="30" cy="16" r="2.5" fill="#22D3EE"/>
+        </svg>
+      </div>
+      <span style="font-size:40px;font-weight:700;letter-spacing:0.18em;color:#0F1A2E;">AVILI</span>
+    </div>
+
+    <p style="font-size:12px;letter-spacing:0.28em;color:#0EA5E9;text-transform:uppercase;">Tecnologia para escritórios e clínicas</p>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- VARIAÇÕES DO LOGO -->
+  <div class="sec">
+    <p class="sec-label">Variações do logotipo</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
+
+      <div class="glass" style="padding:28px 20px;text-align:center;">
+        <div style="display:inline-flex;align-items:center;gap:11px;">
+          <div style="width:34px;height:34px;background:rgba(255,255,255,0.8);border:1px solid rgba(14,165,233,0.25);border-radius:9px;display:flex;align-items:center;justify-content:center;">
+            <svg width="20" height="20" viewBox="0 0 60 60" fill="none">
+              <path d="M10 46 L30 16 L50 46" fill="none" stroke="#0F1A2E" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M18 36 L30 26 L42 36" fill="none" stroke="#0EA5E9" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="30" cy="16" r="3" fill="#22D3EE"/>
+            </svg>
+          </div>
+          <span style="font-size:20px;font-weight:700;letter-spacing:0.18em;color:#0F1A2E;">AVILI</span>
+        </div>
+        <p style="font-size:10px;color:rgba(15,26,46,0.35);letter-spacing:0.2em;margin-top:14px;text-transform:uppercase;">Fundo claro</p>
+      </div>
+
+      <div style="background:#0F1A2E;border-radius:16px;padding:28px 20px;text-align:center;">
+        <div style="display:inline-flex;align-items:center;gap:11px;">
+          <div style="width:34px;height:34px;background:rgba(14,165,233,0.15);border:1px solid rgba(14,165,233,0.4);border-radius:9px;display:flex;align-items:center;justify-content:center;">
+            <svg width="20" height="20" viewBox="0 0 60 60" fill="none">
+              <path d="M10 46 L30 16 L50 46" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M18 36 L30 26 L42 36" fill="none" stroke="#0EA5E9" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="30" cy="16" r="3" fill="#22D3EE"/>
+            </svg>
+          </div>
+          <span style="font-size:20px;font-weight:700;letter-spacing:0.18em;color:white;">AVILI</span>
+        </div>
+        <p style="font-size:10px;color:rgba(255,255,255,0.3);letter-spacing:0.2em;margin-top:14px;text-transform:uppercase;">Fundo escuro</p>
+      </div>
+
+      <div class="glass" style="padding:28px 20px;text-align:center;">
+        <div style="display:inline-flex;justify-content:center;">
+          <div style="width:52px;height:52px;background:rgba(255,255,255,0.85);border:1px solid rgba(14,165,233,0.25);border-radius:13px;display:flex;align-items:center;justify-content:center;">
+            <svg width="30" height="30" viewBox="0 0 60 60" fill="none">
+              <path d="M10 46 L30 16 L50 46" fill="none" stroke="#0F1A2E" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M18 36 L30 26 L42 36" fill="none" stroke="#0EA5E9" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="30" cy="16" r="3" fill="#22D3EE"/>
+            </svg>
+          </div>
+        </div>
+        <p style="font-size:10px;color:rgba(15,26,46,0.35);letter-spacing:0.2em;margin-top:14px;text-transform:uppercase;">Ícone isolado</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- PALETA -->
+  <div class="sec">
+    <p class="sec-label">Paleta de cores</p>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;">
+      <div>
+        <div style="height:72px;border-radius:12px;background:#EEF2F7;border:1px solid rgba(14,165,233,0.15);margin-bottom:10px;"></div>
+        <p style="font-size:11px;font-weight:500;color:#0F1A2E;margin-bottom:2px;">Nuvem</p>
+        <p style="font-size:10px;color:rgba(15,26,46,0.4);">#EEF2F7</p>
+      </div>
+      <div>
+        <div style="height:72px;border-radius:12px;background:rgba(255,255,255,0.75);border:1px solid rgba(14,165,233,0.2);margin-bottom:10px;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);"></div>
+        <p style="font-size:11px;font-weight:500;color:#0F1A2E;margin-bottom:2px;">Vidro</p>
+        <p style="font-size:10px;color:rgba(15,26,46,0.4);">rgba(255,255,255,0.75)</p>
+      </div>
+      <div>
+        <div style="height:72px;border-radius:12px;background:#0EA5E9;margin-bottom:10px;"></div>
+        <p style="font-size:11px;font-weight:500;color:#0F1A2E;margin-bottom:2px;">Azul AVILI</p>
+        <p style="font-size:10px;color:rgba(15,26,46,0.4);">#0EA5E9</p>
+      </div>
+      <div>
+        <div style="height:72px;border-radius:12px;background:#22D3EE;margin-bottom:10px;"></div>
+        <p style="font-size:11px;font-weight:500;color:#0F1A2E;margin-bottom:2px;">Ciano</p>
+        <p style="font-size:10px;color:rgba(15,26,46,0.4);">#22D3EE</p>
+      </div>
+      <div>
+        <div style="height:72px;border-radius:12px;background:#0F1A2E;margin-bottom:10px;"></div>
+        <p style="font-size:11px;font-weight:500;color:#0F1A2E;margin-bottom:2px;">Noite</p>
+        <p style="font-size:10px;color:rgba(15,26,46,0.4);">#0F1A2E</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- TIPOGRAFIA -->
+  <div class="sec">
+    <p class="sec-label">Tipografia</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+      <div class="glass" style="padding:26px;">
+        <p style="font-size:10px;letter-spacing:0.25em;color:#0EA5E9;margin-bottom:16px;text-transform:uppercase;">Display / Títulos</p>
+        <p style="font-size:30px;font-weight:700;letter-spacing:0.01em;line-height:1.15;color:#0F1A2E;">Tecnologia<br/>que funciona.</p>
+        <p style="font-size:11px;color:rgba(15,26,46,0.35);margin-top:14px;">Inter 700 · 30px</p>
+      </div>
+      <div class="glass" style="padding:26px;">
+        <p style="font-size:10px;letter-spacing:0.25em;color:#0EA5E9;margin-bottom:16px;text-transform:uppercase;">Corpo / Texto</p>
+        <p style="font-size:14px;font-weight:400;line-height:1.7;color:rgba(15,26,46,0.7);">Site, e-mail corporativo, hospedagem gerenciada, SEO local e conformidade com a LGPD — tudo em um único plano mensal.</p>
+        <p style="font-size:11px;color:rgba(15,26,46,0.35);margin-top:14px;">Inter 400 · 14px</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- COMPONENTES GLASS CLARO -->
+  <div class="sec">
+    <p class="sec-label">Componentes — glass sobre fundo claro</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+
+      <div class="glass" style="padding:22px;">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+          <div style="width:38px;height:38px;border-radius:11px;background:rgba(14,165,233,0.12);border:1px solid rgba(14,165,233,0.25);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0EA5E9" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+          </div>
+          <div>
+            <p style="font-size:13px;font-weight:600;color:#0F1A2E;">Site WordPress</p>
+            <p style="font-size:11px;color:rgba(15,26,46,0.45);">Profissional</p>
+          </div>
+        </div>
+        <p style="font-size:12px;color:rgba(15,26,46,0.6);line-height:1.65;">Site moderno, seguro e otimizado para o seu negócio em Nova Friburgo.</p>
+      </div>
+
+      <div class="glass" style="padding:22px;">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+          <div style="width:38px;height:38px;border-radius:11px;background:rgba(34,211,238,0.12);border:1px solid rgba(34,211,238,0.28);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0891B2" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+          </div>
+          <div>
+            <p style="font-size:13px;font-weight:600;color:#0F1A2E;">SEO Local</p>
+            <p style="font-size:11px;color:rgba(15,26,46,0.45);">Google Meu Negócio</p>
+          </div>
+        </div>
+        <p style="font-size:12px;color:rgba(15,26,46,0.6);line-height:1.65;">Sua clínica ou escritório encontrado por quem pesquisa na região.</p>
+      </div>
+
+      <div class="glass" style="padding:22px;display:flex;flex-direction:column;gap:12px;">
+        <p style="font-size:11px;color:rgba(15,26,46,0.35);letter-spacing:0.15em;text-transform:uppercase;">Tags & badges</p>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+          <span style="padding:5px 13px;border-radius:20px;background:rgba(14,165,233,0.1);border:1px solid rgba(14,165,233,0.3);color:#0369A1;font-size:11px;font-weight:500;">SSL ativo</span>
+          <span style="padding:5px 13px;border-radius:20px;background:rgba(34,211,238,0.1);border:1px solid rgba(34,211,238,0.3);color:#0E7490;font-size:11px;font-weight:500;">Backup diário</span>
+          <span style="padding:5px 13px;border-radius:20px;background:rgba(15,26,46,0.06);border:1px solid rgba(15,26,46,0.12);color:#334155;font-size:11px;font-weight:500;">LGPD</span>
+          <span style="padding:5px 13px;border-radius:20px;background:rgba(14,165,233,0.1);border:1px solid rgba(14,165,233,0.3);color:#0369A1;font-size:11px;font-weight:500;">WhatsApp</span>
+        </div>
+      </div>
+
+      <div class="glass" style="padding:22px;display:flex;flex-direction:column;gap:12px;justify-content:center;">
+        <p style="font-size:11px;color:rgba(15,26,46,0.35);letter-spacing:0.15em;text-transform:uppercase;">Botões</p>
+        <button class="btn-primary">Contratar agora</button>
+        <button class="btn-ghost">Falar no WhatsApp</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- CARTÃO DE VISITA -->
+  <div class="sec">
+    <p class="sec-label">Cartão de visita</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+
+      <!-- Frente -->
+      <div style="aspect-ratio:1.75;background:linear-gradient(135deg,#EEF2F7 0%,#E2EBF6 100%);border-radius:16px;padding:24px;display:flex;flex-direction:column;justify-content:space-between;border:1px solid rgba(255,255,255,0.9);box-shadow:0 8px 32px rgba(14,100,180,0.1);position:relative;overflow:hidden;">
+        <div style="position:absolute;top:-30px;right:-30px;width:140px;height:140px;background:radial-gradient(circle,rgba(14,165,233,0.18) 0%,transparent 70%);pointer-events:none;"></div>
+        <div style="position:absolute;bottom:-20px;left:-20px;width:100px;height:100px;background:radial-gradient(circle,rgba(34,211,238,0.12) 0%,transparent 70%);pointer-events:none;"></div>
+        <div style="display:flex;align-items:center;gap:10px;position:relative;">
+          <div class="glass" style="width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:8px;">
+            <svg width="17" height="17" viewBox="0 0 60 60" fill="none">
+              <path d="M10 46 L30 16 L50 46" fill="none" stroke="#0F1A2E" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M18 36 L30 26 L42 36" fill="none" stroke="#0EA5E9" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="30" cy="16" r="3" fill="#22D3EE"/>
+            </svg>
+          </div>
+          <span style="font-size:17px;font-weight:700;letter-spacing:0.18em;color:#0F1A2E;">AVILI</span>
+        </div>
+        <div style="position:relative;">
+          <div style="width:36px;height:2px;background:#0EA5E9;border-radius:1px;margin-bottom:7px;"></div>
+          <p style="font-size:9px;letter-spacing:0.25em;color:#0EA5E9;text-transform:uppercase;">Tecnologia profissional</p>
+        </div>
+      </div>
+
+      <!-- Verso -->
+      <div style="aspect-ratio:1.75;background:linear-gradient(135deg,#0EA5E9 0%,#0369A1 100%);border-radius:16px;padding:24px;display:flex;flex-direction:column;justify-content:space-between;position:relative;overflow:hidden;">
+        <div style="position:absolute;top:-30px;right:-30px;width:130px;height:130px;background:rgba(255,255,255,0.12);border-radius:50%;"></div>
+        <div style="position:absolute;bottom:-25px;left:-15px;width:90px;height:90px;background:rgba(255,255,255,0.08);border-radius:50%;"></div>
+        <div style="position:relative;">
+          <p style="font-size:13px;font-weight:600;color:white;">João da Silva</p>
+          <p style="font-size:10px;color:rgba(255,255,255,0.75);">Consultor de Tecnologia</p>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:3px;position:relative;">
+          <p style="font-size:10px;color:rgba(255,255,255,0.9);">contato@avili.com.br</p>
+          <p style="font-size:10px;color:rgba(255,255,255,0.9);">(22) 99999-9999</p>
+          <p style="font-size:10px;color:rgba(255,255,255,0.9);">avili.com.br · Nova Friburgo, RJ</p>
+        </div>
+      </div>
+    </div>
+    <p style="font-size:11px;color:rgba(15,26,46,0.3);text-align:center;margin-top:14px;letter-spacing:0.05em;">Frente e verso — 90 × 50 mm</p>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- FOOTER -->
+  <div style="padding:24px 40px;display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.35);">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <div style="width:24px;height:24px;background:rgba(255,255,255,0.8);border:1px solid rgba(14,165,233,0.25);border-radius:7px;display:flex;align-items:center;justify-content:center;">
+        <svg width="14" height="14" viewBox="0 0 60 60" fill="none">
+          <path d="M10 46 L30 16 L50 46" fill="none" stroke="#0F1A2E" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M18 36 L30 26 L42 36" fill="none" stroke="#0EA5E9" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="30" cy="16" r="3" fill="#22D3EE"/>
+        </svg>
+      </div>
+      <span style="font-size:14px;font-weight:700;letter-spacing:0.18em;color:#0F1A2E;">AVILI</span>
+    </div>
+    <p style="font-size:10px;letter-spacing:0.15em;color:rgba(15,26,46,0.3);text-transform:uppercase;">Brand Identity Kit · 2026</p>
+  </div>
+
+</div>

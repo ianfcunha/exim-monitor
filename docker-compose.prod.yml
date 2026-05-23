@@ -1,0 +1,89 @@
+# docker-compose.prod.yml — Deploy em producao com HTTPS automatico (Caddy)
+#
+# Uso:
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Pre-requisitos:
+#   1. Apontar seu dominio para o IP do servidor (A record)
+#   2. Copiar .env.example para .env e preencher os valores
+#   3. Definir DOMAIN no .env ou exportar: export DOMAIN=mail.seudominio.com
+
+version: '3.9'
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       exim_monitor
+      POSTGRES_USER:     exim
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-exim}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U exim -d exim_monitor"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    command: >
+      postgres
+        -c max_connections=50
+        -c shared_buffers=128MB
+        -c effective_cache_size=512MB
+        -c work_mem=4MB
+        -c checkpoint_completion_target=0.9
+        -c wal_buffers=16MB
+        -c random_page_cost=1.1
+
+  backend:
+    image: ${DOCKER_IMAGE_BACKEND:-exim-monitor-backend:latest}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["uwsgi", "--ini", "uwsgi.ini"]
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ~/.ssh:/root/.ssh:ro
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://exim:${POSTGRES_PASSWORD:-exim}@postgres:5432/exim_monitor
+    expose:
+      - "8000"
+
+  frontend:
+    image: ${DOCKER_IMAGE_FRONTEND:-exim-monitor-frontend:latest}
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+    expose:
+      - "80"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+      - frontend
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+
+volumes:
+  pg_data:
+  caddy_data:
+  caddy_config:

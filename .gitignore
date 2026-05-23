@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Banco de dados local
+*.db
+*.sqlite3
+
+# Variáveis de ambiente (nunca commitar o .env real)
+.env
+!.env.example
+
+# Node / frontend
+node_modules/
+dist/
+.cache/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

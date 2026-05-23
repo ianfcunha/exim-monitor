@@ -1,0 +1,39 @@
+# Caddyfile — Reverse proxy com HTTPS automatico (Let's Encrypt)
+#
+# Caddy obtem e renova o certificado TLS automaticamente.
+# Basta apontar o DNS do seu dominio para este servidor antes de subir.
+
+{$DOMAIN:localhost} {
+
+    # API e WebSocket — repassa para o backend (uWSGI/FastAPI)
+    handle /api/* {
+        reverse_proxy backend:8000 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # SPA React — repassa para o Nginx do container frontend
+    handle {
+        reverse_proxy frontend:80 {
+            header_up Host {host}
+        }
+    }
+
+    # Cabecalhos de seguranca
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options    "nosniff"
+        X-Frame-Options           "SAMEORIGIN"
+        Referrer-Policy           "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    # Logs estruturados
+    log {
+        output stdout
+        format json
+    }
+}
