@@ -1,13 +1,22 @@
 /**
- * Tabela de top remetentes / IPs — identidade AVILI light profissional.
+ * Tabela de top remetentes / IPs / domínios — identidade AVILI light.
+ * accentColor: 'sky' (default) | 'red' | 'amber'
  */
-export default function TopTable({ title, rows = [], emptyMsg = 'Nenhum dado', loading = false }) {
+
+const ACCENT = {
+  sky:   { bar0: '#0EA5E9', bar1: '#38BDF8', bar2: '#BAE6FD', rank0bg: '#0EA5E9', rank0text: '#fff' },
+  red:   { bar0: '#EF4444', bar1: '#F87171', bar2: '#FECACA', rank0bg: '#EF4444', rank0text: '#fff' },
+  amber: { bar0: '#F59E0B', bar1: '#FCD34D', bar2: '#FDE68A', rank0bg: '#F59E0B', rank0text: '#fff' },
+}
+
+export default function TopTable({ title, rows = [], emptyMsg = 'Nenhum dado', loading = false, accentColor = 'sky' }) {
   const max = rows[0]?.count || 1
+  const A   = ACCENT[accentColor] ?? ACCENT.sky
 
   const barColor = (i) => {
-    if (i === 0) return '#0EA5E9'
-    if (i === 1) return '#38BDF8'
-    return '#BAE6FD'
+    if (i === 0) return A.bar0
+    if (i === 1) return A.bar1
+    return A.bar2
   }
 
   return (
@@ -31,8 +40,8 @@ export default function TopTable({ title, rows = [], emptyMsg = 'Nenhum dado', l
               {/* Rank */}
               <span style={{
                 width: 18, height: 18, borderRadius: 5, flexShrink: 0,
-                background: i === 0 ? '#0EA5E9' : '#F1F5F9',
-                color: i === 0 ? '#fff' : 'var(--muted)',
+                background: i === 0 ? A.rank0bg : '#F1F5F9',
+                color: i === 0 ? A.rank0text : 'var(--muted)',
                 fontSize: 10, fontWeight: 700,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>

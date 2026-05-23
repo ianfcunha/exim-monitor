@@ -86,8 +86,16 @@ export default function Dashboard({ onLogout, onSettings }) {
   const log   = q.log       ?? f.log       ?? {}
   const queue = q.queue     ?? f.queue     ?? {}
 
-  const hourlyStats = q.hourly_stats ?? []
-  const eximVersion = q.exim?.version ?? f.exim?.version ?? null
+  const hourlyStats        = q.hourly_stats ?? []
+  const eximVersion        = q.exim?.version ?? f.exim?.version ?? null
+  const recommendedActions = diag.actions_recommended ?? []
+
+  // Converte {domain, count} → {label, count} para TopTable
+  const domainRows = (arr) =>
+    (arr ?? []).map(({ domain, count }) => ({ label: domain, count })).filter(r => r.label)
+
+  const topRejected = domainRows(q.top_rejected_domains ?? f.top_rejected_domains)
+  const topDeferred = domainRows(q.top_defer_domains    ?? f.top_defer_domains)
 
   const staleness = useStaleness(q.timestamp)
   const loading   = quick.loading && full.loading
@@ -245,8 +253,32 @@ export default function Dashboard({ onLogout, onSettings }) {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <TopTable title="Top Remetentes" rows={topSenders} emptyMsg="Disponível no próximo ciclo completo" loading={full.loading}  />
           <TopTable title="Top IPs / Auth"  rows={topIPs}    emptyMsg="Disponível no próximo ciclo completo" loading={quick.loading} />
-          <ActionPanel onActionComplete={handleActionComplete} />
+          <ActionPanel onActionComplete={handleActionComplete} recommendedActions={recommendedActions} />
         </div>
+
+        {/* Domínios com erros — só aparece se houver dados */}
+        {(topRejected.length > 0 || topDeferred.length > 0) && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {topRejected.length > 0 && (
+              <TopTable
+                title="Top Domínios Rejeitados"
+                rows={topRejected}
+                emptyMsg=""
+                loading={false}
+                accentColor="red"
+              />
+            )}
+            {topDeferred.length > 0 && (
+              <TopTable
+                title="Top Domínios Deferidos"
+                rows={topDeferred}
+                emptyMsg=""
+                loading={false}
+                accentColor="amber"
+              />
+            )}
+          </div>
+        )}
 
         {/* Gráficos */}
         <div className={hourlyStats.length > 0 ? 'grid grid-cols-1 lg:grid-cols-2 gap-4' : ''}>
