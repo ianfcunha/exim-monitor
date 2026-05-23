@@ -1,6 +1,5 @@
 /**
  * Toast global — identidade AVILI light.
- * toast({ type: 'ok' | 'err', msg: '...' })
  */
 import { CheckCircle2, X, XCircle } from 'lucide-react'
 import { createContext, useCallback, useContext, useState } from 'react'
@@ -13,11 +12,11 @@ export function ToastProvider({ children }) {
 
   const add = useCallback(({ type = 'ok', msg, duration = 4500 }) => {
     const id = ++_id
-    setToasts((p) => [...p, { id, type, msg }])
-    setTimeout(() => setToasts((p) => p.filter((t) => t.id !== id)), duration)
+    setToasts(p => [...p, { id, type, msg }])
+    setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), duration)
   }, [])
 
-  const remove = useCallback((id) => setToasts((p) => p.filter((t) => t.id !== id)), [])
+  const remove = useCallback((id) => setToasts(p => p.filter(t => t.id !== id)), [])
 
   return (
     <ToastContext.Provider value={add}>
@@ -34,7 +33,7 @@ function ToastStack({ toasts, onRemove }) {
       aria-live="polite"
       style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 8, pointerEvents: 'none' }}
     >
-      {toasts.map((t) => (
+      {toasts.map(t => (
         <div
           key={t.id}
           onClick={() => onRemove(t.id)}
@@ -43,22 +42,20 @@ function ToastStack({ toasts, onRemove }) {
             pointerEvents: 'auto',
             display: 'flex', alignItems: 'center', gap: 10,
             minWidth: 260, maxWidth: 380,
-            borderRadius: 14, padding: '11px 16px',
+            borderRadius: 12, padding: '11px 16px',
             fontSize: 13, fontWeight: 400, cursor: 'pointer',
-            backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-            boxShadow: '0 8px 32px rgba(14,100,180,0.15)',
-            ...(t.type === 'ok'
-              ? { background: 'rgba(255,255,255,0.90)', border: '1px solid rgba(14,165,233,0.28)', color: '#0369A1' }
-              : { background: 'rgba(255,255,255,0.90)', border: '1px solid rgba(239,68,68,0.30)',  color: '#DC2626' }
-            ),
+            background: '#fff',
+            border: t.type === 'ok' ? '1px solid #BAE6FD' : '1px solid #FECACA',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.10)',
+            color: t.type === 'ok' ? '#0369A1' : '#991B1B',
           }}
         >
           {t.type === 'ok'
             ? <CheckCircle2 size={15} style={{ flexShrink: 0, color: '#0EA5E9' }} />
-            : <XCircle      size={15} style={{ flexShrink: 0, color: '#DC2626' }} />
+            : <XCircle      size={15} style={{ flexShrink: 0, color: '#EF4444' }} />
           }
-          <span style={{ flex: 1, lineHeight: 1.4, color: '#0F1A2E' }}>{t.msg}</span>
-          <X size={13} style={{ flexShrink: 0, opacity: 0.35, color: '#0F1A2E' }} />
+          <span style={{ flex: 1, lineHeight: 1.4, color: '#0F172A' }}>{t.msg}</span>
+          <X size={13} style={{ flexShrink: 0, opacity: 0.35, color: '#0F172A' }} />
         </div>
       ))}
     </div>

@@ -1,31 +1,29 @@
 /**
- * Página de configurações de alertas — identidade AVILI light.
+ * Configurações de alertas — identidade AVILI light profissional.
  */
 import { ArrowLeft } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import {
-  fetchAlertSettings,
-  saveAlertSettings,
-  testEmail,
-  testTelegram,
-} from '../api/client'
+import { fetchAlertSettings, saveAlertSettings, testEmail, testTelegram } from '../api/client'
 
 const SEVERITY_OPTIONS = ['HIGH', 'CRITICAL']
 const MASK = '••••••••'
 
-/* ── Primitivos de UI ────────────────────────────────────────────────────── */
+const inputStyle = {
+  width: '100%', borderRadius: 8,
+  background: '#F8FAFC', border: '1px solid #E2E8F0',
+  padding: '9px 13px', fontSize: 12, color: '#0F172A', outline: 'none',
+  transition: 'border-color 0.15s, box-shadow 0.15s',
+}
 
+/* ── Primitivos ── */
 function Section({ title, children }) {
   return (
     <div style={{
-      background: 'rgba(255,255,255,0.65)',
-      border: '1px solid rgba(255,255,255,0.88)',
-      borderRadius: 16, padding: '20px 20px 16px',
-      backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-      boxShadow: '0 4px 24px rgba(14,100,180,0.07), inset 0 1px 0 rgba(255,255,255,0.95)',
-      marginBottom: 12,
+      background: '#fff', border: '1px solid #E2E8F0', borderRadius: 12,
+      padding: '20px 20px 16px', marginBottom: 12,
+      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
     }}>
-      <p style={{ fontSize: 10, letterSpacing: '0.32em', textTransform: 'uppercase', color: '#0EA5E9', fontWeight: 600, marginBottom: 16 }}>
+      <p style={{ fontSize: 10, letterSpacing: '0.30em', textTransform: 'uppercase', color: '#0EA5E9', fontWeight: 700, marginBottom: 16 }}>
         {title}
       </p>
       {children}
@@ -36,10 +34,10 @@ function Section({ title, children }) {
 function Field({ label, hint, children }) {
   return (
     <div style={{ marginBottom: 14 }}>
-      <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'rgba(15,26,46,0.65)', marginBottom: 5 }}>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#64748B', marginBottom: 5 }}>
         {label}
       </label>
-      {hint && <p style={{ fontSize: 11, color: 'rgba(15,26,46,0.40)', marginBottom: 6 }}>{hint}</p>}
+      {hint && <p style={{ fontSize: 11, color: '#94A3B8', marginBottom: 6 }}>{hint}</p>}
       {children}
     </div>
   )
@@ -48,36 +46,17 @@ function Field({ label, hint, children }) {
 function Input({ value, onChange, type = 'text', placeholder = '' }) {
   return (
     <input
-      type={type}
-      value={value ?? ''}
-      onChange={e => onChange(e.target.value)}
-      placeholder={placeholder}
-      style={{
-        width: '100%', borderRadius: 10,
-        background: 'rgba(14,165,233,0.05)',
-        border: '1px solid rgba(14,165,233,0.20)',
-        padding: '9px 13px', fontSize: 12, color: '#0F1A2E', outline: 'none',
-        transition: 'border-color 0.15s',
-      }}
-      onFocus={e => e.target.style.borderColor = 'rgba(14,165,233,0.50)'}
-      onBlur={e  => e.target.style.borderColor = 'rgba(14,165,233,0.20)'}
+      type={type} value={value ?? ''} onChange={e => onChange(e.target.value)}
+      placeholder={placeholder} style={inputStyle}
+      onFocus={e => { e.target.style.borderColor = '#0EA5E9'; e.target.style.boxShadow = '0 0 0 3px rgba(14,165,233,0.10)' }}
+      onBlur={e  => { e.target.style.borderColor = '#E2E8F0'; e.target.style.boxShadow = 'none' }}
     />
   )
 }
 
 function Select({ value, onChange, children }) {
   return (
-    <select
-      value={value ?? ''}
-      onChange={e => onChange(e.target.value)}
-      style={{
-        width: '100%', borderRadius: 10,
-        background: 'rgba(255,255,255,0.80)',
-        border: '1px solid rgba(14,165,233,0.20)',
-        padding: '9px 13px', fontSize: 12, color: '#0F1A2E', outline: 'none',
-        cursor: 'pointer',
-      }}
-    >
+    <select value={value ?? ''} onChange={e => onChange(e.target.value)} style={{ ...inputStyle, cursor: 'pointer', background: '#F8FAFC' }}>
       {children}
     </select>
   )
@@ -85,24 +64,24 @@ function Select({ value, onChange, children }) {
 
 function Toggle({ checked, onChange, label }) {
   return (
-    <label style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', userSelect: 'none' }}>
+    <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', userSelect: 'none' }}>
       <div
         onClick={() => onChange(!checked)}
         style={{
-          position: 'relative', width: 42, height: 24, borderRadius: 12,
-          background: checked ? '#0EA5E9' : 'rgba(15,26,46,0.12)',
-          border: `1px solid ${checked ? 'rgba(14,165,233,0.55)' : 'rgba(15,26,46,0.15)'}`,
-          transition: 'background 0.2s, border-color 0.2s', flexShrink: 0,
+          position: 'relative', width: 40, height: 22, borderRadius: 11, flexShrink: 0,
+          background: checked ? '#0EA5E9' : '#E2E8F0',
+          border: `1px solid ${checked ? '#0284C7' : '#CBD5E1'}`,
+          transition: 'background 0.2s, border-color 0.2s',
         }}
       >
         <span style={{
-          position: 'absolute', top: 3, left: checked ? 20 : 3,
+          position: 'absolute', top: 2, left: checked ? 19 : 2,
           width: 16, height: 16, borderRadius: '50%',
-          background: 'white', boxShadow: '0 1px 4px rgba(0,0,0,0.18)',
+          background: 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
           transition: 'left 0.2s',
         }} />
       </div>
-      <span style={{ fontSize: 13, color: 'rgba(15,26,46,0.70)' }}>{label}</span>
+      <span style={{ fontSize: 13, color: '#64748B' }}>{label}</span>
     </label>
   )
 }
@@ -112,9 +91,9 @@ function Feedback({ msg, isError }) {
   return (
     <div style={{
       marginTop: 8, borderRadius: 8, padding: '8px 12px', fontSize: 12,
-      background: isError ? 'rgba(239,68,68,0.07)' : 'rgba(14,165,233,0.08)',
-      border: `1px solid ${isError ? 'rgba(239,68,68,0.28)' : 'rgba(14,165,233,0.22)'}`,
-      color: isError ? '#DC2626' : '#0369A1',
+      background: isError ? '#FEF2F2' : '#F0F9FF',
+      border: `1px solid ${isError ? '#FECACA' : '#BAE6FD'}`,
+      color: isError ? '#991B1B' : '#0369A1',
     }}>
       {msg}
     </div>
@@ -129,10 +108,11 @@ function GhostBtn({ onClick, children }) {
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
-        borderRadius: 8, border: `1px solid ${hov ? 'rgba(14,165,233,0.45)' : 'rgba(14,165,233,0.28)'}`,
+        borderRadius: 7,
+        border: `1px solid ${hov ? '#BAE6FD' : '#E2E8F0'}`,
         padding: '6px 14px', fontSize: 11, fontWeight: 500,
-        color: hov ? '#0284C7' : '#0EA5E9',
-        background: hov ? 'rgba(14,165,233,0.08)' : 'transparent',
+        color: hov ? '#0369A1' : '#64748B',
+        background: hov ? '#F0F9FF' : '#F8FAFC',
         cursor: 'pointer', transition: 'all 0.15s',
       }}
     >
@@ -141,8 +121,7 @@ function GhostBtn({ onClick, children }) {
   )
 }
 
-/* ── Componente principal ────────────────────────────────────────────────── */
-
+/* ── Principal ── */
 export default function Settings({ onBack }) {
   const [cfg, setCfg]         = useState(null)
   const [loading, setLoading] = useState(true)
@@ -152,28 +131,20 @@ export default function Settings({ onBack }) {
   const [testMsg, setTestMsg] = useState({})
 
   useEffect(() => {
-    fetchAlertSettings()
-      .then(setCfg)
-      .catch(() => setCfg({}))
-      .finally(() => setLoading(false))
+    fetchAlertSettings().then(setCfg).catch(() => setCfg({})).finally(() => setLoading(false))
   }, [])
 
-  const set = (key) => (val) => setCfg(prev => ({ ...prev, [key]: val }))
+  const set = key => val => setCfg(prev => ({ ...prev, [key]: val }))
 
   const handleSave = async () => {
-    setSaving(true)
-    setSaveMsg('')
+    setSaving(true); setSaveMsg('')
     try {
       const updated = await saveAlertSettings(cfg)
-      setCfg(updated)
-      setSaveErr(false)
-      setSaveMsg('Configurações salvas com sucesso.')
+      setCfg(updated); setSaveErr(false); setSaveMsg('Configurações salvas com sucesso.')
     } catch (e) {
-      setSaveErr(true)
-      setSaveMsg(e?.response?.data?.detail || 'Erro ao salvar.')
+      setSaveErr(true); setSaveMsg(e?.response?.data?.detail || 'Erro ao salvar.')
     } finally {
-      setSaving(false)
-      setTimeout(() => setSaveMsg(''), 4000)
+      setSaving(false); setTimeout(() => setSaveMsg(''), 4000)
     }
   }
 
@@ -190,43 +161,39 @@ export default function Settings({ onBack }) {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'rgba(15,26,46,0.40)', fontSize: 13 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: '#94A3B8', fontSize: 13 }}>
         Carregando configurações…
       </div>
     )
   }
 
   return (
-    <div style={{ minHeight: '100vh', color: 'var(--text)' }}>
+    <div style={{ minHeight: '100vh', background: '#F1F5F9' }}>
 
       {/* Header */}
-      <header
-        className="header-accent"
-        style={{
-          position: 'sticky', top: 0, zIndex: 10,
-          padding: '0 24px',
-          borderBottom: '1px solid rgba(14,165,233,0.14)',
-          background: 'rgba(238,242,247,0.85)',
-          backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)',
-          boxShadow: '0 1px 12px rgba(14,100,180,0.06)',
-        }}
-      >
-        <div style={{ maxWidth: 760, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 16, height: 54 }}>
+      <header style={{
+        position: 'sticky', top: 0, zIndex: 10,
+        padding: '0 24px', background: '#fff',
+        borderBottom: '1px solid #E2E8F0',
+        boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
+      }}>
+        <div style={{ maxWidth: 760, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 14, height: 56 }}>
           <button
             onClick={onBack}
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
-              fontSize: 12, color: 'rgba(15,26,46,0.45)', background: 'none',
-              border: 'none', cursor: 'pointer', padding: 0, transition: 'color 0.15s',
+              fontSize: 12, color: '#94A3B8', background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+              transition: 'color 0.15s',
             }}
             onMouseEnter={e => e.currentTarget.style.color = '#0EA5E9'}
-            onMouseLeave={e => e.currentTarget.style.color = 'rgba(15,26,46,0.45)'}
+            onMouseLeave={e => e.currentTarget.style.color = '#94A3B8'}
           >
-            <ArrowLeft size={14} />
-            Dashboard
+            <ArrowLeft size={14} /> Dashboard
           </button>
-          <span style={{ color: 'rgba(15,26,46,0.15)' }}>|</span>
-          <span className="section-label" style={{ letterSpacing: '0.22em' }}>Configurações de Alertas</span>
+          <span style={{ color: '#E2E8F0' }}>|</span>
+          <span style={{ fontSize: 10, letterSpacing: '0.28em', textTransform: 'uppercase', color: '#0EA5E9', fontWeight: 700 }}>
+            Configurações de Alertas
+          </span>
         </div>
       </header>
 
@@ -235,7 +202,6 @@ export default function Settings({ onBack }) {
         {/* E-mail */}
         <Section title="Alertas por E-mail">
           <Toggle checked={!!cfg.email_enabled} onChange={set('email_enabled')} label="Ativar alertas por e-mail" />
-
           {cfg.email_enabled && (
             <div style={{ marginTop: 16 }}>
               <Field label="Destinatário" hint="Endereço que receberá os alertas">
@@ -246,23 +212,18 @@ export default function Settings({ onBack }) {
               </Field>
 
               {/* Resend */}
-              <div style={{
-                margin: '12px 0', borderRadius: 12, padding: '14px 16px',
-                background: 'rgba(14,165,233,0.05)',
-                border: '1px solid rgba(14,165,233,0.18)',
-              }}>
-                <p style={{ fontSize: 10, letterSpacing: '0.25em', textTransform: 'uppercase', color: '#0EA5E9', fontWeight: 600, marginBottom: 12 }}>
+              <div style={{ margin: '12px 0', borderRadius: 10, padding: '14px 16px', background: '#F0F9FF', border: '1px solid #BAE6FD' }}>
+                <p style={{ fontSize: 10, letterSpacing: '0.25em', textTransform: 'uppercase', color: '#0369A1', fontWeight: 700, marginBottom: 12 }}>
                   Resend (recomendado)
                 </p>
-                <Field label="Resend API Key" hint="Quando configurada, usa o Resend em vez de SMTP. Obtenha em resend.com/api-keys">
+                <Field label="Resend API Key" hint="Obtenha em resend.com/api-keys">
                   <Input
                     value={cfg.resend_api_key === MASK ? '' : (cfg.resend_api_key || '')}
-                    onChange={set('resend_api_key')}
-                    type="password"
+                    onChange={set('resend_api_key')} type="password"
                     placeholder={cfg.resend_api_key === MASK ? 'Chave salva — altere para trocar' : 're_xxxxxxxxxxxxxxxx'}
                   />
                 </Field>
-                {(cfg.resend_api_key && cfg.resend_api_key !== MASK) && (
+                {cfg.resend_api_key && cfg.resend_api_key !== MASK && (
                   <p style={{ fontSize: 11, color: '#0369A1', marginTop: 4 }}>Resend ativo</p>
                 )}
                 {cfg.resend_api_key === MASK && (
@@ -270,9 +231,9 @@ export default function Settings({ onBack }) {
                 )}
               </div>
 
-              {/* SMTP fallback */}
-              <div style={{ opacity: cfg.resend_api_key ? 0.4 : 1, pointerEvents: cfg.resend_api_key ? 'none' : 'auto' }}>
-                <p style={{ fontSize: 10, letterSpacing: '0.22em', textTransform: 'uppercase', color: 'rgba(15,26,46,0.35)', fontWeight: 600, marginBottom: 12 }}>
+              {/* SMTP */}
+              <div style={{ opacity: cfg.resend_api_key ? 0.45 : 1, pointerEvents: cfg.resend_api_key ? 'none' : 'auto' }}>
+                <p style={{ fontSize: 10, letterSpacing: '0.22em', textTransform: 'uppercase', color: '#94A3B8', fontWeight: 700, marginBottom: 12 }}>
                   SMTP (fallback)
                 </p>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
@@ -280,12 +241,8 @@ export default function Settings({ onBack }) {
                   <Field label="Porta"><Input value={cfg.smtp_port} onChange={set('smtp_port')} type="number" placeholder="587" /></Field>
                   <Field label="Usuário SMTP"><Input value={cfg.smtp_user} onChange={set('smtp_user')} placeholder="apikey" /></Field>
                   <Field label="Senha / API Key">
-                    <Input
-                      value={cfg.smtp_password === MASK ? '' : cfg.smtp_password}
-                      onChange={set('smtp_password')}
-                      type="password"
-                      placeholder={cfg.smtp_password === MASK ? 'Mantida — altere para trocar' : ''}
-                    />
+                    <Input value={cfg.smtp_password === MASK ? '' : cfg.smtp_password} onChange={set('smtp_password')} type="password"
+                      placeholder={cfg.smtp_password === MASK ? 'Mantida — altere para trocar' : ''} />
                   </Field>
                 </div>
                 <Toggle checked={!!cfg.smtp_tls} onChange={set('smtp_tls')} label="Usar STARTTLS (recomendado)" />
@@ -302,16 +259,11 @@ export default function Settings({ onBack }) {
         {/* Telegram */}
         <Section title="Alertas por Telegram">
           <Toggle checked={!!cfg.telegram_enabled} onChange={set('telegram_enabled')} label="Ativar alertas por Telegram" />
-
           {cfg.telegram_enabled && (
             <div style={{ marginTop: 16 }}>
               <Field label="Bot Token" hint="Obtenha em @BotFather no Telegram — /newbot">
-                <Input
-                  value={cfg.telegram_bot_token === MASK ? '' : cfg.telegram_bot_token}
-                  onChange={set('telegram_bot_token')}
-                  type="password"
-                  placeholder={cfg.telegram_bot_token === MASK ? 'Token salvo — altere para trocar' : '123456789:AAxxxxxx…'}
-                />
+                <Input value={cfg.telegram_bot_token === MASK ? '' : cfg.telegram_bot_token} onChange={set('telegram_bot_token')} type="password"
+                  placeholder={cfg.telegram_bot_token === MASK ? 'Token salvo — altere para trocar' : '123456789:AAxxxxxx…'} />
               </Field>
               <Field label="Chat ID" hint="Envie /start ao seu bot e consulte api.telegram.org/bot<TOKEN>/getUpdates">
                 <Input value={cfg.telegram_chat_id} onChange={set('telegram_chat_id')} placeholder="-1001234567890" />
@@ -340,17 +292,16 @@ export default function Settings({ onBack }) {
         </Section>
 
         {/* Salvar */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 4 }}>
           <button
-            onClick={handleSave}
-            disabled={saving}
+            onClick={handleSave} disabled={saving}
             style={{
-              borderRadius: 10, border: 'none',
-              background: saving ? 'rgba(14,165,233,0.55)' : '#0EA5E9',
-              color: 'white', fontSize: 13, fontWeight: 600,
+              borderRadius: 8, border: 'none',
+              background: saving ? '#7DD3F0' : '#0EA5E9',
+              color: '#fff', fontSize: 13, fontWeight: 700,
               padding: '10px 24px', cursor: saving ? 'not-allowed' : 'pointer',
+              boxShadow: saving ? 'none' : '0 1px 4px rgba(14,165,233,0.35)',
               transition: 'background 0.15s',
-              boxShadow: '0 2px 12px rgba(14,165,233,0.28)',
             }}
             onMouseEnter={e => { if (!saving) e.currentTarget.style.background = '#0284C7' }}
             onMouseLeave={e => { if (!saving) e.currentTarget.style.background = '#0EA5E9' }}
@@ -358,7 +309,7 @@ export default function Settings({ onBack }) {
             {saving ? 'Salvando…' : 'Salvar configurações'}
           </button>
           {saveMsg && (
-            <span style={{ fontSize: 12, color: saveErr ? '#DC2626' : '#0369A1' }}>{saveMsg}</span>
+            <span style={{ fontSize: 12, color: saveErr ? '#991B1B' : '#0369A1', fontWeight: 500 }}>{saveMsg}</span>
           )}
         </div>
 

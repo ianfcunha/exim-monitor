@@ -1,6 +1,5 @@
 /**
- * Página de login — identidade AVILI light.
- * Logo SVG inline com traços escuros, glass card branco, paleta sky-blue.
+ * Página de login — identidade AVILI light profissional.
  */
 import { useState } from 'react'
 import { login } from '../api/client'
@@ -8,11 +7,20 @@ import { login } from '../api/client'
 function LogoMark({ size = 28 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 60 60" fill="none" aria-hidden>
-      <path d="M10 46 L30 16 L50 46" fill="none" stroke="#0F1A2E" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"/>
-      <path d="M18 36 L30 26 L42 36" fill="none" stroke="#0EA5E9" strokeWidth="3"   strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M10 46 L30 16 L50 46" fill="none" stroke="#0F172A" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M18 36 L30 26 L42 36" fill="none" stroke="#0EA5E9" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
       <circle cx="30" cy="16" r="2.5" fill="#22D3EE"/>
     </svg>
   )
+}
+
+const inputStyle = {
+  width: '100%', borderRadius: 8,
+  background: '#F8FAFC',
+  border: '1px solid #E2E8F0',
+  padding: '10px 14px', fontSize: 13,
+  color: '#0F172A', outline: 'none',
+  transition: 'border-color 0.15s, box-shadow 0.15s',
 }
 
 export default function Login({ onLogin }) {
@@ -36,143 +44,97 @@ export default function Login({ onLogin }) {
   }
 
   return (
-    <div
-      style={{
-        minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: '0 16px',
-        background: '#EEF2F7',
-        backgroundImage: `
-          radial-gradient(ellipse 700px 500px at 20% 10%, rgba(14,165,233,0.18) 0%, transparent 65%),
-          radial-gradient(ellipse 500px 400px at 85% 90%, rgba(34,211,238,0.14) 0%, transparent 60%)
-        `,
-        backgroundAttachment: 'fixed',
-      }}
-    >
-      <div style={{ width: '100%', maxWidth: 360, display: 'flex', flexDirection: 'column', gap: 28 }}>
+    <div style={{
+      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: '0 16px', background: '#F1F5F9',
+      backgroundImage: `
+        radial-gradient(ellipse 700px 500px at 15% 15%, rgba(14,165,233,0.10) 0%, transparent 60%),
+        radial-gradient(ellipse 600px 400px at 85% 85%, rgba(34,211,238,0.07) 0%, transparent 55%)
+      `,
+      backgroundAttachment: 'fixed',
+    }}>
+      <div style={{ width: '100%', maxWidth: 380 }}>
 
         {/* Logo + título */}
-        <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+        <div style={{ textAlign: 'center', marginBottom: 28 }}>
           <div style={{
-            width: 60, height: 60, borderRadius: 18,
-            background: 'rgba(255,255,255,0.80)',
-            border: '1px solid rgba(14,165,233,0.22)',
-            boxShadow: '0 4px 20px rgba(14,100,180,0.12)',
+            width: 64, height: 64, borderRadius: 18, margin: '0 auto 14px',
+            background: '#fff', border: '1px solid #E2E8F0',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
-            <LogoMark size={32} />
+            <LogoMark size={34} />
           </div>
-          <div>
-            <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '0.06em', color: '#0F1A2E', margin: 0 }}>
-              EXIM Monitor
-            </h1>
-            <p style={{ fontSize: 10, letterSpacing: '0.28em', textTransform: 'uppercase', color: '#0EA5E9', marginTop: 5, fontWeight: 500 }}>
-              Um produto de Avili
-            </p>
-          </div>
+          <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0F172A', margin: 0, letterSpacing: '-0.01em' }}>
+            EXIM Monitor
+          </h1>
+          <p style={{ fontSize: 10, letterSpacing: '0.24em', textTransform: 'uppercase', color: '#0EA5E9', marginTop: 5, fontWeight: 600 }}>
+            Um produto de Avili
+          </p>
         </div>
 
-        {/* Card glass */}
-        <form
-          onSubmit={handleSubmit}
-          style={{
-            background: 'rgba(255,255,255,0.70)',
-            border: '1px solid rgba(255,255,255,0.90)',
-            borderRadius: 20,
-            padding: '28px 24px',
-            backdropFilter: 'blur(24px)',
-            WebkitBackdropFilter: 'blur(24px)',
-            boxShadow: '0 8px 40px rgba(14,100,180,0.12), 0 1px 3px rgba(14,100,180,0.06), inset 0 1px 0 rgba(255,255,255,0.98)',
-            display: 'flex', flexDirection: 'column', gap: 16,
-          }}
-        >
-          {/* Campo usuário */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <label
-              htmlFor="username"
-              style={{ fontSize: 10, letterSpacing: '0.28em', textTransform: 'uppercase', color: '#0EA5E9', fontWeight: 600 }}
-            >
-              Usuário
-            </label>
-            <input
-              id="username"
-              type="text"
-              autoComplete="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-              placeholder="admin"
-              style={{
-                width: '100%', borderRadius: 10,
-                background: 'rgba(14,165,233,0.05)',
-                border: '1px solid rgba(14,165,233,0.22)',
-                padding: '10px 14px', fontSize: 13,
-                color: '#0F1A2E', outline: 'none',
-                transition: 'border-color 0.15s',
-              }}
-              onFocus={e => e.target.style.borderColor = 'rgba(14,165,233,0.55)'}
-              onBlur={e  => e.target.style.borderColor = 'rgba(14,165,233,0.22)'}
-            />
-          </div>
+        {/* Card */}
+        <div style={{
+          background: '#fff', border: '1px solid #E2E8F0', borderRadius: 16,
+          padding: '28px 24px',
+          boxShadow: '0 4px 24px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04)',
+        }}>
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-          {/* Campo senha */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <label
-              htmlFor="password"
-              style={{ fontSize: 10, letterSpacing: '0.28em', textTransform: 'uppercase', color: '#0EA5E9', fontWeight: 600 }}
-            >
-              Senha
-            </label>
-            <input
-              id="password"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              placeholder="••••••••"
-              style={{
-                width: '100%', borderRadius: 10,
-                background: 'rgba(14,165,233,0.05)',
-                border: '1px solid rgba(14,165,233,0.22)',
-                padding: '10px 14px', fontSize: 13,
-                color: '#0F1A2E', outline: 'none',
-                transition: 'border-color 0.15s',
-              }}
-              onFocus={e => e.target.style.borderColor = 'rgba(14,165,233,0.55)'}
-              onBlur={e  => e.target.style.borderColor = 'rgba(14,165,233,0.22)'}
-            />
-          </div>
-
-          {/* Erro */}
-          {error && (
-            <div style={{
-              borderRadius: 10, padding: '10px 14px', fontSize: 12,
-              background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.28)',
-              color: '#DC2626',
-            }}>
-              {error}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <label htmlFor="username" style={{ fontSize: 11, fontWeight: 600, color: '#64748B', letterSpacing: '0.05em' }}>
+                Usuário
+              </label>
+              <input
+                id="username" type="text" autoComplete="username"
+                value={username} onChange={e => setUsername(e.target.value)}
+                required placeholder="admin"
+                style={inputStyle}
+                onFocus={e => { e.target.style.borderColor = '#0EA5E9'; e.target.style.boxShadow = '0 0 0 3px rgba(14,165,233,0.10)' }}
+                onBlur={e  => { e.target.style.borderColor = '#E2E8F0'; e.target.style.boxShadow = 'none' }}
+              />
             </div>
-          )}
 
-          {/* Botão primário */}
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              width: '100%', borderRadius: 10, border: 'none',
-              background: loading ? 'rgba(14,165,233,0.55)' : '#0EA5E9',
-              color: 'white', fontSize: 13, fontWeight: 600,
-              letterSpacing: '0.05em', padding: '11px',
-              cursor: loading ? 'not-allowed' : 'pointer',
-              transition: 'background 0.15s',
-              boxShadow: '0 2px 12px rgba(14,165,233,0.30)',
-            }}
-            onMouseEnter={e => { if (!loading) e.currentTarget.style.background = '#0284C7' }}
-            onMouseLeave={e => { if (!loading) e.currentTarget.style.background = '#0EA5E9' }}
-          >
-            {loading ? 'Entrando…' : 'Entrar'}
-          </button>
-        </form>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <label htmlFor="password" style={{ fontSize: 11, fontWeight: 600, color: '#64748B', letterSpacing: '0.05em' }}>
+                Senha
+              </label>
+              <input
+                id="password" type="password" autoComplete="current-password"
+                value={password} onChange={e => setPassword(e.target.value)}
+                required placeholder="••••••••"
+                style={inputStyle}
+                onFocus={e => { e.target.style.borderColor = '#0EA5E9'; e.target.style.boxShadow = '0 0 0 3px rgba(14,165,233,0.10)' }}
+                onBlur={e  => { e.target.style.borderColor = '#E2E8F0'; e.target.style.boxShadow = 'none' }}
+              />
+            </div>
+
+            {error && (
+              <div style={{
+                borderRadius: 8, padding: '9px 12px', fontSize: 12,
+                background: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B',
+              }}>
+                {error}
+              </div>
+            )}
+
+            <button
+              type="submit" disabled={loading}
+              style={{
+                width: '100%', borderRadius: 8, border: 'none',
+                background: loading ? '#7DD3F0' : '#0EA5E9',
+                color: '#fff', fontSize: 13, fontWeight: 700,
+                padding: '11px', cursor: loading ? 'not-allowed' : 'pointer',
+                transition: 'background 0.15s',
+                boxShadow: loading ? 'none' : '0 1px 4px rgba(14,165,233,0.35)',
+              }}
+              onMouseEnter={e => { if (!loading) e.currentTarget.style.background = '#0284C7' }}
+              onMouseLeave={e => { if (!loading) e.currentTarget.style.background = '#0EA5E9' }}
+            >
+              {loading ? 'Entrando…' : 'Entrar'}
+            </button>
+          </form>
+        </div>
 
       </div>
     </div>
