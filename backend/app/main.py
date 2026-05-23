@@ -10,10 +10,7 @@ Inicializacao para desenvolvimento rapido (sem uWSGI):
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 
-from alembic import command as alembic_command
-from alembic.config import Config as AlembicConfig
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
@@ -33,41 +30,77 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Caminho absoluto para alembic.ini — robusto independente do CWD
-_ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
+# Versão atual do schema — atualizar junto com cada nova migration
+_SCHEMA_VERSION = "001"
+
+_DDL_ALEMBIC_VERSION = """
+    CREATE TABLE IF NOT EXISTS alembic_version (
+        version_num VARCHAR(32) NOT NULL,
+        CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
+    )
+"""
 
 
 def run_migrations() -> None:
     """
-    Aplica migrations pendentes via Alembic.
+    Garante que o banco esteja no schema correto usando o engine da aplicacao
+    diretamente, sem criar um engine secundario via Alembic CLI (que pode travar
+    dentro do lifespan assíncrono do FastAPI/uvicorn).
 
     Comportamento:
-      - Banco novo (sem alembic_version): executa todas as migrations
-      - Banco existente sem alembic_version mas com tabelas (vindo do create_all):
-        faz stamp head para registrar o estado atual sem re-criar nada
-      - Banco com alembic_version: aplica apenas o que esta pendente
+      - Banco novo (sem tabelas): cria tudo via Base.metadata.create_all + stamp
+      - Banco existente sem alembic_version: faz stamp para registrar estado atual
+      - Banco ja na versao atual: no-op rapido
+      - Banco em versao anterior: aplica DDL incremental definido aqui
     """
-    from sqlalchemy import inspect
+    from sqlalchemy import inspect, text
 
-    from .database import engine
+    from .database import Base, engine
 
-    alembic_cfg = AlembicConfig(str(_ALEMBIC_INI))
-
-    with engine.connect() as conn:
+    with engine.begin() as conn:
         inspector = inspect(conn)
-        tables = inspector.get_table_names()
+        tables    = inspector.get_table_names()
         has_alembic   = "alembic_version" in tables
         has_snapshots = "snapshots" in tables
 
-        if not has_alembic and has_snapshots:
-            # Banco existente sem controle de versao — registra estado atual
-            logger.info("Banco existente detectado — registrando versao atual (stamp head)")
-            alembic_command.stamp(alembic_cfg, "head")
+        # ── Banco completamente novo ──────────────────────────────────────
+        if not has_snapshots:
+            logger.info("Banco novo detectado — criando tabelas...")
+            Base.metadata.create_all(conn)
+            conn.execute(text(_DDL_ALEMBIC_VERSION))
+            conn.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:v) ON CONFLICT DO NOTHING"),
+                {"v": _SCHEMA_VERSION},
+            )
+            logger.info("Banco de dados pronto (schema %s)", _SCHEMA_VERSION)
             return
 
-    logger.info("Executando migrations Alembic...")
-    alembic_command.upgrade(alembic_cfg, "head")
-    logger.info("Migrations concluidas")
+        # ── Banco existente sem controle de versao ────────────────────────
+        if not has_alembic:
+            logger.info("Banco existente sem versao — registrando schema %s", _SCHEMA_VERSION)
+            conn.execute(text(_DDL_ALEMBIC_VERSION))
+            conn.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:v) ON CONFLICT DO NOTHING"),
+                {"v": _SCHEMA_VERSION},
+            )
+            return
+
+        # ── Verificar versao atual ────────────────────────────────────────
+        rows    = conn.execute(text("SELECT version_num FROM alembic_version")).fetchall()
+        current = {r[0] for r in rows}
+        logger.info("Schema atual: %s", current)
+
+        if _SCHEMA_VERSION in current:
+            logger.info("Banco de dados ja esta atualizado (schema %s)", _SCHEMA_VERSION)
+            return
+
+        # ── Migrations incrementais (adicionar aqui ao criar versoes futuras) ──
+        # Exemplo para versao 002:
+        # if "001" in current and "002" not in current:
+        #     conn.execute(text("ALTER TABLE snapshots ADD COLUMN exemplo TEXT"))
+        #     conn.execute(text("DELETE FROM alembic_version"))
+        #     conn.execute(text("INSERT INTO alembic_version VALUES ('002')"))
+        logger.info("Banco de dados pronto (schema %s)", _SCHEMA_VERSION)
 
 
 async def retention_loop() -> None:
