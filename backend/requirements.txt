@@ -10,3 +10,6 @@ passlib[bcrypt]==1.7.4
 bcrypt==3.2.2
 python-multipart==0.0.9
 resend==2.0.0
+# Fase 1 — Fundação sólida
+alembic==1.13.1
+slowapi==0.1.9

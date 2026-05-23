@@ -646,7 +646,7 @@ analyze_php_mailers_json() {
         local susp
         susp=$(timeout 10 find "$root" -name '*.php' -maxdepth 8 2>/dev/null \
             | xargs -r grep -lE "$PAT_SUSPECT" 2>/dev/null | head -5)
-        local cnt; cnt=$(printf '%s\n' "$susp" | grep -c . 2>/dev/null || echo 0)
+        local cnt; cnt=$(printf '%s\n' "$susp" | grep -c . 2>/dev/null); cnt=${cnt:-0}
         PHP_MAILER_SUSPICIOUS=$(( PHP_MAILER_SUSPICIOUS + cnt ))
         [ -z "$PHP_MAILER_TOP_SUSPECT" ] && \
             PHP_MAILER_TOP_SUSPECT=$(printf '%s\n' "$susp" | head -1)
@@ -875,7 +875,7 @@ execute_action() {
         clean-frozen)
             local ids; ids=$(exiqgrep -z -i 2>/dev/null \
                 | grep -E '^[A-Za-z0-9-]{6,}$')
-            local count; count=$(echo "$ids" | grep -c . 2>/dev/null || echo 0)
+            local count; count=$(echo "$ids" | grep -c . 2>/dev/null); count=${count:-0}
             echo "$ids" | xargs -r -P4 exim -Mrm 2>/dev/null
             output_action_json "true" "$cmd" \
                 "$count mensagens frozen removidas"
@@ -884,7 +884,7 @@ execute_action() {
         clean-bounces)
             local ids; ids=$(exiqgrep -f '<>' -i 2>/dev/null \
                 | grep -E '^[A-Za-z0-9-]{6,}$')
-            local count; count=$(echo "$ids" | grep -c . 2>/dev/null || echo 0)
+            local count; count=$(echo "$ids" | grep -c . 2>/dev/null); count=${count:-0}
             echo "$ids" | xargs -r -P4 exim -Mrm 2>/dev/null
             output_action_json "true" "$cmd" \
                 "$count bounces (<>) removidos"
@@ -898,7 +898,7 @@ execute_action() {
             fi
             local ids; ids=$(exiqgrep -f "$param" -i 2>/dev/null \
                 | grep -E '^[A-Za-z0-9-]{6,}$')
-            local count; count=$(echo "$ids" | grep -c . 2>/dev/null || echo 0)
+            local count; count=$(echo "$ids" | grep -c . 2>/dev/null); count=${count:-0}
             echo "$ids" | xargs -r -P4 exim -Mrm 2>/dev/null
             output_action_json "true" "$cmd" \
                 "$count mensagens de '$param' removidas"

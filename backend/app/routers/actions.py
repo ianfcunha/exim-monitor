@@ -16,10 +16,11 @@ Body JSON: { "param": "valor" }  (opcional conforme a ação)
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from ..auth import get_current_user
+from ..limiter import limiter
 from ..ssh import SSHError, run_action
 
 router = APIRouter(prefix="/api/actions", tags=["actions"])
@@ -42,7 +43,9 @@ class ActionRequest(BaseModel):
 
 
 @router.post("/{action}", summary="Executa ação no servidor EXIM")
+@limiter.limit("20/minute")         # ações SSH — evita flood acidental
 def execute_action(
+    request: Request,
     action: str,
     body: ActionRequest = ActionRequest(),
     current_user: str = Depends(get_current_user),

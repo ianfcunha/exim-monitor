@@ -5,10 +5,11 @@ GET  /api/status/quick    →  dados leves (cache 30s)   — usado pelo heartbea
 GET  /api/status/full     →  dados completos (cache 5min)
 POST /api/status/refresh  →  força nova coleta completa ignorando cache
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ..auth import get_current_user
 from ..collector import get_full, get_quick
+from ..limiter import limiter
 from ..ssh import SSHError
 
 router = APIRouter(prefix="/api/status", tags=["status"])
@@ -31,7 +32,8 @@ def status_full(current_user: str = Depends(get_current_user)):
 
 
 @router.post("/refresh", summary="Força nova coleta completa")
-def refresh(current_user: str = Depends(get_current_user)):
+@limiter.limit("10/minute")         # evita spam de coleta SSH
+def refresh(request: Request, current_user: str = Depends(get_current_user)):
     try:
         return get_full(force=True)
     except SSHError as exc:

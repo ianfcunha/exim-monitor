@@ -102,6 +102,43 @@ def create_tables() -> None:
     Base.metadata.create_all(bind=engine)
 
 
+# ── Retenção de snapshots ──────────────────────────────────────────────────────
+
+def run_retention() -> dict:
+    """
+    Limpeza periódica da tabela snapshots para evitar crescimento ilimitado.
+
+    Política:
+      - Snapshots 'quick' com mais de 7 dias → removidos
+        (mantemos apenas 'full' para o histórico de médio prazo)
+      - Todos os snapshots com mais de 90 dias → removidos
+
+    Retorna dict com contagens para logging.
+    """
+    from datetime import datetime, timedelta
+
+    cutoff_quick = datetime.utcnow() - timedelta(days=7)
+    cutoff_all   = datetime.utcnow() - timedelta(days=90)
+
+    db = SessionLocal()
+    try:
+        deleted_quick = (
+            db.query(Snapshot)
+            .filter(Snapshot.timestamp < cutoff_quick, Snapshot.mode == "quick")
+            .delete(synchronize_session=False)
+        )
+        deleted_old = (
+            db.query(Snapshot)
+            .filter(Snapshot.timestamp < cutoff_all)
+            .delete(synchronize_session=False)
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    return {"deleted_quick_7d": deleted_quick, "deleted_all_90d": deleted_old}
+
+
 def get_db():
     db = SessionLocal()
     try:
