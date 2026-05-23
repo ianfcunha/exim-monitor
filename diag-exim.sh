@@ -1,19 +1,36 @@
 #!/bin/bash
 # ============================================================
-# EXIM MONITOR PRO v4.8 — Diagnóstico Inteligente de Fila
+# EXIM MONITOR PRO v4.9 — Diagnóstico Inteligente de Fila
 # ============================================================
 # Uso:   bash exim-monitor.sh [--auto] [--json] [--clean-spam]
 #        --auto          executa sem interação (modo cron/alerta)
 #        --json          saída em JSON para integração externa
 #        --clean-spam    limpa fila automaticamente se SPAM detectado
 #        --quick         modo leve para dashboard (heartbeat ~30s):
-#                          skip de exim -bp e exiqgrep, lê 500 linhas
-#                          de log, retorna JSON com mode:"quick"
+#                          skip de exim -bp e exiqgrep; lê log com
+#                          suporte a rotation (mainlog.1/.gz);
+#                          linhas escaladas por --hours=N;
+#                          retorna JSON com mode:"quick" + hourly_stats
+#        --hours=N       janela de análise por hora (padrão 6);
+#                          em --quick ajusta QUICK_LOG_LINES dinamicamente
 #        --action=<cmd>  executa uma ação isolada e retorna JSON:
 #                          clean-full | clean-frozen | clean-bounces
 #                          clean-sender:<addr> | clean-auth:<user>
 #                          block-ip:<ip> | retry-queue
 # ============================================================
+# Changelog v4.9:
+#   - Novo: thresholds configuráveis via variável de ambiente
+#           (EXIM_TH_AUTH_ABUSE=100, EXIM_TH_FILA_ALTA=1000, etc.)
+#   - Novo: suporte a log rotation — lê mainlog.1.gz / mainlog.1
+#           automaticamente antes de aplicar tail -N (ambos modos)
+#   - Novo: --hours=N em --quick: QUICK_LOG_LINES escala com a janela
+#           (HOURS_WINDOW * 500, mín 1000), cobrindo o período pedido
+#   - Novo: hourly_stats[] no JSON do --quick (recv/sent por hora)
+#   - Novo: campo php_mailers{} no JSON --json (suspicious, mail_calls,
+#           top_suspect) via analyze_php_mailers_json() com timeout
+#   - Novo: suporte a Exim 4.96+ — awk de hourly_stats tolera timestamps
+#           com sub-segundo; exim.version adicionado ao JSON
+#   - Novo: detect_exim_version() — detecta e expõe versão do Exim
 # Changelog v4.8:
 #   - Novo: --quick — modo leve de coleta para polling de dashboard;
 #           pula exim -bp e exiqgrep, lê apenas 500 linhas de log,
@@ -57,12 +74,30 @@
 #          (evita pegar local-parts com ponto, ex: case.file@domain → domain)
 # ============================================================
 
-VERSION="4.8"
+VERSION="4.9"
 LOG_PATH="/var/log/exim4/mainlog"
 LOG_LINES=10000
 QUEUE_SAMPLE_THRESHOLD=10000  # acima disso usa amostra da fila
 QUEUE_LINES=5000
 HOURS_WINDOW=6                # janela padrão para análise por hora
+
+# ── Thresholds de classificação — configuráveis via variável de ambiente ──
+# Exemplo: EXIM_TH_AUTH_ABUSE=100 bash diag-exim.sh --quick
+TH_SPAM_RELAY_SEND=${EXIM_TH_SPAM_RELAY_SEND:-30}
+TH_SPAM_RELAY_BOUNCE=${EXIM_TH_SPAM_RELAY_BOUNCE:-10}
+TH_SPAM_MASSIVO_QUEUE=${EXIM_TH_SPAM_MASSIVO_QUEUE:-5000}
+TH_SPAM_MASSIVO_SENDS=${EXIM_TH_SPAM_MASSIVO_SENDS:-200}
+TH_SPAM_MASSIVO_SENDER=${EXIM_TH_SPAM_MASSIVO_SENDER:-500}
+TH_AUTH_ABUSE=${EXIM_TH_AUTH_ABUSE:-200}
+TH_BOUNCE_CONCENTRADO=${EXIM_TH_BOUNCE_CONCENTRADO:-100}
+TH_BOUNCE_CONCENTRADO_RCPT=${EXIM_TH_BOUNCE_CONCENTRADO_RCPT:-50}
+TH_IP_FLOOD=${EXIM_TH_IP_FLOOD:-500}
+TH_FILA_TRAVADA_DAYS=${EXIM_TH_FILA_TRAVADA_DAYS:-100}
+TH_FILA_TRAVADA_FROZEN=${EXIM_TH_FILA_TRAVADA_FROZEN:-50}
+TH_ALTO_DEFERIMENTO=${EXIM_TH_ALTO_DEFERIMENTO:-500}
+TH_BOUNCE_STORM=${EXIM_TH_BOUNCE_STORM:-500}
+TH_ALTA_REJEICAO=${EXIM_TH_ALTA_REJEICAO:-500}
+TH_FILA_ALTA=${EXIM_TH_FILA_ALTA:-2000}
 DATE=$(date "+%Y-%m-%d %H:%M:%S")
 HOSTNAME=$(hostname -f 2>/dev/null || hostname)
 
@@ -163,6 +198,40 @@ $(getent hosts "$HOSTNAME" 2>/dev/null | awk '{print $1}')"
 is_own_ip() { echo "$SERVER_IPS" | grep -qxF "$1"; }
 
 # ============================================================
+# DETECÇÃO DE VERSÃO DO EXIM
+# Popula EXIM_VER_STR, EXIM_VER_MAJOR, EXIM_VER_MINOR.
+# Usado para ajustar regex e emitir versão no JSON.
+# ============================================================
+detect_exim_version() {
+    EXIM_VER_STR=$(exim --version 2>/dev/null | head -1 \
+        | grep -oP 'Exim version \K[0-9]+\.[0-9]+(\.[0-9]+)?')
+    [ -z "$EXIM_VER_STR" ] && EXIM_VER_STR="unknown"
+    EXIM_VER_MAJOR=$(echo "$EXIM_VER_STR" | cut -d. -f1)
+    EXIM_VER_MINOR=$(echo "$EXIM_VER_STR" | cut -d. -f2)
+    [ -z "$EXIM_VER_MAJOR" ] && EXIM_VER_MAJOR=0
+    [ -z "$EXIM_VER_MINOR" ] && EXIM_VER_MINOR=0
+}
+
+# ============================================================
+# LEITURA DO LOG COM SUPORTE A LOG ROTATION
+# Tenta ler mainlog.1.gz → mainlog.1 → mainlog (fallback).
+# Concatena rotacionado + atual e retorna as últimas N linhas.
+# Garante cobertura de janelas maiores sem depender só do log ativo.
+# ============================================================
+_read_log_lines() {
+    local log_path="$1" lines="$2"
+    local rotated="${log_path}.1"
+    local rotated_gz="${log_path}.1.gz"
+    if [ -f "$rotated_gz" ]; then
+        { zcat "$rotated_gz" 2>/dev/null; cat "$log_path" 2>/dev/null; } | tail -"$lines"
+    elif [ -f "$rotated" ]; then
+        { cat "$rotated" 2>/dev/null; cat "$log_path" 2>/dev/null; } | tail -"$lines"
+    else
+        tail -"$lines" "$log_path" 2>/dev/null
+    fi
+}
+
+# ============================================================
 # COLETA
 # ============================================================
 # Arquivos temporários para coleta paralela
@@ -191,16 +260,19 @@ collect() {
     QUEUE=$(exim -bpc 2>/dev/null || echo 0)
 
     # ── Modo quick: coleta mínima para heartbeat de dashboard ───────
-    # Pula exim -bp (lento) e exiqgrep; lê apenas QUICK_LOG_LINES de log.
+    # Pula exim -bp (lento) e exiqgrep; lê QUICK_LOG_LINES de log.
+    # QUICK_LOG_LINES escala com HOURS_WINDOW (≈500 linhas/hora).
+    # Suporte a log rotation: lê mainlog.1(.gz) + mainlog atual.
     # Variáveis dependentes de fila ficam vazias/zero — indicado no JSON.
-    QUICK_LOG_LINES=500
+    QUICK_LOG_LINES=$(( HOURS_WINDOW * 500 ))
+    [ "$QUICK_LOG_LINES" -lt 1000 ] && QUICK_LOG_LINES=1000
     if [ "$QUICK_MODE" -eq 1 ]; then
         _FOUND_LOG=""
         for candidate in "$LOG_PATH" /var/log/exim4/mainlog /var/log/exim/mainlog /var/log/mail.log; do
             [ -f "$candidate" ] && { _FOUND_LOG="$candidate"; LOG_PATH="$candidate"; break; }
         done
         _TMP_LOG=$(mktemp /tmp/eximmon_log.XXXXXX)
-        [ -n "$_FOUND_LOG" ] && tail -"$QUICK_LOG_LINES" "$_FOUND_LOG" > "$_TMP_LOG"
+        [ -n "$_FOUND_LOG" ] && _read_log_lines "$_FOUND_LOG" "$QUICK_LOG_LINES" > "$_TMP_LOG"
         QUEUE_RAW=""; FROZEN_COUNT=0; OLDEST_IN_QUEUE=""
         QUEUE_SAMPLED=0
         LOG_SAMPLE=$(cat "$_TMP_LOG" 2>/dev/null)
@@ -247,9 +319,9 @@ collect() {
     } &
     _PID_QUEUE=$!
 
-    # Job 2: log
+    # Job 2: log (com suporte a log rotation — mainlog.1.gz / mainlog.1)
     {
-        [ -n "$_FOUND_LOG" ] && tail -"$LOG_LINES" "$_FOUND_LOG" > "$_TMP_LOG"
+        [ -n "$_FOUND_LOG" ] && _read_log_lines "$_FOUND_LOG" "$LOG_LINES" > "$_TMP_LOG"
     } &
     _PID_LOG=$!
 
@@ -429,8 +501,10 @@ analyze_hourly_stats() {
 
     # Processa LOG_SAMPLE e agrega por hora
     # Chave de saída: "YYYY-MM-DD-HH recv sent"
+    # Nota: padrão de timestamp é tolerante a sub-segundo (Exim 4.96+)
+    # — o campo $2 começa com HH: independente da precisão configurada.
     HOURLY_RAW=$(printf '%s\n' "$LOG_SAMPLE" | awk '
-    /^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} / {
+    /^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}/ {
         hkey = substr($1,1,10) "-" substr($2,1,2)
         if (index($0, " <= ") > 0) recv[hkey]++
         if (index($0, " => ") > 0) sent[hkey]++
@@ -538,6 +612,57 @@ analyze_defers() {
 }
 
 # ============================================================
+# ANÁLISE DE PHP MAILERS — versão leve para JSON (--json full)
+# Não usa o modo interativo completo: apenas conta arquivos suspeitos
+# com timeout para não bloquear o ciclo de 5 min do dashboard.
+# Popula: PHP_MAILER_SUSPICIOUS, PHP_MAILER_MAIL_COUNT, PHP_MAILER_TOP_SUSPECT
+# ============================================================
+analyze_php_mailers_json() {
+    PHP_MAILER_SUSPICIOUS=0
+    PHP_MAILER_MAIL_COUNT=0
+    PHP_MAILER_TOP_SUSPECT=""
+
+    # Padrões de ofuscação / execução dinâmica
+    local PAT_SUSPECT='base64_decode\s*\(|eval\s*\(|str_rot13\s*\(|gzinflate\s*\(|fsockopen.*25\b'
+    local PAT_MAIL='mail\s*('
+
+    # Raízes de busca: /srv/*/www → /srv/* → /var/www (máx 20 roots)
+    local roots=()
+    if [ -d /srv ]; then
+        while IFS= read -r d; do
+            if [ -d "${d}/www" ]; then
+                roots+=("${d}/www")
+            else
+                roots+=("$d")
+            fi
+        done < <(find /srv -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | head -20)
+    fi
+    [ -d /var/www ] && roots+=("/var/www")
+
+    for root in "${roots[@]}"; do
+        [ -d "$root" ] || continue
+
+        # Arquivos suspeitos — timeout de 10s por root para não travar
+        local susp
+        susp=$(timeout 10 find "$root" -name '*.php' -maxdepth 8 2>/dev/null \
+            | xargs -r grep -lE "$PAT_SUSPECT" 2>/dev/null | head -5)
+        local cnt; cnt=$(printf '%s\n' "$susp" | grep -c . 2>/dev/null || echo 0)
+        PHP_MAILER_SUSPICIOUS=$(( PHP_MAILER_SUSPICIOUS + cnt ))
+        [ -z "$PHP_MAILER_TOP_SUSPECT" ] && \
+            PHP_MAILER_TOP_SUSPECT=$(printf '%s\n' "$susp" | head -1)
+
+        # Arquivos com mail() — timeout de 10s
+        local mail_cnt
+        mail_cnt=$(timeout 10 find "$root" -name '*.php' -maxdepth 8 2>/dev/null \
+            | xargs -r grep -lE "$PAT_MAIL" 2>/dev/null | wc -l)
+        PHP_MAILER_MAIL_COUNT=$(( PHP_MAILER_MAIL_COUNT + mail_cnt ))
+    done
+
+    # Escapa aspas para JSON seguro
+    PHP_MAILER_TOP_SUSPECT=$(printf '%s' "$PHP_MAILER_TOP_SUSPECT" | sed 's/"/\\"/g')
+}
+
+# ============================================================
 # ANÁLISE DE IDADE
 # ============================================================
 analyze_age() {
@@ -554,43 +679,49 @@ analyze_age() {
 classify() {
     PROBLEM="NORMAL"; SEVERITY="OK"; PROBLEM_DESC="Fila operando normalmente"
 
-    if   [ "$RELAY_SUSPECT_SEND" -gt 30 ] && [ "$RELAY_SUSPECT_BOUNCE" -gt 10 ]; then
+    if   [ "$RELAY_SUSPECT_SEND" -gt "$TH_SPAM_RELAY_SEND" ] && \
+         [ "$RELAY_SUSPECT_BOUNCE" -gt "$TH_SPAM_RELAY_BOUNCE" ]; then
         PROBLEM="SPAM_RELAY"; SEVERITY="CRITICAL"
         PROBLEM_DESC="Relay de spam — ${RELAY_SUSPECT} disparou e-mails usando este servidor"
 
-    elif [ "$QUEUE" -gt 5000 ] && [ "$RECENT_SENDS" -gt 200 ] && [ "$TOP_SENDER_COUNT" -gt 500 ]; then
+    elif [ "$QUEUE" -gt "$TH_SPAM_MASSIVO_QUEUE" ] && \
+         [ "$RECENT_SENDS" -gt "$TH_SPAM_MASSIVO_SENDS" ] && \
+         [ "$TOP_SENDER_COUNT" -gt "$TH_SPAM_MASSIVO_SENDER" ]; then
         PROBLEM="SPAM_MASSIVO"; SEVERITY="CRITICAL"
         PROBLEM_DESC="Spam massivo — $TOP_SENDER ($TOP_SENDER_COUNT msgs na fila)"
 
-    elif [ "$TOP_AUTH_COUNT" -gt 200 ]; then
+    elif [ "$TOP_AUTH_COUNT" -gt "$TH_AUTH_ABUSE" ]; then
         PROBLEM="AUTH_ABUSE"; SEVERITY="CRITICAL"
         PROBLEM_DESC="Conta SMTP comprometida — $TOP_AUTH_USER ($TOP_AUTH_COUNT envios)"
 
-    elif [ "$BOUNCE_COUNT" -gt 100 ] && [ "$TOP_RECIPIENT_COUNT" -gt 50 ]; then
+    elif [ "$BOUNCE_COUNT" -gt "$TH_BOUNCE_CONCENTRADO" ] && \
+         [ "$TOP_RECIPIENT_COUNT" -gt "$TH_BOUNCE_CONCENTRADO_RCPT" ]; then
         PROBLEM="BOUNCE_CONCENTRADO"; SEVERITY="HIGH"
         PROBLEM_DESC="Bounce storm — $BOUNCE_COUNT bounces, $TOP_RECIPIENT_COUNT msgs para $TOP_RECIPIENT"
 
-    elif [ "$TOP_IP_COUNT" -gt 500 ]; then
+    elif [ "$TOP_IP_COUNT" -gt "$TH_IP_FLOOD" ]; then
         PROBLEM="IP_FLOOD"; SEVERITY="HIGH"
         PROBLEM_DESC="Flood por IP externo — $TOP_IP ($TOP_IP_COUNT conexões)"
 
-    elif [ "$OLD_DAYS" -gt 100 ] || [ "$FROZEN_COUNT" -gt 50 ]; then
+    elif [ "$OLD_DAYS" -gt "$TH_FILA_TRAVADA_DAYS" ] || \
+         [ "$FROZEN_COUNT" -gt "$TH_FILA_TRAVADA_FROZEN" ]; then
         PROBLEM="FILA_TRAVADA"; SEVERITY="HIGH"
         PROBLEM_DESC="Fila travada — $OLD_DAYS msgs >1 dia, $FROZEN_COUNT frozen"
 
-    elif [ "$DEFER_COUNT" -gt 500 ]; then
+    elif [ "$DEFER_COUNT" -gt "$TH_ALTO_DEFERIMENTO" ]; then
         PROBLEM="ALTO_DEFERIMENTO"; SEVERITY="MEDIUM"
         PROBLEM_DESC="Alto deferimento ($DEFER_COUNT) — destinos bloqueando entregas"
 
-    elif [ "$BOUNCE_COUNT" -gt 500 ] || [ "$BOUNCE_LOG_COUNT" -gt 500 ]; then
+    elif [ "$BOUNCE_COUNT" -gt "$TH_BOUNCE_STORM" ] || \
+         [ "$BOUNCE_LOG_COUNT" -gt "$TH_BOUNCE_STORM" ]; then
         PROBLEM="BOUNCE_STORM"; SEVERITY="MEDIUM"
         PROBLEM_DESC="Storm de bounces — $BOUNCE_COUNT bounces na fila"
 
-    elif [ "$REJECT_COUNT" -gt 500 ]; then
+    elif [ "$REJECT_COUNT" -gt "$TH_ALTA_REJEICAO" ]; then
         PROBLEM="ALTA_REJEICAO"; SEVERITY="MEDIUM"
         PROBLEM_DESC="Alta taxa de rejeição — $REJECT_COUNT rejeições"
 
-    elif [ "$QUEUE" -gt 2000 ]; then
+    elif [ "$QUEUE" -gt "$TH_FILA_ALTA" ]; then
         PROBLEM="FILA_ALTA"; SEVERITY="LOW"
         PROBLEM_DESC="Fila elevada sem causa óbvia — investigar"
     fi
@@ -604,8 +735,17 @@ output_json() {
     [ "$QUICK_MODE" -eq 1 ] && _mode="quick"
 
     if [ "$QUICK_MODE" -eq 1 ]; then
-        # Modo quick: apenas métricas do log + contagem de fila.
+        # Modo quick: métricas do log + contagem de fila + hourly_stats.
         # Campos dependentes de exim -bp são omitidos (não coletados).
+
+        # Monta array JSON de hourly_stats a partir das arrays bash
+        local _hs_json="" _i
+        for _i in "${!HOURLY_HOURS[@]}"; do
+            [ -n "$_hs_json" ] && _hs_json="${_hs_json},"
+            _hs_json="${_hs_json}
+    {\"hour\":\"${HOURLY_HOURS[$_i]}\",\"recv\":${HOURLY_RECV[$_i]:-0},\"sent\":${HOURLY_SENT[$_i]:-0}}"
+        done
+
         cat <<EOF
 {
   "timestamp": "$DATE",
@@ -622,6 +762,8 @@ output_json() {
     "recent_sends": $RECENT_SENDS,
     "dns_errors": $DNS_ERRORS
   },
+  "hourly_stats": [${_hs_json}
+  ],
   "top_auth_user": "$TOP_AUTH_USER",
   "top_auth_count": $TOP_AUTH_COUNT,
   "top_ip": "$TOP_IP",
@@ -631,7 +773,7 @@ output_json() {
     "severity": "$SEVERITY",
     "description": "$PROBLEM_DESC"
   },
-  "exim": { "processes": $EXIM_PROCS, "uptime": "$EXIM_UPTIME" }
+  "exim": { "processes": $EXIM_PROCS, "uptime": "$EXIM_UPTIME", "version": "$EXIM_VER_STR" }
 }
 EOF
     else
@@ -667,12 +809,17 @@ EOF
   "relay_suspect": "$RELAY_SUSPECT",
   "relay_suspect_send": $RELAY_SUSPECT_SEND,
   "relay_suspect_bounce": $RELAY_SUSPECT_BOUNCE,
+  "php_mailers": {
+    "suspicious": $PHP_MAILER_SUSPICIOUS,
+    "mail_calls": $PHP_MAILER_MAIL_COUNT,
+    "top_suspect": "$PHP_MAILER_TOP_SUSPECT"
+  },
   "diagnosis": {
     "problem": "$PROBLEM",
     "severity": "$SEVERITY",
     "description": "$PROBLEM_DESC"
   },
-  "exim": { "processes": $EXIM_PROCS, "uptime": "$EXIM_UPTIME" }
+  "exim": { "processes": $EXIM_PROCS, "uptime": "$EXIM_UPTIME", "version": "$EXIM_VER_STR" }
 }
 EOF
     fi
@@ -1612,6 +1759,7 @@ main() {
     fi
 
     get_server_ips
+    detect_exim_version
 
     # Mostra cabeçalho imediatamente enquanto coleta dados em background
     [ "$JSON_MODE" -eq 0 ] && print_header
@@ -1623,6 +1771,7 @@ main() {
     # Ideal para polling de dashboard a cada 30s.
     if [ "$QUICK_MODE" -eq 1 ]; then
         analyze_log
+        analyze_hourly_stats
         # Classificação simplificada: só cenários detectáveis pelo log
         TOP_SENDER=""; TOP_SENDER_COUNT=0
         BOUNCE_COUNT=0; TOP_RECIPIENT=""; TOP_RECIPIENT_COUNT=0
@@ -1635,7 +1784,8 @@ main() {
 
     [ "$JSON_MODE" -eq 1 ] && {
         analyze_senders; analyze_recipients; analyze_log
-        analyze_defers;  analyze_age;        classify
+        analyze_defers;  analyze_age;        analyze_php_mailers_json
+        classify
         output_json; exit 0
     }
 
