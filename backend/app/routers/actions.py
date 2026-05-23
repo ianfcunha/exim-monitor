@@ -16,7 +16,7 @@ Body JSON: { "param": "valor" }  (opcional conforme a ação)
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from ..auth import get_current_user
@@ -46,6 +46,7 @@ class ActionRequest(BaseModel):
 @limiter.limit("20/minute")         # ações SSH — evita flood acidental
 def execute_action(
     request: Request,
+    response: Response,
     action: str,
     body: ActionRequest = ActionRequest(),
     current_user: str = Depends(get_current_user),
