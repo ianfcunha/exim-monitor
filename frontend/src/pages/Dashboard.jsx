@@ -9,6 +9,7 @@ import ActionPanel from '../components/ActionPanel'
 import DiagnosisPanel from '../components/DiagnosisPanel'
 import HistoryChart from '../components/HistoryChart'
 import HourlyBarChart from '../components/HourlyBarChart'
+import MessagesDrawer from '../components/MessagesDrawer'
 import MetricCard from '../components/MetricCard'
 import StatusBadge from '../components/StatusBadge'
 import TopTable from '../components/TopTable'
@@ -79,6 +80,7 @@ export default function Dashboard({ onLogout, onSettings }) {
   const full  = useFullStatus()
   const [refreshing, setRefreshing] = useState(false)
   const [chartKey, setChartKey]     = useState(0)
+  const [drawer, setDrawer]         = useState(null) // 'queue'|'delivered'|'rejected'|'deferred'|'sent'
 
   const q     = quick.data ?? {}
   const f     = full.data  ?? {}
@@ -240,11 +242,11 @@ export default function Dashboard({ onLogout, onSettings }) {
 
         {/* Métricas */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-          <MetricCard icon={Inbox}       label="Fila total"      value={fmt(queue.total)}      sub={queue.frozen != null ? `${queue.frozen} frozen` : undefined} loading={loading} />
-          <MetricCard icon={CheckCircle} label="Entregues"       value={fmt(log.delivered)}    sub="no log amostrado"   loading={loading} />
-          <MetricCard icon={XCircle}     label="Rejeitados"      value={fmt(log.rejected)}                              loading={loading} />
-          <MetricCard icon={Clock}       label="Deferidos"       value={fmt(log.deferred)}                              loading={loading} />
-          <MetricCard icon={Send}        label="Envios recentes" value={fmt(log.recent_sends)}                          loading={loading} />
+          <MetricCard icon={Inbox}       label="Fila total"      value={fmt(queue.total)}      sub={queue.frozen != null ? `${queue.frozen} frozen` : undefined} loading={loading} onClick={() => setDrawer('queue')}     />
+          <MetricCard icon={CheckCircle} label="Entregues"       value={fmt(log.delivered)}    sub="no log amostrado"   loading={loading} onClick={() => setDrawer('delivered')} />
+          <MetricCard icon={XCircle}     label="Rejeitados"      value={fmt(log.rejected)}                              loading={loading} onClick={() => setDrawer('rejected')}  />
+          <MetricCard icon={Clock}       label="Deferidos"       value={fmt(log.deferred)}                              loading={loading} onClick={() => setDrawer('deferred')}  />
+          <MetricCard icon={Send}        label="Envios recentes" value={fmt(log.recent_sends)}                          loading={loading} onClick={() => setDrawer('sent')}       />
         </div>
 
         {/* Diagnóstico */}
@@ -288,6 +290,14 @@ export default function Dashboard({ onLogout, onSettings }) {
         </div>
 
       </main>
+
+      {/* ── Drawer de mensagens ── */}
+      {drawer && (
+        <MessagesDrawer
+          cardType={drawer}
+          onClose={() => setDrawer(null)}
+        />
+      )}
     </div>
   )
 }

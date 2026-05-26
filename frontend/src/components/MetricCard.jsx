@@ -1,6 +1,7 @@
 /**
  * MetricCard — estilo Flowbite/admin com identidade AVILI.
  * Ícone em caixa sky-blue, número grande escuro, label uppercase.
+ * Aceita onClick para abrir o drawer de detalhes.
  */
 export default function MetricCard({
   icon: Icon,
@@ -8,9 +9,15 @@ export default function MetricCard({
   value,
   sub,
   loading = false,
+  onClick,
 }) {
   return (
-    <div className="card card-interactive flex flex-col gap-3 min-w-0">
+    <div
+      className="card card-interactive flex flex-col gap-3 min-w-0"
+      onClick={onClick}
+      style={{ cursor: onClick ? 'pointer' : undefined }}
+      title={onClick ? `Ver detalhes: ${label}` : undefined}
+    >
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="section-label truncate mb-1">{label}</p>

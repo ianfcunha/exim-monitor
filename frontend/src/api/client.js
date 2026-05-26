@@ -66,6 +66,13 @@ export const login = (username, password) => {
     .then(r => r.data)
 }
 
+// ── Mensagens (fila + log) ────────────────────────────────────────────────
+export const fetchQueueMessages = () =>
+  api.get('/messages/queue').then(r => r.data)
+
+export const fetchLogMessages = (type, limit = 100) =>
+  api.get('/messages/log', { params: { type, limit } }).then(r => r.data)
+
 // ── Configuracoes de alertas ──────────────────────────────────────────────
 export const fetchAlertSettings = () =>
   api.get('/settings/alerts').then(r => r.data)

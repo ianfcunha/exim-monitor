@@ -21,7 +21,7 @@ from .collector import background_collector
 from .config import settings
 from .database import run_retention
 from .limiter import limiter
-from .routers import actions, auth, history, status
+from .routers import actions, auth, history, messages, status
 from .routers import settings as settings_router
 
 logging.basicConfig(
@@ -179,6 +179,7 @@ app.include_router(auth.router)
 app.include_router(status.router)
 app.include_router(actions.router)
 app.include_router(history.router)
+app.include_router(messages.router)
 app.include_router(settings_router.router)
 
 
