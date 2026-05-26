@@ -124,6 +124,13 @@ EXIM_BIN=""
 for _eb in exim4 exim; do
     command -v "$_eb" &>/dev/null && { EXIM_BIN="$_eb"; break; }
 done
+# Se não somos root, usar sudo para os comandos de fila do exim
+# (exige regra em /etc/sudoers.d/ian-exim no servidor)
+if [ "$(id -u)" -ne 0 ] && sudo -n true 2>/dev/null; then
+    SUDO_EXIM="sudo"
+else
+    SUDO_EXIM=""
+fi
 
 
 AUTO_MODE=0; JSON_MODE=0; CLEAN_SPAM_AUTO=0; QUICK_MODE=0
@@ -290,7 +297,7 @@ _spinner() {
 
 collect() {
     # Contagem rápida primeiro (exim -bpc é instantâneo)
-    QUEUE=$("$EXIM_BIN" -bpc 2>/dev/null || echo 0)
+    QUEUE=$($SUDO_EXIM "$EXIM_BIN" -bpc 2>/dev/null || echo 0)
 
     # ── Modo quick: coleta mínima para heartbeat de dashboard ───────
     # Pula exim -bp (lento) e exiqgrep; lê QUICK_LOG_LINES de log.
@@ -308,7 +315,7 @@ collect() {
         [ -n "$_FOUND_LOG" ] && _read_log_lines "$_FOUND_LOG" "$QUICK_LOG_LINES" > "$_TMP_LOG"
         QUEUE_RAW=""; OLDEST_IN_QUEUE=""
         # Frozen count no quick — exiqgrep -z com timeout curto (10s)
-        FROZEN_COUNT=$(timeout 10 exiqgrep -z -i 2>/dev/null | wc -l | tr -d '[:space:]')
+        FROZEN_COUNT=$(timeout 10 $SUDO_EXIM exiqgrep -z -i 2>/dev/null | wc -l | tr -d '[:space:]')
         [ -z "$FROZEN_COUNT" ] && FROZEN_COUNT=0
         QUEUE_SAMPLED=0
         LOG_SAMPLE=$(cat "$_TMP_LOG" 2>/dev/null)
@@ -347,10 +354,10 @@ collect() {
         if [ "$QUEUE_SAMPLED" -eq 1 ]; then
             # Amostra: primeiras QUEUE_LIMIT linhas (msgs antigas) +
             #          últimas QUEUE_LIMIT linhas (msgs recentes)
-            { timeout 120 "$EXIM_BIN" -bp 2>/dev/null | head -"$QUEUE_LIMIT";
-              timeout 120 "$EXIM_BIN" -bp 2>/dev/null | tail -"$QUEUE_LIMIT"; } > "$_TMP_QUEUE"
+            { timeout 120 $SUDO_EXIM "$EXIM_BIN" -bp 2>/dev/null | head -"$QUEUE_LIMIT";
+              timeout 120 $SUDO_EXIM "$EXIM_BIN" -bp 2>/dev/null | tail -"$QUEUE_LIMIT"; } > "$_TMP_QUEUE"
         else
-            timeout 120 "$EXIM_BIN" -bp 2>/dev/null | head -"$QUEUE_LIMIT" > "$_TMP_QUEUE"
+            timeout 120 $SUDO_EXIM "$EXIM_BIN" -bp 2>/dev/null | head -"$QUEUE_LIMIT" > "$_TMP_QUEUE"
         fi
     } &
     _PID_QUEUE=$!
@@ -363,7 +370,7 @@ collect() {
 
     # Job 3: frozen (exiqgrep pode ser lento em filas grandes)
     {
-        exiqgrep -z -i 2>/dev/null | wc -l > "$_TMP_FROZEN"
+        $SUDO_EXIM exiqgrep -z -i 2>/dev/null | wc -l > "$_TMP_FROZEN"
     } &
     _PID_FROZEN=$!
 
@@ -958,29 +965,29 @@ execute_action() {
     case "$cmd" in
 
         clean-full)
-            local count; count=$("$EXIM_BIN" -bpc 2>/dev/null || echo 0)
-            timeout 120 "$EXIM_BIN" -bp 2>/dev/null \
+            local count; count=$($SUDO_EXIM "$EXIM_BIN" -bpc 2>/dev/null || echo 0)
+            timeout 120 $SUDO_EXIM "$EXIM_BIN" -bp 2>/dev/null \
                 | awk '{print $3}' \
                 | grep -E '^[A-Za-z0-9-]{6,}$' \
-                | xargs -r -P4 "$EXIM_BIN" -Mrm 2>/dev/null
+                | xargs -r -P4 $SUDO_EXIM "$EXIM_BIN" -Mrm 2>/dev/null
             output_action_json "true" "$cmd" \
                 "Fila limpa — $count mensagens removidas"
             ;;
 
         clean-frozen)
-            local ids; ids=$(exiqgrep -z -i 2>/dev/null \
+            local ids; ids=$($SUDO_EXIM exiqgrep -z -i 2>/dev/null \
                 | grep -E '^[A-Za-z0-9-]{6,}$')
             local count; count=$(echo "$ids" | grep -c . 2>/dev/null); count=${count:-0}
-            echo "$ids" | xargs -r -P4 "$EXIM_BIN" -Mrm 2>/dev/null
+            echo "$ids" | xargs -r -P4 $SUDO_EXIM "$EXIM_BIN" -Mrm 2>/dev/null
             output_action_json "true" "$cmd" \
                 "$count mensagens frozen removidas"
             ;;
 
         clean-bounces)
-            local ids; ids=$(exiqgrep -f '<>' -i 2>/dev/null \
+            local ids; ids=$($SUDO_EXIM exiqgrep -f '<>' -i 2>/dev/null \
                 | grep -E '^[A-Za-z0-9-]{6,}$')
             local count; count=$(echo "$ids" | grep -c . 2>/dev/null); count=${count:-0}
-            echo "$ids" | xargs -r -P4 "$EXIM_BIN" -Mrm 2>/dev/null
+            echo "$ids" | xargs -r -P4 $SUDO_EXIM "$EXIM_BIN" -Mrm 2>/dev/null
             output_action_json "true" "$cmd" \
                 "$count bounces (<>) removidos"
             ;;
@@ -996,10 +1003,10 @@ execute_action() {
                     "Parâmetro inválido: '$param' contém caracteres não permitidos"
                 exit 1
             fi
-            local ids; ids=$(exiqgrep -f "$param" -i 2>/dev/null \
+            local ids; ids=$($SUDO_EXIM exiqgrep -f "$param" -i 2>/dev/null \
                 | grep -E '^[A-Za-z0-9-]{6,}$')
             local count; count=$(echo "$ids" | grep -c . 2>/dev/null); count=${count:-0}
-            echo "$ids" | xargs -r -P4 "$EXIM_BIN" -Mrm 2>/dev/null
+            echo "$ids" | xargs -r -P4 $SUDO_EXIM "$EXIM_BIN" -Mrm 2>/dev/null
             output_action_json "true" "$cmd" \
                 "$count mensagens de '$param' removidas"
             ;;
@@ -1016,9 +1023,9 @@ execute_action() {
                 exit 1
             fi
             local removed=0
-            for mid in $(exiqgrep -f "" -i 2>/dev/null | head -500); do
-                "$EXIM_BIN" -Mvh "$mid" 2>/dev/null | grep -q "auth_id.*${param}" \
-                    && { "$EXIM_BIN" -Mrm "$mid" 2>/dev/null; removed=$((removed+1)); }
+            for mid in $($SUDO_EXIM exiqgrep -f "" -i 2>/dev/null | head -500); do
+                $SUDO_EXIM "$EXIM_BIN" -Mvh "$mid" 2>/dev/null | grep -q "auth_id.*${param}" \
+                    && { $SUDO_EXIM "$EXIM_BIN" -Mrm "$mid" 2>/dev/null; removed=$((removed+1)); }
             done
             output_action_json "true" "$cmd" \
                 "$removed mensagens do usuário '$param' removidas"
@@ -1059,7 +1066,7 @@ execute_action() {
             ;;
 
         retry-queue)
-            "$EXIM_BIN" -qff 2>/dev/null
+            $SUDO_EXIM "$EXIM_BIN" -qff 2>/dev/null
             output_action_json "true" "$cmd" \
                 "Reprocessamento forçado da fila ($EXIM_BIN -qff) concluído"
             ;;
@@ -1482,32 +1489,32 @@ maybe_delete_script() {
 
 clean_full() {
     echo -e "${YELLOW}[AÇÃO] Limpando toda a fila...${RESET}"
-    exim -bp 2>/dev/null | awk '{print $3}' | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 exim -Mrm 2>/dev/null
+    $SUDO_EXIM exim -bp 2>/dev/null | awk '{print $3}' | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 $SUDO_EXIM exim -Mrm 2>/dev/null
     echo -e "${GREEN}[OK] Fila limpa.${RESET}"
     QUEUE_CLEANED=1
 }
 clean_frozen() {
     echo -e "${YELLOW}[AÇÃO] Removendo frozen...${RESET}"
-    exiqgrep -z -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 exim -Mrm 2>/dev/null
+    $SUDO_EXIM exiqgrep -z -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 $SUDO_EXIM exim -Mrm 2>/dev/null
     echo -e "${GREEN}[OK] Frozen removidos.${RESET}"
     QUEUE_CLEANED=1
 }
 clean_bounces() {
     echo -e "${YELLOW}[AÇÃO] Removendo bounces (<>)...${RESET}"
-    exiqgrep -f '<>' -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 exim -Mrm 2>/dev/null
+    $SUDO_EXIM exiqgrep -f '<>' -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 $SUDO_EXIM exim -Mrm 2>/dev/null
     echo -e "${GREEN}[OK] Bounces removidos.${RESET}"
     QUEUE_CLEANED=1
 }
 clean_by_sender() {
     echo -e "${YELLOW}[AÇÃO] Removendo fila de $1...${RESET}"
-    exiqgrep -f "$1" -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 exim -Mrm 2>/dev/null
+    $SUDO_EXIM exiqgrep -f "$1" -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 $SUDO_EXIM exim -Mrm 2>/dev/null
     echo -e "${GREEN}[OK]${RESET}"
     QUEUE_CLEANED=1
 }
 clean_by_auth_user() {
     echo -e "${YELLOW}[AÇÃO] Removendo fila do usuário $1...${RESET}"
-    for mid in $(exiqgrep -f "" -i 2>/dev/null | head -200); do
-        exim -Mvh "$mid" 2>/dev/null | grep -q "auth_id.*$1" && exim -Mrm "$mid" 2>/dev/null
+    for mid in $($SUDO_EXIM exiqgrep -f "" -i 2>/dev/null | head -200); do
+        $SUDO_EXIM exim -Mvh "$mid" 2>/dev/null | grep -q "auth_id.*$1" && $SUDO_EXIM exim -Mrm "$mid" 2>/dev/null
     done
     echo -e "${GREEN}[OK]${RESET}"
     QUEUE_CLEANED=1
@@ -1579,7 +1586,7 @@ block_ip_firewall_d() {
 }
 retry_queue() {
     echo -e "${YELLOW}[AÇÃO] Forçando reprocessamento...${RESET}"
-    exim -qff 2>/dev/null
+    $SUDO_EXIM exim -qff 2>/dev/null
     echo -e "${GREEN}[OK]${RESET}"
 }
 check_blacklists() {
@@ -1791,7 +1798,7 @@ print_menu() {
         b) check_blacklists;    read -rp "  [Enter]" ;;
         s) check_dkim_spf;      read -rp "  [Enter]" ;;
         e) show_last_log_errors | less -R ;;
-        v) "$EXIM_BIN" -bp 2>/dev/null | less -R ;;
+        v) $SUDO_EXIM "$EXIM_BIN" -bp 2>/dev/null | less -R ;;
         h) print_hourly_stats;  read -rp "  [Enter para continuar]" ;;
         d) [ "$PROBLEM" = "SPAM_RELAY" ] && show_relay_detail | less -R ;;
         f) [ "${DEFER_DETAIL_AVAILABLE:-0}" -eq 1 ] && { print_defers; read -rp "  [Enter para continuar]"; } ;;
@@ -1837,7 +1844,7 @@ print_menu() {
                 SPAM_MASSIVO)  clean_frozen ;;
                 IP_FLOOD)      clean_frozen ;;
                 ALTO_DEFERIMENTO|BOUNCE_STORM|ALTA_REJEICAO) retry_queue ;;
-                FILA_TRAVADA|BOUNCE_CONCENTRADO|FILA_ALTA|NORMAL) "$EXIM_BIN" -bp 2>/dev/null | less -R ;;
+                FILA_TRAVADA|BOUNCE_CONCENTRADO|FILA_ALTA|NORMAL) $SUDO_EXIM "$EXIM_BIN" -bp 2>/dev/null | less -R ;;
             esac; read -rp "  [Enter]" ;;
         *) echo -e "  ${DIM}Opção inválida.${RESET}"; sleep 1 ;;
     esac
