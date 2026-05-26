@@ -2,7 +2,7 @@
  * Dashboard principal — identidade AVILI light profissional.
  * Estilo admin dashboard: header branco, fundo slate-100, cards brancos com sombra.
  */
-import { CheckCircle, Clock, FileText, Inbox, LogOut, RefreshCw, Send, Settings, XCircle } from 'lucide-react'
+import { CheckCircle, Clock, FileText, Inbox, LogOut, MailOpen, RefreshCw, Settings, XCircle } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { refreshStatus } from '../api/client'
 import ActionPanel from '../components/ActionPanel'
@@ -253,7 +253,7 @@ export default function Dashboard({ onLogout, onSettings }) {
           <MetricCard icon={CheckCircle} label="Entregues"       value={fmt(log.delivered)}    sub="no log amostrado"   loading={loading} onClick={() => setDrawer('delivered')} />
           <MetricCard icon={XCircle}     label="Rejeitados"      value={fmt(log.rejected)}                              loading={loading} onClick={() => setDrawer('rejected')}  />
           <MetricCard icon={Clock}       label="Deferidos"       value={fmt(log.deferred)}                              loading={loading} onClick={() => setDrawer('deferred')}  />
-          <MetricCard icon={Send}        label="Envios recentes" value={fmt(log.recent_sends)}                          loading={loading} onClick={() => setDrawer('sent')}       />
+          <MetricCard icon={MailOpen}    label="Recebidos"       value={fmt(log.recent_sends)}                          loading={loading} onClick={() => setDrawer('sent')}       />
           <DeliveryRateCard
             delivered={log.delivered ?? 0}
             rejected={log.rejected   ?? 0}
