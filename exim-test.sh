@@ -85,8 +85,9 @@ inject() {
         RECIPIENT="recipient-${i}@${DOMAIN}"
         TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-        # exim -f <remetente> <destinatario> le o corpo RFC 2822 do stdin
-        # (diferente de -bS que espera protocolo SMTP em batch)
+        # -odq  = queue-only, nao tenta entrega imediata
+        # -f    = define envelope sender
+        # sem -odq, EXIM tenta DNS na hora e descarta como falha permanente (NXDOMAIN)
         if printf '%s\n' \
             "Subject: [$TEST_TAG] Mensagem de teste #$i" \
             "From: $SENDER" \
@@ -99,7 +100,7 @@ inject() {
             "Tag: $TEST_TAG  |  Seq: $i/$N" \
             "Dominio destino invalido -> ficara em DEFERRED automaticamente." \
             "Para remover: bash exim-test.sh --clean" \
-            | exim -f "$SENDER" "$RECIPIENT" 2>/dev/null; then
+            | exim -odq -f "$SENDER" "$RECIPIENT" 2>/dev/null; then
             INJECTED=$((INJECTED + 1))
             printf "  ${DIM}[%3d/%d]${RESET} injetada -> %s\n" "$i" "$N" "$RECIPIENT"
         else
