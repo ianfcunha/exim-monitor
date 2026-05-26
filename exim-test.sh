@@ -19,7 +19,7 @@
 #   bash exim-test.sh -n 5 --freeze          # injeta 5 e as congela
 #   bash exim-test.sh --clean                # limpa as mensagens de teste
 #   bash exim-test.sh --watch                # monitora a fila em tempo real
-#   bash exim-test.sh --compare              # compara diag vs API
+#   ADMIN_PASSWORD=senha bash exim-test.sh --compare
 # =============================================================================
 
 set -euo pipefail
@@ -32,38 +32,36 @@ CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
 N=10
 DOMAIN="test-invalid.exim-monitor.local"
 SENDER="test-inject@exim-monitor.local"
-MODE="inject"         # inject | clean | watch | compare
+MODE="inject"
 FREEZE=false
 API_URL="http://127.0.0.1:8000"
 DIAG_SCRIPT="/root/exim-monitor/diag-exim.sh"
-TEST_TAG="EXIM-MONITOR-TEST"    # tag única para identificar msgs injetadas
+TEST_TAG="EXIM-MONITOR-TEST"
 
 # ── Parse de args ──────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -n)       N="$2";            shift 2 ;;
-        -d)       DOMAIN="$2";       shift 2 ;;
-        -s)       SENDER="$2";       shift 2 ;;
-        --freeze) FREEZE=true;       shift ;;
-        --clean)  MODE="clean";      shift ;;
-        --watch)  MODE="watch";      shift ;;
-        --compare) MODE="compare";   shift ;;
-        *) echo "Opção desconhecida: $1"; exit 1 ;;
+        -n)        N="$2";           shift 2 ;;
+        -d)        DOMAIN="$2";      shift 2 ;;
+        -s)        SENDER="$2";      shift 2 ;;
+        --freeze)  FREEZE=true;      shift   ;;
+        --clean)   MODE="clean";     shift   ;;
+        --watch)   MODE="watch";     shift   ;;
+        --compare) MODE="compare";   shift   ;;
+        *) echo "Opcao desconhecida: $1"; exit 1 ;;
     esac
 done
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
-info()    { echo -e "${CYAN}${BOLD}[INFO]${RESET}  $*"; }
-ok()      { echo -e "${GREEN}${BOLD}[ OK ]${RESET}  $*"; }
-warn()    { echo -e "${YELLOW}${BOLD}[WARN]${RESET}  $*"; }
-err()     { echo -e "${RED}${BOLD}[ERRO]${RESET}  $*"; }
-sep()     { echo -e "${DIM}────────────────────────────────────────────${RESET}"; }
+info() { echo -e "${CYAN}${BOLD}[INFO]${RESET}  $*"; }
+ok()   { echo -e "${GREEN}${BOLD}[ OK ]${RESET}  $*"; }
+warn() { echo -e "${YELLOW}${BOLD}[WARN]${RESET}  $*"; }
+err()  { echo -e "${RED}${BOLD}[ERRO]${RESET}  $*"; }
+sep()  { echo -e "${DIM}--------------------------------------------${RESET}"; }
 
 check_deps() {
     for cmd in exim curl jq; do
-        if ! command -v "$cmd" &>/dev/null; then
-            warn "$cmd não encontrado — algumas funções podem não funcionar"
-        fi
+        command -v "$cmd" &>/dev/null || warn "$cmd nao encontrado — algumas funcoes podem nao funcionar"
     done
 }
 
@@ -75,33 +73,35 @@ queue_count() {
 inject() {
     info "Injetando ${BOLD}$N${RESET} mensagens de teste na fila do EXIM..."
     info "Remetente : $SENDER"
-    info "Destino   : user@$DOMAIN (domínio inválido → deferred automático)"
+    info "Destino   : recipient-N@$DOMAIN (dominio invalido -> deferred)"
     sep
 
     BEFORE=$(queue_count)
-    info "Fila antes da injeção: ${BOLD}$BEFORE${RESET} mensagens"
+    info "Fila antes da injecao: ${BOLD}$BEFORE${RESET} mensagens"
     sep
 
     INJECTED=0
     for i in $(seq 1 "$N"); do
         RECIPIENT="recipient-${i}@${DOMAIN}"
-        MSG_BODY="From: $SENDER
-To: $RECIPIENT
-Subject: [$TEST_TAG] Mensagem de teste #$i
-X-Test-Tag: $TEST_TAG
-X-Test-Seq: $i
-X-Test-Time: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+        TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-Esta é uma mensagem de teste injetada pelo exim-test.sh.
-Sequência: $i de $N
-Tag: $TEST_TAG
-
-Esta mensagem ficará em DEFERRED pois o domínio destino é inválido.
-Para remover todas as mensagens de teste: bash exim-test.sh --clean
-"
-        if echo "$MSG_BODY" | exim -bS 2>/dev/null; then
+        # exim -f <remetente> <destinatario> le o corpo RFC 2822 do stdin
+        # (diferente de -bS que espera protocolo SMTP em batch)
+        if printf '%s\n' \
+            "Subject: [$TEST_TAG] Mensagem de teste #$i" \
+            "From: $SENDER" \
+            "To: $RECIPIENT" \
+            "X-Test-Tag: $TEST_TAG" \
+            "X-Test-Seq: $i" \
+            "X-Test-Time: $TS" \
+            "" \
+            "Mensagem de teste #$i injetada pelo exim-test.sh" \
+            "Tag: $TEST_TAG  |  Seq: $i/$N" \
+            "Dominio destino invalido -> ficara em DEFERRED automaticamente." \
+            "Para remover: bash exim-test.sh --clean" \
+            | exim -f "$SENDER" "$RECIPIENT" 2>/dev/null; then
             INJECTED=$((INJECTED + 1))
-            printf "  ${DIM}[%3d/%d]${RESET} injetada → %s\n" "$i" "$N" "$RECIPIENT"
+            printf "  ${DIM}[%3d/%d]${RESET} injetada -> %s\n" "$i" "$N" "$RECIPIENT"
         else
             warn "Falha ao injetar mensagem #$i"
         fi
@@ -110,7 +110,6 @@ Para remover todas as mensagens de teste: bash exim-test.sh --clean
     sep
     ok "Injetadas: ${BOLD}$INJECTED${RESET} mensagens"
 
-    # Congela se solicitado
     if $FREEZE; then
         info "Congelando mensagens de teste (--freeze)..."
         FROZEN=0
@@ -122,9 +121,8 @@ Para remover todas as mensagens de teste: bash exim-test.sh --clean
         ok "Congeladas: ${BOLD}$FROZEN${RESET} mensagens"
     fi
 
-    # Aguarda o diag-exim ser executado pelo coletor (~30s)
     echo ""
-    info "Aguardando próxima coleta do dashboard (até 35s)..."
+    info "Aguardando proxima coleta do dashboard (ate 35s)..."
     for i in $(seq 1 7); do
         sleep 5
         CURRENT=$(queue_count)
@@ -139,7 +137,7 @@ Para remover todas as mensagens de teste: bash exim-test.sh --clean
     if [ "$DIFF" -gt 0 ]; then
         ok "Delta: +${BOLD}$DIFF${RESET} mensagens na fila"
     else
-        warn "Delta: $DIFF (possível coleta automática em andamento)"
+        warn "Delta: $DIFF (possivel coleta automatica em andamento)"
     fi
 
     echo ""
@@ -149,7 +147,7 @@ Para remover todas as mensagens de teste: bash exim-test.sh --clean
 
 # ── MODO: limpar mensagens de teste ───────────────────────────────────────────
 clean() {
-    info "Removendo mensagens de teste (tag: $TEST_TAG)..."
+    info "Removendo mensagens de teste (remetente: $SENDER)..."
     sep
 
     REMOVED=0
@@ -158,14 +156,15 @@ clean() {
             REMOVED=$((REMOVED + 1))
             echo -e "  ${DIM}removida${RESET} $msg_id"
         fi
-    done < <(exiqgrep -s "$SENDER" -i 2>/dev/null | grep -E '^[A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+$' || true)
+    done < <(exiqgrep -s "$SENDER" -i 2>/dev/null \
+        | grep -E '^[A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+$' || true)
 
     sep
     ok "Removidas: ${BOLD}$REMOVED${RESET} mensagens de teste"
     info "Fila atual: ${BOLD}$(queue_count)${RESET}"
 }
 
-# ── MODO: watch (monitorar fila) ───────────────────────────────────────────────
+# ── MODO: watch ────────────────────────────────────────────────────────────────
 watch_queue() {
     info "Monitorando fila EXIM (Ctrl+C para parar)..."
     sep
@@ -185,7 +184,6 @@ compare() {
     info "Comparando output do diag-exim.sh com a API REST..."
     sep
 
-    # Obtém token JWT
     echo -ne "  ${DIM}Login na API...${RESET} "
     TOKEN_RESP=$(curl -s -X POST "$API_URL/api/auth/login" \
         -H "Content-Type: application/x-www-form-urlencoded" \
@@ -193,32 +191,26 @@ compare() {
     TOKEN=$(echo "$TOKEN_RESP" | jq -r '.access_token // empty' 2>/dev/null || true)
 
     if [ -z "$TOKEN" ]; then
-        warn "Não foi possível obter token JWT."
-        warn "Defina ADMIN_PASSWORD=<senha> antes de rodar --compare"
-        warn "Exemplo: ADMIN_PASSWORD=suasenha bash exim-test.sh --compare"
-        echo ""
-        warn "Comparando apenas via diag-exim.sh (sem API)..."
+        warn "Nao foi possivel obter token JWT."
+        warn "Defina ADMIN_PASSWORD=<senha> antes: ADMIN_PASSWORD=sua_senha bash exim-test.sh --compare"
     else
         echo -e "${GREEN}OK${RESET}"
     fi
 
-    # Roda diag-exim.sh diretamente
     echo -ne "  ${DIM}Executando diag-exim.sh --json...${RESET} "
     if [ ! -f "$DIAG_SCRIPT" ]; then
-        err "Script não encontrado: $DIAG_SCRIPT"
+        err "Script nao encontrado: $DIAG_SCRIPT"
         exit 1
     fi
     DIAG_OUT=$(bash "$DIAG_SCRIPT" --json 2>/dev/null)
     echo -e "${GREEN}OK${RESET}"
 
-    # Parseia métricas do diag
-    DIAG_QUEUE=$(echo "$DIAG_OUT"    | jq -r '.queue_total    // "?"' 2>/dev/null)
-    DIAG_SEV=$(echo "$DIAG_OUT"      | jq -r '.severity       // "?"' 2>/dev/null)
-    DIAG_DELIVERED=$(echo "$DIAG_OUT" | jq -r '.delivered     // "?"' 2>/dev/null)
-    DIAG_REJECTED=$(echo "$DIAG_OUT"  | jq -r '.rejected      // "?"' 2>/dev/null)
-    DIAG_DEFERRED=$(echo "$DIAG_OUT"  | jq -r '.deferred      // "?"' 2>/dev/null)
+    DIAG_QUEUE=$(echo "$DIAG_OUT"     | jq -r '.queue_total // "?"' 2>/dev/null)
+    DIAG_SEV=$(echo "$DIAG_OUT"       | jq -r '.severity    // "?"' 2>/dev/null)
+    DIAG_DELIVERED=$(echo "$DIAG_OUT" | jq -r '.delivered   // "?"' 2>/dev/null)
+    DIAG_REJECTED=$(echo "$DIAG_OUT"  | jq -r '.rejected    // "?"' 2>/dev/null)
+    DIAG_DEFERRED=$(echo "$DIAG_OUT"  | jq -r '.deferred    // "?"' 2>/dev/null)
 
-    # Obtém dados da API
     API_QUEUE="?"; API_SEV="?"; API_DELIVERED="?"; API_REJECTED="?"; API_DEFERRED="?"
     if [ -n "$TOKEN" ]; then
         echo -ne "  ${DIM}Consultando API /status/full...${RESET} "
@@ -226,52 +218,47 @@ compare() {
             -H "Authorization: Bearer $TOKEN" 2>/dev/null || echo "{}")
         echo -e "${GREEN}OK${RESET}"
 
-        API_QUEUE=$(echo "$API_OUT"     | jq -r '.queue_total    // "?"' 2>/dev/null)
-        API_SEV=$(echo "$API_OUT"       | jq -r '.severity       // "?"' 2>/dev/null)
-        API_DELIVERED=$(echo "$API_OUT"  | jq -r '.delivered     // "?"' 2>/dev/null)
-        API_REJECTED=$(echo "$API_OUT"   | jq -r '.rejected      // "?"' 2>/dev/null)
-        API_DEFERRED=$(echo "$API_OUT"   | jq -r '.deferred      // "?"' 2>/dev/null)
+        API_QUEUE=$(echo "$API_OUT"     | jq -r '.queue_total // "?"' 2>/dev/null)
+        API_SEV=$(echo "$API_OUT"       | jq -r '.severity    // "?"' 2>/dev/null)
+        API_DELIVERED=$(echo "$API_OUT" | jq -r '.delivered   // "?"' 2>/dev/null)
+        API_REJECTED=$(echo "$API_OUT"  | jq -r '.rejected    // "?"' 2>/dev/null)
+        API_DEFERRED=$(echo "$API_OUT"  | jq -r '.deferred    // "?"' 2>/dev/null)
     fi
 
     sep
-    printf "  %-20s  %15s  %15s  %s\n" "MÉTRICA" "diag-exim.sh" "API /status/full" "STATUS"
+    printf "  %-18s  %16s  %16s  %s\n" "METRICA" "diag-exim.sh" "API /status/full" "STATUS"
     sep
 
-    compare_metric() {
-        local label="$1" val_diag="$2" val_api="$3"
-        if [ "$val_api" = "?" ]; then
-            printf "  %-20s  %15s  %15s  ${DIM}(sem token)${RESET}\n" "$label" "$val_diag" "$val_api"
-        elif [ "$val_diag" = "$val_api" ]; then
-            printf "  %-20s  %15s  %15s  ${GREEN}✓ bate${RESET}\n" "$label" "$val_diag" "$val_api"
-        else
-            printf "  %-20s  %15s  %15s  ${YELLOW}△ diferença${RESET}\n" "$label" "$val_diag" "$val_api"
+    _cmp() {
+        local label="$1" vd="$2" va="$3"
+        if   [ "$va" = "?" ];    then printf "  %-18s  %16s  %16s  ${DIM}(sem token)${RESET}\n"     "$label" "$vd" "$va"
+        elif [ "$vd" = "$va" ];  then printf "  %-18s  %16s  %16s  ${GREEN}bate${RESET}\n"          "$label" "$vd" "$va"
+        else                          printf "  %-18s  %16s  %16s  ${YELLOW}diferenca${RESET}\n"    "$label" "$vd" "$va"
         fi
     }
 
-    compare_metric "Fila total"   "$DIAG_QUEUE"     "$API_QUEUE"
-    compare_metric "Severidade"   "$DIAG_SEV"       "$API_SEV"
-    compare_metric "Entregues"    "$DIAG_DELIVERED"  "$API_DELIVERED"
-    compare_metric "Rejeitados"   "$DIAG_REJECTED"   "$API_REJECTED"
-    compare_metric "Deferidos"    "$DIAG_DEFERRED"   "$API_DEFERRED"
+    _cmp "Fila total"   "$DIAG_QUEUE"      "$API_QUEUE"
+    _cmp "Severidade"   "$DIAG_SEV"        "$API_SEV"
+    _cmp "Entregues"    "$DIAG_DELIVERED"  "$API_DELIVERED"
+    _cmp "Rejeitados"   "$DIAG_REJECTED"   "$API_REJECTED"
+    _cmp "Deferidos"    "$DIAG_DEFERRED"   "$API_DEFERRED"
 
     sep
     echo ""
-    info "Nota: diferenças pequenas são normais se houve nova coleta entre as duas"
-    info "chamadas (~30s de defasagem). Para mínima variação, use imediatamente"
-    info "após um refresh manual no dashboard."
-
-    # Exibe resumo do diag
+    info "Nota: diferencas pequenas sao normais — ha ~30s de defasagem entre"
+    info "a coleta do background_collector e o diag rodado agora."
     echo ""
     info "Resumo completo do diag-exim.sh:"
-    echo "$DIAG_OUT" | jq '{queue_total,severity,problem,delivered,rejected,deferred,recent_sends}' 2>/dev/null || \
-        echo "$DIAG_OUT" | head -20
+    echo "$DIAG_OUT" | jq \
+        '{queue_total,severity,problem,delivered,rejected,deferred,recent_sends}' \
+        2>/dev/null || echo "$DIAG_OUT" | head -20
 }
 
-# ── Execução ───────────────────────────────────────────────────────────────────
+# ── Execução principal ─────────────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════╗${RESET}"
-echo -e "${BOLD}${CYAN}║     EXIM Monitor — Script de Teste           ║${RESET}"
-echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════╝${RESET}"
+echo -e "${BOLD}${CYAN}+----------------------------------------------+${RESET}"
+echo -e "${BOLD}${CYAN}|   EXIM Monitor — Script de Teste             |${RESET}"
+echo -e "${BOLD}${CYAN}+----------------------------------------------+${RESET}"
 echo ""
 
 check_deps
