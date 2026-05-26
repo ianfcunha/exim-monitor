@@ -2,14 +2,16 @@
  * Dashboard principal — identidade AVILI light profissional.
  * Estilo admin dashboard: header branco, fundo slate-100, cards brancos com sombra.
  */
-import { CheckCircle, Clock, Inbox, LogOut, RefreshCw, Send, Settings, XCircle } from 'lucide-react'
+import { CheckCircle, Clock, FileText, Inbox, LogOut, RefreshCw, Send, Settings, XCircle } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { refreshStatus } from '../api/client'
 import ActionPanel from '../components/ActionPanel'
 import DiagnosisPanel from '../components/DiagnosisPanel'
 import HistoryChart from '../components/HistoryChart'
 import HourlyBarChart from '../components/HourlyBarChart'
+import DeliveryRateCard from '../components/DeliveryRateCard'
 import MessagesDrawer from '../components/MessagesDrawer'
+import LogViewerDrawer from '../components/LogViewerDrawer'
 import MetricCard from '../components/MetricCard'
 import StatusBadge from '../components/StatusBadge'
 import TopTable from '../components/TopTable'
@@ -81,6 +83,7 @@ export default function Dashboard({ onLogout, onSettings }) {
   const [refreshing, setRefreshing] = useState(false)
   const [chartKey, setChartKey]     = useState(0)
   const [drawer, setDrawer]         = useState(null) // 'queue'|'delivered'|'rejected'|'deferred'|'sent'
+  const [logViewer, setLogViewer]   = useState(false)
 
   const q     = quick.data ?? {}
   const f     = full.data  ?? {}
@@ -213,6 +216,10 @@ export default function Dashboard({ onLogout, onSettings }) {
               <RefreshCw size={12} style={{ animation: refreshing ? 'spin 1s linear infinite' : undefined }} />
               <span className="hidden sm:inline">{refreshing ? 'Atualizando…' : 'Refresh'}</span>
             </HBtn>
+            <HBtn onClick={() => setLogViewer(true)} title="Abrir visualizador de log">
+              <FileText size={12} />
+              <span className="hidden sm:inline">Logs</span>
+            </HBtn>
             <HBtn onClick={onSettings} title="Configurações de alertas">
               <Settings size={12} />
               <span className="hidden sm:inline">Alertas</span>
@@ -241,12 +248,18 @@ export default function Dashboard({ onLogout, onSettings }) {
       <main style={{ maxWidth: 1280, margin: '0 auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {/* Métricas */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
           <MetricCard icon={Inbox}       label="Fila total"      value={fmt(queue.total)}      sub={queue.frozen != null ? `${queue.frozen} frozen` : undefined} loading={loading} onClick={() => setDrawer('queue')}     />
           <MetricCard icon={CheckCircle} label="Entregues"       value={fmt(log.delivered)}    sub="no log amostrado"   loading={loading} onClick={() => setDrawer('delivered')} />
           <MetricCard icon={XCircle}     label="Rejeitados"      value={fmt(log.rejected)}                              loading={loading} onClick={() => setDrawer('rejected')}  />
           <MetricCard icon={Clock}       label="Deferidos"       value={fmt(log.deferred)}                              loading={loading} onClick={() => setDrawer('deferred')}  />
           <MetricCard icon={Send}        label="Envios recentes" value={fmt(log.recent_sends)}                          loading={loading} onClick={() => setDrawer('sent')}       />
+          <DeliveryRateCard
+            delivered={log.delivered ?? 0}
+            rejected={log.rejected   ?? 0}
+            deferred={log.deferred   ?? 0}
+            loading={loading}
+          />
         </div>
 
         {/* Diagnóstico */}
@@ -297,6 +310,11 @@ export default function Dashboard({ onLogout, onSettings }) {
           cardType={drawer}
           onClose={() => setDrawer(null)}
         />
+      )}
+
+      {/* ── Log Viewer ── */}
+      {logViewer && (
+        <LogViewerDrawer onClose={() => setLogViewer(false)} />
       )}
     </div>
   )

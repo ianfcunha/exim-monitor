@@ -1,9 +1,9 @@
 /**
  * Configurações de alertas — identidade AVILI light profissional.
  */
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { fetchAlertSettings, saveAlertSettings, testEmail, testTelegram } from '../api/client'
+import { fetchAlertHistory, fetchAlertSettings, saveAlertSettings, testEmail, testTelegram } from '../api/client'
 
 const SEVERITY_OPTIONS = ['HIGH', 'CRITICAL']
 const MASK = '••••••••'
@@ -118,6 +118,120 @@ function GhostBtn({ onClick, children }) {
     >
       {children}
     </button>
+  )
+}
+
+/* ── Histórico de Alertas ── */
+const SEV_COLOR = { CRITICAL: '#DC2626', HIGH: '#D97706', MEDIUM: '#0EA5E9', LOW: '#64748B', OK: '#16A34A' }
+const CH_LABEL  = { email: '✉ E-mail', telegram: '✈ Telegram' }
+
+function AlertHistorySection() {
+  const [rows, setRows]   = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  const load = () => {
+    setLoading(true)
+    fetchAlertHistory(50)
+      .then(setRows)
+      .catch(e => setError(e?.response?.data?.detail ?? e.message))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => { load() }, [])
+
+  const fmtDate = (iso) => {
+    const d = new Date(iso)
+    return d.toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })
+  }
+
+  return (
+    <Section title="Histórico de Alertas">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <span style={{ fontSize: 11, color: '#94A3B8' }}>
+          {loading ? 'Carregando…' : `${rows.length} registro${rows.length !== 1 ? 's' : ''}`}
+        </span>
+        <button
+          onClick={load} disabled={loading}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 5,
+            padding: '4px 10px', borderRadius: 7, fontSize: 11,
+            border: '1px solid #E2E8F0', background: '#F8FAFC',
+            color: '#64748B', cursor: 'pointer',
+            opacity: loading ? 0.5 : 1,
+          }}
+        >
+          <RefreshCw size={11} style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} />
+          Atualizar
+        </button>
+      </div>
+
+      {error && (
+        <div style={{ padding: '10px 12px', borderRadius: 8, background: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B', fontSize: 12 }}>
+          {error}
+        </div>
+      )}
+
+      {!loading && !error && rows.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '32px 0', color: '#94A3B8', fontSize: 13 }}>
+          Nenhum alerta disparado ainda.
+        </div>
+      )}
+
+      {rows.length > 0 && (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #E2E8F0' }}>
+                {['Data/Hora', 'Canal', 'Severidade', 'Problema', 'Fila', 'Status'].map(h => (
+                  <th key={h} style={{ padding: '6px 8px', textAlign: 'left', fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#94A3B8', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={r.id} style={{ background: i % 2 === 0 ? '#F8FAFC' : '#fff', borderBottom: '1px solid #F1F5F9' }}>
+                  <td style={{ padding: '7px 8px', color: '#64748B', whiteSpace: 'nowrap', fontFamily: 'monospace', fontSize: 11 }}>
+                    {fmtDate(r.sent_at)}
+                  </td>
+                  <td style={{ padding: '7px 8px', color: '#0F172A' }}>
+                    {CH_LABEL[r.channel] ?? r.channel}
+                  </td>
+                  <td style={{ padding: '7px 8px' }}>
+                    <span style={{
+                      display: 'inline-block', padding: '1px 8px', borderRadius: 999, fontSize: 10, fontWeight: 700,
+                      background: `${SEV_COLOR[r.severity] ?? '#94A3B8'}18`,
+                      color: SEV_COLOR[r.severity] ?? '#94A3B8',
+                      border: `1px solid ${SEV_COLOR[r.severity] ?? '#94A3B8'}40`,
+                    }}>
+                      {r.severity}
+                    </span>
+                  </td>
+                  <td style={{ padding: '7px 8px', color: '#0F172A', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    title={r.problem}>
+                    {r.problem}
+                  </td>
+                  <td style={{ padding: '7px 8px', color: '#64748B', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
+                    {r.queue_total}
+                  </td>
+                  <td style={{ padding: '7px 8px' }}>
+                    {r.success ? (
+                      <span style={{ color: '#16A34A', fontSize: 11, fontWeight: 600 }}>✓ OK</span>
+                    ) : (
+                      <span style={{ color: '#DC2626', fontSize: 11, fontWeight: 600 }} title={r.error_msg ?? ''}>✗ Falha</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </Section>
   )
 }
 
@@ -311,6 +425,11 @@ export default function Settings({ onBack }) {
           {saveMsg && (
             <span style={{ fontSize: 12, color: saveErr ? '#991B1B' : '#0369A1', fontWeight: 500 }}>{saveMsg}</span>
           )}
+        </div>
+
+        {/* Histórico de Alertas */}
+        <div style={{ marginTop: 20 }}>
+          <AlertHistorySection />
         </div>
 
       </div>

@@ -73,7 +73,13 @@ export const fetchQueueMessages = () =>
 export const fetchLogMessages = (type, limit = 100) =>
   api.get('/messages/log', { params: { type, limit } }).then(r => r.data)
 
+export const fetchLogTail = (limit = 300) =>
+  api.get('/messages/tail', { params: { limit } }).then(r => r.data)
+
 // ── Configuracoes de alertas ──────────────────────────────────────────────
+export const fetchAlertHistory = (limit = 50) =>
+  api.get('/settings/alerts/history', { params: { limit } }).then(r => r.data)
+
 export const fetchAlertSettings = () =>
   api.get('/settings/alerts').then(r => r.data)
 

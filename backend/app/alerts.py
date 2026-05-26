@@ -24,7 +24,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional
 
-from .database import AlertSettings, SessionLocal, get_alert_settings
+from .database import AlertHistory, AlertSettings, SessionLocal, get_alert_settings
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +161,30 @@ def _send_telegram_sync(cfg: AlertSettings, severity: str, problem: str,
     logger.info("Alerta Telegram enviado para chat %s", cfg.telegram_chat_id)
 
 
+# ── Histórico de alertas ───────────────────────────────────────────────────
+
+def _record_history(channel: str, severity: str, problem: str,
+                    queue_total: int, success: bool, error_msg: Optional[str] = None) -> None:
+    """Persiste um registro no histórico de alertas (fire-and-forget seguro)."""
+    try:
+        db = SessionLocal()
+        try:
+            entry = AlertHistory(
+                channel=channel,
+                severity=severity,
+                problem=problem,
+                queue_total=queue_total,
+                success=success,
+                error_msg=error_msg,
+            )
+            db.add(entry)
+            db.commit()
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning("Não foi possível registrar histórico de alerta: %s", exc)
+
+
 # ── API publica ────────────────────────────────────────────────────────────
 
 async def check_and_alert(severity: str, problem: str, queue_total: int) -> None:
@@ -202,8 +226,10 @@ async def check_and_alert(severity: str, problem: str, queue_total: int) -> None
                         _send_email_sync, cfg, severity, problem, queue_total
                     )
                     _state["email_sent_at"] = now
+                    _record_history("email", severity, problem, queue_total, True)
                 except Exception as exc:
                     logger.error("Falha ao enviar e-mail: %s", exc)
+                    _record_history("email", severity, problem, queue_total, False, str(exc)[:500])
 
         # ── Telegram ──────────────────────────────────────────────────
         if cfg.telegram_enabled and cfg.telegram_bot_token and cfg.telegram_chat_id:
@@ -214,8 +240,10 @@ async def check_and_alert(severity: str, problem: str, queue_total: int) -> None
                         _send_telegram_sync, cfg, severity, problem, queue_total
                     )
                     _state["telegram_sent_at"] = now
+                    _record_history("telegram", severity, problem, queue_total, True)
                 except Exception as exc:
                     logger.error("Falha ao enviar Telegram: %s", exc)
+                    _record_history("telegram", severity, problem, queue_total, False, str(exc)[:500])
 
     finally:
         db.close()

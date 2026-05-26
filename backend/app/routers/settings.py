@@ -11,9 +11,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import Optional
 
+from fastapi import Query
+
 from ..alerts import send_test_email, send_test_telegram
 from ..auth import get_current_user
-from ..database import AlertSettings, get_alert_settings, get_db
+from ..database import AlertHistory, AlertSettings, get_alert_settings, get_db
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -125,6 +127,33 @@ async def test_email(
     except Exception as exc:
         raise HTTPException(502, f"Falha ao enviar e-mail: {exc}")
     return {"ok": True, "message": f"E-mail de teste enviado para {cfg.email_to}"}
+
+
+@router.get("/alerts/history", summary="Histórico de alertas disparados")
+def get_alert_history(
+    limit: int = Query(50, ge=1, le=200, description="Máximo de registros"),
+    db: Session = Depends(get_db),
+    _: str = Depends(get_current_user),
+):
+    rows = (
+        db.query(AlertHistory)
+        .order_by(AlertHistory.sent_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id":          r.id,
+            "sent_at":     r.sent_at.isoformat(),
+            "channel":     r.channel,
+            "severity":    r.severity,
+            "problem":     r.problem,
+            "queue_total": r.queue_total,
+            "success":     r.success,
+            "error_msg":   r.error_msg,
+        }
+        for r in rows
+    ]
 
 
 @router.post("/test/telegram", summary="Envia mensagem de teste no Telegram")

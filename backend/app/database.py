@@ -87,6 +87,26 @@ class AlertSettings(Base):
     cooldown_minutes    = Column(Integer,    default=30,      nullable=False)
 
 
+class AlertHistory(Base):
+    """
+    Histórico de alertas disparados — append-only.
+    Retenção: 90 dias.
+    """
+    __tablename__ = "alert_history"
+    __table_args__ = (
+        Index("ix_alert_history_ts", "sent_at"),
+    )
+
+    id         = Column(Integer, primary_key=True)
+    sent_at    = Column(DateTime, default=datetime.utcnow, nullable=False)
+    channel    = Column(String(20),  nullable=False)   # 'email' | 'telegram'
+    severity   = Column(String(20),  nullable=False)
+    problem    = Column(String(200), nullable=False)
+    queue_total= Column(Integer,     nullable=False, default=0)
+    success    = Column(Boolean,     nullable=False, default=True)
+    error_msg  = Column(String(500), nullable=True)
+
+
 def get_alert_settings(db) -> AlertSettings:
     """Retorna o registro singleton, criando com defaults se nao existir."""
     cfg = db.get(AlertSettings, 1)

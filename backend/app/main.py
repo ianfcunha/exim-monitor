@@ -31,7 +31,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Versão atual do schema — atualizar junto com cada nova migration
-_SCHEMA_VERSION = "001"
+_SCHEMA_VERSION = "002"
 
 _DDL_ALEMBIC_VERSION = """
     CREATE TABLE IF NOT EXISTS alembic_version (
@@ -94,12 +94,31 @@ def run_migrations() -> None:
             logger.info("Banco de dados ja esta atualizado (schema %s)", _SCHEMA_VERSION)
             return
 
-        # ── Migrations incrementais (adicionar aqui ao criar versoes futuras) ──
-        # Exemplo para versao 002:
-        # if "001" in current and "002" not in current:
-        #     conn.execute(text("ALTER TABLE snapshots ADD COLUMN exemplo TEXT"))
-        #     conn.execute(text("DELETE FROM alembic_version"))
-        #     conn.execute(text("INSERT INTO alembic_version VALUES ('002')"))
+        # ── Migrations incrementais ────────────────────────────────────────
+        if "001" in current and "002" not in current:
+            logger.info("Aplicando migration 001 → 002 (alert_history)...")
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS alert_history (
+                    id          SERIAL PRIMARY KEY,
+                    sent_at     TIMESTAMP NOT NULL DEFAULT NOW(),
+                    channel     VARCHAR(20)  NOT NULL,
+                    severity    VARCHAR(20)  NOT NULL,
+                    problem     VARCHAR(200) NOT NULL,
+                    queue_total INTEGER      NOT NULL DEFAULT 0,
+                    success     BOOLEAN      NOT NULL DEFAULT TRUE,
+                    error_msg   VARCHAR(500)
+                )
+            """))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_alert_history_ts ON alert_history (sent_at)"
+            ))
+            conn.execute(text("DELETE FROM alembic_version"))
+            conn.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
+                {"v": "002"},
+            )
+            logger.info("Migration 002 aplicada com sucesso")
+
         logger.info("Banco de dados pronto (schema %s)", _SCHEMA_VERSION)
 
 
