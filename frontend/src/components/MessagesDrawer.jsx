@@ -2,7 +2,7 @@
  * MessagesDrawer — painel lateral deslizante com detalhes de mensagens.
  * Abre ao clicar em qualquer MetricCard do dashboard.
  */
-import { AlertCircle, Clock, Inbox, Mail, RefreshCw, X } from 'lucide-react'
+import { AlertCircle, Clock, Inbox, Mail, MailOpen, RefreshCw, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchLogMessages, fetchQueueMessages } from '../api/client'
 
@@ -59,8 +59,8 @@ const CONFIG = {
     ],
   },
   sent: {
-    title: 'Envios Recentes',
-    icon: Mail,
+    title: 'Recebidos pelo EXIM',
+    icon: MailOpen,
     endpoint: 'log',
     logType: 'sent',
     columns: [
