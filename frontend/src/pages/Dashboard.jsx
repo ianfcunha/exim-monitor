@@ -159,11 +159,12 @@ export default function Dashboard({ onLogout, onSettings }) {
                 <LogoMark size={20} />
               </div>
               <div className="hidden sm:block" style={{ lineHeight: 1.15 }}>
-                <div style={{ fontSize: 14, fontWeight: 800, letterSpacing: '-0.01em', color: '#0F172A' }}>
-                  EXIM Monitor
+                <div style={{ fontSize: 14, fontWeight: 800, letterSpacing: '-0.01em' }}>
+                  <span style={{ color: '#0F172A' }}>Mail </span>
+                  <span style={{ color: '#0EA5E9' }}>IQ</span>
                 </div>
-                <div style={{ fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#0EA5E9', fontWeight: 600 }}>
-                  Um produto de Avili
+                <div style={{ fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 600, color: '#94A3B8' }}>
+                  by <span style={{ color: '#0EA5E9' }}>AVILI</span>
                 </div>
               </div>
             </div>

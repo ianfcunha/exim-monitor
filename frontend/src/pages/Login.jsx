@@ -65,11 +65,12 @@ export default function Login({ onLogin }) {
           }}>
             <LogoMark size={34} />
           </div>
-          <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0F172A', margin: 0, letterSpacing: '-0.01em' }}>
-            EXIM Monitor
+          <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0, letterSpacing: '-0.01em' }}>
+            <span style={{ color: '#0F172A' }}>Mail </span>
+            <span style={{ color: '#0EA5E9' }}>IQ</span>
           </h1>
-          <p style={{ fontSize: 10, letterSpacing: '0.24em', textTransform: 'uppercase', color: '#0EA5E9', marginTop: 5, fontWeight: 600 }}>
-            Um produto de Avili
+          <p style={{ fontSize: 10, letterSpacing: '0.24em', textTransform: 'uppercase', color: '#94A3B8', marginTop: 5, fontWeight: 600 }}>
+            by <span style={{ color: '#0EA5E9' }}>AVILI</span>
           </p>
         </div>
 
