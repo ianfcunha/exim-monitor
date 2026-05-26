@@ -6,20 +6,24 @@ export default function DeliveryRateCard({ delivered = 0, rejected = 0, deferred
   const total = delivered + rejected + deferred
   const rate  = total > 0 ? Math.round((delivered / total) * 100) : null
 
-  const color = rate == null ? '#94A3B8'
-    : rate >= 95 ? '#16A34A'
-    : rate >= 80 ? '#D97706'
-    : '#DC2626'
+  // Sem dados: aparência neutra igual aos MetricCards
+  const color       = rate == null ? '#94A3B8' : rate >= 95 ? '#16A34A' : rate >= 80 ? '#D97706' : '#DC2626'
+  const bgColor     = rate == null ? '#fff'    : rate >= 95 ? '#F0FDF4' : rate >= 80 ? '#FFFBEB' : '#FEF2F2'
+  const borderColor = rate == null ? '#E2E8F0' : rate >= 95 ? '#BBF7D0' : rate >= 80 ? '#FDE68A' : '#FECACA'
 
-  const bgColor = rate == null ? '#F1F5F9'
-    : rate >= 95 ? '#F0FDF4'
-    : rate >= 80 ? '#FFFBEB'
-    : '#FEF2F2'
-
-  const borderColor = rate == null ? '#E2E8F0'
-    : rate >= 95 ? '#BBF7D0'
-    : rate >= 80 ? '#FDE68A'
-    : '#FECACA'
+  // Placeholder de ícone (espelho do MetricCard) quando sem dados
+  const NoDataIcon = () => (
+    <div style={{
+      width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+      background: 'rgba(148,163,184,0.10)',
+      border: '1px solid rgba(148,163,184,0.18)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+      </svg>
+    </div>
+  )
 
   return (
     <div className="card flex flex-col gap-3 min-w-0" style={{ background: bgColor, borderColor }}>
@@ -51,19 +55,23 @@ export default function DeliveryRateCard({ delivered = 0, rejected = 0, deferred
           )}
         </div>
 
-        {/* Gauge circular simples */}
-        {!loading && rate != null && (
-          <svg width={40} height={40} viewBox="0 0 40 40" style={{ flexShrink: 0 }}>
-            <circle cx="20" cy="20" r="16" fill="none" stroke={borderColor} strokeWidth="4" />
-            <circle
-              cx="20" cy="20" r="16" fill="none"
-              stroke={color} strokeWidth="4"
-              strokeDasharray={`${(rate / 100) * 100.53} 100.53`}
-              strokeLinecap="round"
-              transform="rotate(-90 20 20)"
-              style={{ transition: 'stroke-dasharray 0.6s ease' }}
-            />
-          </svg>
+        {/* Gauge circular quando há dados, ícone neutro quando não */}
+        {!loading && (
+          rate != null ? (
+            <svg width={40} height={40} viewBox="0 0 40 40" style={{ flexShrink: 0 }}>
+              <circle cx="20" cy="20" r="16" fill="none" stroke={borderColor} strokeWidth="4" />
+              <circle
+                cx="20" cy="20" r="16" fill="none"
+                stroke={color} strokeWidth="4"
+                strokeDasharray={`${(rate / 100) * 100.53} 100.53`}
+                strokeLinecap="round"
+                transform="rotate(-90 20 20)"
+                style={{ transition: 'stroke-dasharray 0.6s ease' }}
+              />
+            </svg>
+          ) : (
+            <NoDataIcon />
+          )
         )}
       </div>
 
