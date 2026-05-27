@@ -125,8 +125,8 @@ for _eb in exim4 exim; do
     command -v "$_eb" &>/dev/null && { EXIM_BIN="$_eb"; break; }
 done
 # Se não somos root, usar sudo para os comandos de fila do exim
-# (exige regra em /etc/sudoers.d/ian-exim no servidor)
-if [ "$(id -u)" -ne 0 ] && sudo -n true 2>/dev/null; then
+# (exige regra em /etc/sudoers.d/zzz-ian-exim no servidor)
+if [ "$(id -u)" -ne 0 ]; then
     SUDO_EXIM="sudo"
 else
     SUDO_EXIM=""
