@@ -1,35 +1,73 @@
 /**
  * Painel de ações — identidade AVILI light profissional.
+ *
+ * Ações simples (sem parâmetro): botão → confirmação → executa
+ * Ações parametrizadas (block-ip, block-sender, clean-sender):
+ *   botão → input inline → confirmação → executa
  */
-import { AlertTriangle, CornerDownLeft, RotateCcw, Snowflake, Trash2, X } from 'lucide-react'
-import { useState } from 'react'
+import { AlertTriangle, Ban, CornerDownLeft, RotateCcw, Search, Shield, Snowflake, Trash2, X } from 'lucide-react'
+import { useRef, useState } from 'react'
 import { runAction } from '../api/client'
 import { useToast } from '../contexts/ToastContext'
 
 const ACTIONS = [
-  { id: 'retry-queue',   label: 'Reprocessar fila', Icon: RotateCcw,      color: 'sky'   , confirm: false },
-  { id: 'clean-frozen',  label: 'Remover frozen',    Icon: Snowflake,      color: 'amber' , confirm: true  },
-  { id: 'clean-bounces', label: 'Limpar bounces',    Icon: CornerDownLeft, color: 'orange', confirm: true  },
-  { id: 'clean-full',    label: 'Limpar toda a fila',Icon: Trash2,         color: 'red'   , confirm: true  },
+  { id: 'retry-queue',   label: 'Reprocessar fila',   Icon: RotateCcw,      color: 'sky',    confirm: false, param: null },
+  { id: 'clean-frozen',  label: 'Remover frozen',      Icon: Snowflake,      color: 'amber',  confirm: true,  param: null },
+  { id: 'clean-bounces', label: 'Limpar bounces',      Icon: CornerDownLeft, color: 'orange', confirm: true,  param: null },
+  { id: 'clean-sender',  label: 'Limpar remetente',    Icon: Search,         color: 'purple', confirm: true,  param: 'email', placeholder: 'remetente@dominio.com' },
+  { id: 'block-ip',      label: 'Bloquear IP',         Icon: Shield,         color: 'rose',   confirm: true,  param: 'ip',    placeholder: '192.168.0.1' },
+  { id: 'block-sender',  label: 'Bloquear remetente',  Icon: Ban,            color: 'red',    confirm: true,  param: 'email', placeholder: 'spam@dominio.com' },
+  { id: 'clean-full',    label: 'Limpar toda a fila',  Icon: Trash2,         color: 'red',    confirm: true,  param: null },
 ]
 
 const COLOR_MAP = {
   sky:    { bg: '#F0F9FF', border: '#BAE6FD', text: '#0369A1', hoverBg: '#E0F2FE' },
   amber:  { bg: '#FFFBEB', border: '#FDE68A', text: '#92400E', hoverBg: '#FEF3C7' },
   orange: { bg: '#FFF7ED', border: '#FED7AA', text: '#9A3412', hoverBg: '#FFEDD5' },
+  purple: { bg: '#FAF5FF', border: '#E9D5FF', text: '#6B21A8', hoverBg: '#F3E8FF' },
+  rose:   { bg: '#FFF1F2', border: '#FECDD3', text: '#9F1239', hoverBg: '#FFE4E6' },
   red:    { bg: '#FEF2F2', border: '#FECACA', text: '#991B1B', hoverBg: '#FEE2E2' },
 }
 
 export default function ActionPanel({ onActionComplete, recommendedActions = [] }) {
-  const toast                     = useToast()
-  const [pending, setPending]     = useState(null)
-  const [confirmId, setConfirmId] = useState(null)
+  const toast                       = useToast()
+  const [pending, setPending]       = useState(null)
+  const [confirmId, setConfirmId]   = useState(null)
+  const [paramValue, setParamValue] = useState('')
+  const [paramError, setParamError] = useState('')
+  const inputRef                    = useRef(null)
+
+  const hasRecommended = recommendedActions.length > 0
+
+  const requestAction = (action) => {
+    setParamValue('')
+    setParamError('')
+    setConfirmId(action.id)
+    if (action.param) setTimeout(() => inputRef.current?.focus(), 50)
+  }
+
+  const validateParam = (action, value) => {
+    if (!action.param) return true
+    const v = value.trim()
+    if (!v) { setParamError('Campo obrigatório'); return false }
+    if (action.param === 'ip') {
+      const ipv4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(v)
+      const ipv6 = /^[0-9a-fA-F:]+$/.test(v) && v.includes(':')
+      if (!ipv4 && !ipv6) { setParamError('IP inválido (ex: 192.168.0.1)'); return false }
+    }
+    if (action.param === 'email') {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) { setParamError('Endereço inválido'); return false }
+    }
+    return true
+  }
 
   const execute = async (action) => {
+    const param = action.param ? paramValue.trim() : null
+    if (!validateParam(action, paramValue)) return
     setConfirmId(null)
     setPending(action.id)
     try {
-      const res = await runAction(action.id)
+      const res = await runAction(action.id, param)
       toast({ type: 'ok', msg: res.message || `${action.label} concluído.` })
       onActionComplete?.()
     } catch (err) {
@@ -39,8 +77,9 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
     }
   }
 
+  const cancel = () => { setConfirmId(null); setParamValue(''); setParamError('') }
+
   const confirmAction = ACTIONS.find((a) => a.id === confirmId)
-  const hasRecommended = recommendedActions.length > 0
 
   return (
     <div className="card space-y-3">
@@ -61,19 +100,17 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
         {ACTIONS.map((action) => {
           const { Icon } = action
           const c = COLOR_MAP[action.color]
-          const isRunning   = pending === action.id
+          const isRunning     = pending === action.id
           const isRecommended = recommendedActions.includes(action.id)
           return (
             <div key={action.id} style={{ position: 'relative' }}>
               <button
                 disabled={!!pending}
-                onClick={() => action.confirm ? setConfirmId(action.id) : execute(action)}
+                onClick={() => requestAction(action)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6,
                   borderRadius: 8,
-                  border: isRecommended
-                    ? '2px solid #0EA5E9'
-                    : `1px solid ${c.border}`,
+                  border: isRecommended ? '2px solid #0EA5E9' : `1px solid ${c.border}`,
                   padding: isRecommended ? '5px 11px' : '6px 12px',
                   fontSize: 11, fontWeight: isRecommended ? 600 : 500,
                   color: isRecommended ? '#0369A1' : c.text,
@@ -89,14 +126,12 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
                 <Icon size={12} style={{ animation: isRunning ? 'spin 1s linear infinite' : undefined }} />
                 {isRunning ? 'Executando…' : action.label}
               </button>
-              {/* Badge "Sugerido" */}
               {isRecommended && !isRunning && (
                 <span style={{
                   position: 'absolute', top: -7, right: -4,
                   fontSize: 8, fontWeight: 700, letterSpacing: '0.05em',
                   padding: '1px 5px', borderRadius: 999,
-                  background: '#0EA5E9', color: '#fff',
-                  pointerEvents: 'none',
+                  background: '#0EA5E9', color: '#fff', pointerEvents: 'none',
                 }}>
                   Sugerido
                 </span>
@@ -117,6 +152,33 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
               Confirma: <strong>{confirmAction.label}</strong>?
             </span>
           </div>
+
+          {confirmAction.param && (
+            <div style={{ marginBottom: 10 }}>
+              <input
+                ref={inputRef}
+                type="text"
+                value={paramValue}
+                placeholder={confirmAction.placeholder || ''}
+                onChange={e => { setParamValue(e.target.value); setParamError('') }}
+                onKeyDown={e => e.key === 'Enter' && execute(confirmAction)}
+                style={{
+                  width: '100%', boxSizing: 'border-box',
+                  borderRadius: 7,
+                  border: `1px solid ${paramError ? '#F87171' : '#FECACA'}`,
+                  padding: '6px 10px', fontSize: 12, color: '#1E293B',
+                  background: '#FFF', outline: 'none',
+                  boxShadow: paramError ? '0 0 0 2px rgba(248,113,113,0.25)' : 'none',
+                }}
+              />
+              {paramError && (
+                <span style={{ fontSize: 10, color: '#DC2626', marginTop: 3, display: 'block' }}>
+                  {paramError}
+                </span>
+              )}
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: 8 }}>
             <button
               onClick={() => execute(confirmAction)}
@@ -131,7 +193,7 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
               Confirmar
             </button>
             <button
-              onClick={() => setConfirmId(null)}
+              onClick={cancel}
               style={{
                 display: 'flex', alignItems: 'center', gap: 5,
                 borderRadius: 7, border: '1px solid #E2E8F0',

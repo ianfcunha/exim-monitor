@@ -73,20 +73,41 @@ def _run(args: str) -> Dict[str, Any]:
 
 # ── API pública ────────────────────────────────────────────────────────
 
-def run_quick() -> Dict[str, Any]:
-    """Coleta leve (~1s) — usada pelo heartbeat do dashboard."""
-    return _run("--quick")
+def run_quick(profile: str = "light") -> Dict[str, Any]:
+    """Coleta leve (~1s) — usada pelo heartbeat do dashboard.
+
+    profile: perfil de coleta passado ao script via --profile=
+             (suportado a partir de diag-exim.sh v5.1+; ignorado em versões anteriores)
+    """
+    return _run(f"--quick --profile={profile}")
 
 
-def run_full() -> Dict[str, Any]:
-    """Coleta completa — usada a cada 5 min e no botão de refresh."""
-    return _run("--json")
+def run_full(profile: str = "full") -> Dict[str, Any]:
+    """Coleta completa — usada a cada 5 min e no botão de refresh.
+
+    profile: perfil de coleta passado ao script via --profile=
+    """
+    return _run(f"--json --profile={profile}")
 
 
-def run_action(action: str, param: Optional[str] = None) -> Dict[str, Any]:
-    """Executa uma ação isolada e retorna o JSON de resultado."""
+def run_action(
+    action: str,
+    param: Optional[str] = None,
+    actor: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Executa uma ação isolada e retorna o JSON de resultado.
+
+    actor: usuário autenticado que disparou a ação — passado como --actor=
+           para que o script registre no log de auditoria local (T3-3).
+    """
     action_arg = f"{action}:{param}" if param else action
-    return _run(f"--action={action_arg}")
+    args = f"--action={action_arg}"
+    if actor:
+        # Sanitiza: mantém apenas caracteres seguros para o shell
+        safe_actor = "".join(c for c in actor if c.isalnum() or c in "-_@.")
+        if safe_actor:
+            args += f" --actor={safe_actor}"
+    return _run(args)
 
 
 # ── Mensagens: fila e log ──────────────────────────────────────────────
@@ -206,6 +227,42 @@ def _parse_log_line(line: str, msg_type: str) -> Optional[Dict[str, str]]:
         "recipient": recipient,
         "detail": detail,
     }
+
+
+_TYPE_MARKERS = {
+    " => ": "delivered",
+    " ** ": "rejected",
+    " == ": "deferred",
+    " <= ": "sent",
+}
+
+
+def get_log_tail(limit: int = 300) -> List[Dict[str, str]]:
+    """
+    Retorna as últimas N linhas do mainlog com tipo detectado automaticamente.
+    Usado pelo Log Viewer do dashboard.
+    """
+    candidates = " ".join(f'"{p}"' for p in _LOG_CANDIDATES)
+    cmd = (
+        f"for f in {candidates}; do "
+        f'  [ -f "$f" ] && tail -{limit} "$f" 2>/dev/null && break; '
+        f"done"
+    )
+    raw = _run_raw(cmd)
+
+    entries = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        msg_type = "other"
+        for marker, t in _TYPE_MARKERS.items():
+            if marker in line:
+                msg_type = t
+                break
+        entries.append({"raw": line, "type": msg_type})
+
+    return list(reversed(entries))
 
 
 def get_queue_items() -> List[Dict[str, Any]]:

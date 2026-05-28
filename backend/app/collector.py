@@ -67,7 +67,7 @@ def _cache_valid(key: str, max_age: int) -> bool:
 def get_quick(force: bool = False) -> Dict[str, Any]:
     if not force and _cache_valid("quick", settings.quick_interval):
         return _cache["quick"]
-    data = run_quick()
+    data = run_quick(profile="light")   # T3-4: perfil leve para heartbeat
     _cache["quick"] = data
     _cache["quick_ts"] = datetime.utcnow()
     _save_snapshot(data, "quick")
@@ -77,7 +77,7 @@ def get_quick(force: bool = False) -> Dict[str, Any]:
 def get_full(force: bool = False) -> Dict[str, Any]:
     if not force and _cache_valid("full", settings.full_interval):
         return _cache["full"]
-    data = run_full()
+    data = run_full(profile="full")     # T3-4: perfil completo para relatório
     _cache["full"] = data
     _cache["full_ts"] = datetime.utcnow()
     _save_snapshot(data, "full")

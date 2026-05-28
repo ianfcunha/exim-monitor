@@ -10,9 +10,11 @@ Ações disponíveis:
   clean-sender   →  remove msgs de um remetente  (param: endereço)
   clean-auth     →  remove msgs de um usuário    (param: usuário)
   block-ip       →  bloqueia IP no firewall      (param: IP)
+  block-sender   →  bloqueia sender no EXIM      (param: endereço)
   retry-queue    →  força reprocessamento (exim -qff)
 
 Body JSON: { "param": "valor" }  (opcional conforme a ação)
+O actor (usuário autenticado) é passado ao script via --actor= para auditoria.
 """
 from typing import Optional
 
@@ -32,10 +34,16 @@ ALLOWED_ACTIONS = frozenset({
     "clean-sender",
     "clean-auth",
     "block-ip",
+    "block-sender",
     "retry-queue",
 })
 
-ACTIONS_REQUIRING_PARAM = frozenset({"clean-sender", "clean-auth", "block-ip"})
+ACTIONS_REQUIRING_PARAM = frozenset({
+    "clean-sender",
+    "clean-auth",
+    "block-ip",
+    "block-sender",
+})
 
 
 class ActionRequest(BaseModel):
@@ -67,7 +75,8 @@ def execute_action(
         )
 
     try:
-        result = run_action(action, body.param)
+        # current_user é passado como actor para auditoria no script (T3-3)
+        result = run_action(action, body.param, actor=current_user)
     except SSHError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
