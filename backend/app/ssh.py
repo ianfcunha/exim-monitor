@@ -183,9 +183,9 @@ _LOG_GREP: Dict[str, str] = {
 
 def _parse_log_line(line: str, msg_type: str) -> Optional[Dict[str, str]]:
     """Parse de uma linha do mainlog do EXIM."""
-    # 2026-05-26 10:15:23 [pid] msg-id flag address ...
+    # 2026-05-26 10:15:23[.mmm] [pid] msg-id flag address ...
     m = re.match(
-        r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})'
+        r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?:\.\d+)?'
         r'(?:\s+\[\d+\])?'
         r'\s+([A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+)'
         r'\s+(\S+)'       # flag (=>, **, ==, <=)
