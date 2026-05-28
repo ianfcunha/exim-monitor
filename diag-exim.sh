@@ -6,6 +6,8 @@
 #        --auto          executa sem interação (modo cron/alerta)
 #        --json          saída em JSON para integração externa
 #        --clean-spam    limpa fila automaticamente se SPAM detectado
+#        --check         verifica pré-requisitos do servidor:
+#                          JSON {ok, checks:[exim_binary,exiqgrep,disk_space,mainlog]}
 #        --quick         modo leve para dashboard (heartbeat ~30s):
 #                          skip de exim -bp e exiqgrep; lê log com
 #                          suporte a rotation (mainlog.1/.gz);
@@ -18,6 +20,18 @@
 #                          clean-sender:<addr> | clean-auth:<user>
 #                          block-ip:<ip> | retry-queue
 # ============================================================
+# Changelog v5.1:
+#   - Novo: GLOBAL_TIMEOUT=120 — controla todos os timeouts de coleta (T2-1);
+#          substitui os "timeout 120" hardcoded; watchdog em collect() define
+#          COLLECT_TIMED_OUT=1 se a coleta total exceder o limite
+#   - Novo: campo "error" no JSON — exim -bpc falhando gera mensagem estruturada
+#          em vez de campo vazio; backend diferencia dados vs falha (T2-2)
+#   - Novo: modo --check — retorna JSON {"ok":bool,"checks":[...]} com
+#          EXIM_BIN, exiqgrep, disco, mainlog; usado no cadastro SaaS (T2-3)
+#   - Novo: campo "script_version" em todos os JSONs — backend valida
+#          compatibilidade de schema antes de processar (T2-4)
+#   - Novo: campo "mainlog_size_mb" no JSON — tamanho do mainlog via du;
+#          integra com alertas de crescimento anormal (T2-5)
 # Changelog v5.0:
 #   - Fix: compatibilidade exim4 vs exim — detecta automaticamente o
 #          binário correto (Debian/Ubuntu usam exim4); EXIM_BIN global
@@ -93,12 +107,13 @@
 #          (evita pegar local-parts com ponto, ex: case.file@domain → domain)
 # ============================================================
 
-VERSION="5.0"
+VERSION="5.1"
 LOG_PATH="/var/log/exim4/mainlog"
 LOG_LINES=10000
 QUEUE_SAMPLE_THRESHOLD=10000  # acima disso usa amostra da fila
 QUEUE_LINES=5000
 HOURS_WINDOW=6                # janela padrão para análise por hora
+GLOBAL_TIMEOUT=120            # timeout total de coleta em segundos (T2-1)
 
 # ── Thresholds de classificação — configuráveis via variável de ambiente ──
 # Exemplo: EXIM_TH_AUTH_ABUSE=100 bash diag-exim.sh --quick
@@ -124,16 +139,9 @@ EXIM_BIN=""
 for _eb in exim4 exim; do
     command -v "$_eb" &>/dev/null && { EXIM_BIN="$_eb"; break; }
 done
-# Se não somos root, usar sudo para os comandos de fila do exim
-# (exige regra em /etc/sudoers.d/zzz-ian-exim no servidor)
-if [ "$(id -u)" -ne 0 ]; then
-    SUDO_EXIM="sudo"
-else
-    SUDO_EXIM=""
-fi
 
 
-AUTO_MODE=0; JSON_MODE=0; CLEAN_SPAM_AUTO=0; QUICK_MODE=0
+AUTO_MODE=0; JSON_MODE=0; CLEAN_SPAM_AUTO=0; QUICK_MODE=0; CHECK_MODE=0
 ACTION_CMD=""; ACTION_PARAM=""
 for arg in "$@"; do
     case "$arg" in
@@ -142,6 +150,7 @@ for arg in "$@"; do
         --clean-spam)  CLEAN_SPAM_AUTO=1 ;;
         --hours=*)     HOURS_WINDOW="${arg#--hours=}" ;;
         --quick)       QUICK_MODE=1; JSON_MODE=1 ;;
+        --check)       CHECK_MODE=1; JSON_MODE=1 ;;
         --action=*)
             _actraw="${arg#--action=}"
             ACTION_CMD="${_actraw%%:*}"
@@ -297,7 +306,16 @@ _spinner() {
 
 collect() {
     # Contagem rápida primeiro (exim -bpc é instantâneo)
-    QUEUE=$($SUDO_EXIM "$EXIM_BIN" -bpc 2>/dev/null || echo 0)
+    COLLECT_ERROR=""
+    COLLECT_TIMED_OUT=0
+    local _bpc_out
+    _bpc_out=$("$EXIM_BIN" -bpc 2>/dev/null)
+    if [ $? -ne 0 ] || [ -z "$_bpc_out" ]; then
+        COLLECT_ERROR="exim -bpc falhou — verifique se o Exim esta em execucao"
+        QUEUE=0
+    else
+        QUEUE="$_bpc_out"
+    fi
 
     # ── Modo quick: coleta mínima para heartbeat de dashboard ───────
     # Pula exim -bp (lento) e exiqgrep; lê QUICK_LOG_LINES de log.
@@ -307,15 +325,25 @@ collect() {
     QUICK_LOG_LINES=$(( HOURS_WINDOW * 500 ))
     [ "$QUICK_LOG_LINES" -lt 1000 ] && QUICK_LOG_LINES=1000
     if [ "$QUICK_MODE" -eq 1 ]; then
+        # Watchdog global (T2-1)
+        local _WDOG_FILE; _WDOG_FILE=$(mktemp /tmp/eximmon_wdog.XXXXXX)
+        ( sleep "$GLOBAL_TIMEOUT" && echo "1" > "$_WDOG_FILE" ) &
+        local _WDOG_PID=$!
         _FOUND_LOG=""
         for candidate in "$LOG_PATH" /var/log/exim4/mainlog /var/log/exim/mainlog /var/log/mail.log; do
             [ -f "$candidate" ] && { _FOUND_LOG="$candidate"; LOG_PATH="$candidate"; break; }
         done
+        # T2-5: tamanho do mainlog
+        MAINLOG_SIZE_MB=0
+        if [ -n "$_FOUND_LOG" ]; then
+            local _mls; _mls=$(du -sm "$_FOUND_LOG" 2>/dev/null | awk '{print $1}')
+            MAINLOG_SIZE_MB=${_mls:-0}
+        fi
         _TMP_LOG=$(mktemp /tmp/eximmon_log.XXXXXX)
         [ -n "$_FOUND_LOG" ] && _read_log_lines "$_FOUND_LOG" "$QUICK_LOG_LINES" > "$_TMP_LOG"
         QUEUE_RAW=""; OLDEST_IN_QUEUE=""
         # Frozen count no quick — exiqgrep -z com timeout curto (10s)
-        FROZEN_COUNT=$(timeout 10 $SUDO_EXIM exiqgrep -z -i 2>/dev/null | wc -l | tr -d '[:space:]')
+        FROZEN_COUNT=$(timeout 10 exiqgrep -z -i 2>/dev/null | wc -l | tr -d '[:space:]')
         [ -z "$FROZEN_COUNT" ] && FROZEN_COUNT=0
         QUEUE_SAMPLED=0
         LOG_SAMPLE=$(cat "$_TMP_LOG" 2>/dev/null)
@@ -323,10 +351,17 @@ collect() {
         EXIM_PROCS=$(pgrep -c "$EXIM_BIN" 2>/dev/null || ps aux | grep -c "[e]xim")
         EXIM_PID=$(cat /var/run/exim4/exim.pid 2>/dev/null || pgrep -n "$EXIM_BIN" 2>/dev/null)
         [ -n "$EXIM_PID" ] && EXIM_UPTIME=$(ps -p "$EXIM_PID" -o etime= 2>/dev/null | xargs) || EXIM_UPTIME="N/A"
+        [ -s "$_WDOG_FILE" ] && COLLECT_TIMED_OUT=1
+        kill "$_WDOG_PID" 2>/dev/null; wait "$_WDOG_PID" 2>/dev/null
+        rm -f "$_WDOG_FILE"
         return
     fi
 
     # ── Modo normal: coleta completa ────────────────────────────────
+    # Watchdog global (T2-1)
+    local _WDOG_FILE; _WDOG_FILE=$(mktemp /tmp/eximmon_wdog.XXXXXX)
+    ( sleep "$GLOBAL_TIMEOUT" && echo "1" > "$_WDOG_FILE" ) &
+    local _WDOG_PID=$!
     # Decide limite de leitura da fila baseado no tamanho
     QUEUE_SAMPLED=0
     if [ "$QUEUE" -gt "$QUEUE_SAMPLE_THRESHOLD" ]; then
@@ -343,6 +378,13 @@ collect() {
         [ -f "$candidate" ] && { _FOUND_LOG="$candidate"; LOG_PATH="$candidate"; break; }
     done
 
+    # T2-5: tamanho do mainlog
+    MAINLOG_SIZE_MB=0
+    if [ -n "$_FOUND_LOG" ]; then
+        local _mls; _mls=$(du -sm "$_FOUND_LOG" 2>/dev/null | awk '{print $1}')
+        MAINLOG_SIZE_MB=${_mls:-0}
+    fi
+
     # Arquivos temporários
     _TMP_QUEUE=$(mktemp /tmp/eximmon_queue.XXXXXX)
     _TMP_LOG=$(mktemp   /tmp/eximmon_log.XXXXXX)
@@ -354,10 +396,10 @@ collect() {
         if [ "$QUEUE_SAMPLED" -eq 1 ]; then
             # Amostra: primeiras QUEUE_LIMIT linhas (msgs antigas) +
             #          últimas QUEUE_LIMIT linhas (msgs recentes)
-            { timeout 120 $SUDO_EXIM "$EXIM_BIN" -bp 2>/dev/null | head -"$QUEUE_LIMIT";
-              timeout 120 $SUDO_EXIM "$EXIM_BIN" -bp 2>/dev/null | tail -"$QUEUE_LIMIT"; } > "$_TMP_QUEUE"
+            { timeout "$GLOBAL_TIMEOUT" "$EXIM_BIN" -bp 2>/dev/null | head -"$QUEUE_LIMIT";
+              timeout "$GLOBAL_TIMEOUT" "$EXIM_BIN" -bp 2>/dev/null | tail -"$QUEUE_LIMIT"; } > "$_TMP_QUEUE"
         else
-            timeout 120 $SUDO_EXIM "$EXIM_BIN" -bp 2>/dev/null | head -"$QUEUE_LIMIT" > "$_TMP_QUEUE"
+            timeout "$GLOBAL_TIMEOUT" "$EXIM_BIN" -bp 2>/dev/null | head -"$QUEUE_LIMIT" > "$_TMP_QUEUE"
         fi
     } &
     _PID_QUEUE=$!
@@ -370,7 +412,7 @@ collect() {
 
     # Job 3: frozen (exiqgrep pode ser lento em filas grandes)
     {
-        $SUDO_EXIM exiqgrep -z -i 2>/dev/null | wc -l > "$_TMP_FROZEN"
+        exiqgrep -z -i 2>/dev/null | wc -l > "$_TMP_FROZEN"
     } &
     _PID_FROZEN=$!
 
@@ -404,6 +446,9 @@ collect() {
     EXIM_PROCS=$(pgrep -c "$EXIM_BIN" 2>/dev/null || ps aux | grep -c "[e]xim")
     EXIM_PID=$(cat /var/run/exim4/exim.pid 2>/dev/null || pgrep -n "$EXIM_BIN" 2>/dev/null)
     [ -n "$EXIM_PID" ] && EXIM_UPTIME=$(ps -p "$EXIM_PID" -o etime= 2>/dev/null | xargs) || EXIM_UPTIME="N/A"
+    [ -s "$_WDOG_FILE" ] && COLLECT_TIMED_OUT=1
+    kill "$_WDOG_PID" 2>/dev/null; wait "$_WDOG_PID" 2>/dev/null
+    rm -f "$_WDOG_FILE"
 }
 
 # Limpa temporários se o script for interrompido
@@ -802,6 +847,63 @@ _domains_to_json() {
 }
 
 # ============================================================
+# MODO --check: AUTODIAGNÓSTICO DO SERVIDOR (T2-3)
+# Verifica pré-requisitos e retorna JSON {"ok":bool,"checks":[]}.
+# Chamado pelo backend ao cadastrar um novo servidor.
+# ============================================================
+run_check() {
+    local _ok="true"
+    local _checks=""
+
+    # ── Check 1: binário exim ─────────────────────────────────────
+    local _eb_ok="true" _eb_msg
+    if [ -z "$EXIM_BIN" ]; then
+        _eb_ok="false"; _ok="false"
+        _eb_msg="exim/exim4 nao encontrado no PATH"
+    else
+        _eb_msg="OK — binario: $EXIM_BIN"
+    fi
+    _checks="${_checks}{\"check\":\"exim_binary\",\"ok\":${_eb_ok},\"detail\":\"${_eb_msg}\"},"
+
+    # ── Check 2: exiqgrep ─────────────────────────────────────────
+    local _eq_ok="true" _eq_msg="OK — exiqgrep disponivel"
+    command -v exiqgrep &>/dev/null || { _eq_ok="false"; _eq_msg="exiqgrep nao encontrado — acoes frozen/bounce limitadas"; }
+    _checks="${_checks}{\"check\":\"exiqgrep\",\"ok\":${_eq_ok},\"detail\":\"${_eq_msg}\"},"
+
+    # ── Check 3: espaço em disco (alerta se >=90% usado) ─────────
+    local _disk_ok="true" _disk_msg _disk_use
+    _disk_use=$(df / 2>/dev/null | awk 'NR==2{gsub(/%/,""); print $5}')
+    if [ -n "$_disk_use" ] && [ "$_disk_use" -ge 90 ]; then
+        _disk_ok="false"; _ok="false"
+        _disk_msg="ATENCAO: disco com ${_disk_use}% usado (menos de 10% livre)"
+    else
+        _disk_msg="OK — disco com ${_disk_use:-?}% usado"
+    fi
+    _checks="${_checks}{\"check\":\"disk_space\",\"ok\":${_disk_ok},\"detail\":\"${_disk_msg}\"},"
+
+    # ── Check 4: mainlog acessível ────────────────────────────────
+    local _log_ok="true" _log_msg _log_found=""
+    for _lc in /var/log/exim4/mainlog /var/log/exim/mainlog /var/log/mail.log; do
+        [ -r "$_lc" ] && { _log_found="$_lc"; break; }
+    done
+    if [ -z "$_log_found" ]; then
+        _log_ok="false"; _ok="false"
+        _log_msg="Mainlog nao encontrado ou inacessivel"
+    else
+        _log_msg="OK — $( printf '%s' "$_log_found" | sed 's/\//\\\//g' )"
+    fi
+    _checks="${_checks}{\"check\":\"mainlog\",\"ok\":${_log_ok},\"detail\":\"${_log_msg}\"}"
+
+    printf '{\n'
+    printf '  "timestamp": "%s",\n' "$DATE"
+    printf '  "hostname": "%s",\n' "$HOSTNAME"
+    printf '  "script_version": "%s",\n' "$VERSION"
+    printf '  "ok": %s,\n' "$_ok"
+    printf '  "checks": [%s]\n' "$_checks"
+    printf '}\n'
+}
+
+# ============================================================
 # SAÍDA JSON
 # ============================================================
 output_json() {
@@ -822,98 +924,89 @@ output_json() {
         # Modo quick: métricas do log + contagem de fila + hourly_stats.
         # Campos dependentes de exim -bp são omitidos (não coletados).
 
-        # Monta array JSON de hourly_stats a partir das arrays bash
+        # Monta array JSON de hourly_stats
         local _hs_json="" _i
         for _i in "${!HOURLY_HOURS[@]}"; do
             [ -n "$_hs_json" ] && _hs_json="${_hs_json},"
-            _hs_json="${_hs_json}
-    {\"hour\":\"${HOURLY_HOURS[$_i]}\",\"recv\":${HOURLY_RECV[$_i]:-0},\"sent\":${HOURLY_SENT[$_i]:-0}}"
+            _hs_json="${_hs_json}{\"hour\":\"${HOURLY_HOURS[$_i]}\",\"recv\":${HOURLY_RECV[$_i]:-0},\"sent\":${HOURLY_SENT[$_i]:-0}}"
         done
 
-        cat <<EOF
-{
-  "timestamp": "$DATE",
-  "hostname": "$HOSTNAME",
-  "version": "$VERSION",
-  "mode": "$_mode",
-  "queue": {
-    "total": ${QUEUE:-0},
-    "frozen": ${FROZEN_COUNT:-0}
-  },
-  "log": {
-    "delivered": $DELIVERED_COUNT,
-    "rejected": $REJECT_COUNT,
-    "deferred": $DEFER_COUNT,
-    "recent_sends": $RECENT_SENDS,
-    "dns_errors": $DNS_ERRORS
-  },
-  "hourly_stats": [${_hs_json}
-  ],
-  "top_auth_user": "$TOP_AUTH_USER",
-  "top_auth_count": $TOP_AUTH_COUNT,
-  "top_ip": "$TOP_IP",
-  "top_ip_count": ${TOP_IP_COUNT:-0},
-  "top_rejected_domains": ${_rejected_json},
-  "top_defer_domains": ${_defer_json},
-  "diagnosis": {
-    "problem": "$PROBLEM",
-    "severity": "$SEVERITY",
-    "description": "$PROBLEM_DESC",
-    "actions_recommended": [${_ar_json}]
-  },
-  "exim": { "processes": ${EXIM_PROCS:-0}, "uptime": "$EXIM_UPTIME", "version": "$EXIM_VER_STR" }
-}
-EOF
-    else
-        # Modo full: saída completa com todos os campos.
-        cat <<EOF
-{
-  "timestamp": "$DATE",
-  "hostname": "$HOSTNAME",
-  "version": "$VERSION",
-  "mode": "$_mode",
-  "queue": {
-    "total": ${QUEUE:-0},
-    "frozen": ${FROZEN_COUNT:-0},
-    "bounces": ${BOUNCE_COUNT:-0},
-    "size_kb": "$QUEUE_SIZE",
-    "age": { "days": ${OLD_DAYS:-0}, "hours": ${OLD_HOURS:-0}, "minutes": ${OLD_MINS:-0} }
-  },
-  "log": {
-    "delivered": ${DELIVERED_COUNT:-0},
-    "rejected": ${REJECT_COUNT:-0},
-    "deferred": ${DEFER_COUNT:-0},
-    "recent_sends": ${RECENT_SENDS:-0},
-    "dns_errors": ${DNS_ERRORS:-0}
-  },
-  "top_sender": "$TOP_SENDER",
-  "top_sender_count": ${TOP_SENDER_COUNT:-0},
-  "top_auth_user": "$TOP_AUTH_USER",
-  "top_auth_count": ${TOP_AUTH_COUNT:-0},
-  "top_ip": "$TOP_IP",
-  "top_ip_count": ${TOP_IP_COUNT:-0},
-  "top_recipient": "$TOP_RECIPIENT",
-  "top_recipient_count": ${TOP_RECIPIENT_COUNT:-0},
-  "relay_suspect": "$RELAY_SUSPECT",
-  "relay_suspect_send": ${RELAY_SUSPECT_SEND:-0},
-  "relay_suspect_bounce": ${RELAY_SUSPECT_BOUNCE:-0},
-  "top_rejected_domains": ${_rejected_json},
-  "top_defer_domains": ${_defer_json},
-  "php_mailers": {
-    "suspicious": ${PHP_MAILER_SUSPICIOUS:-0},
-    "mail_calls": ${PHP_MAILER_MAIL_COUNT:-0},
-    "top_suspect": "$PHP_MAILER_TOP_SUSPECT"
-  },
-  "diagnosis": {
-    "problem": "$PROBLEM",
-    "severity": "$SEVERITY",
-    "description": "$PROBLEM_DESC",
-    "actions_recommended": [${_ar_json}]
-  },
-  "exim": { "processes": ${EXIM_PROCS:-0}, "uptime": "$EXIM_UPTIME", "version": "$EXIM_VER_STR" }
-}
-EOF
+        # T2-2: campo error; T2-1: collect_timed_out
+        local _err_esc _timed_out_str="false"
+        _err_esc=$(printf '%s' "${COLLECT_ERROR:-}" | sed 's/"/\\"/g; s/\//\\\//g')
+        [ "${COLLECT_TIMED_OUT:-0}" -eq 1 ] && _timed_out_str="true"
+
+        printf '{\n'
+        printf '  "timestamp": "%s",\n' "$DATE"
+        printf '  "hostname": "%s",\n' "$HOSTNAME"
+        printf '  "script_version": "%s",\n' "$VERSION"
+        printf '  "version": "%s",\n' "$VERSION"
+        printf '  "mode": "%s",\n' "$_mode"
+        printf '  "collect_timed_out": %s,\n' "$_timed_out_str"
+        [ -n "$_err_esc" ] && printf '  "error": "%s",\n' "$_err_esc"
+        printf '  "queue": { "total": %s, "frozen": %s },\n' "${QUEUE:-0}" "${FROZEN_COUNT:-0}"
+        printf '  "log": {\n'
+        printf '    "delivered": %s, "rejected": %s, "deferred": %s,\n'             "${DELIVERED_COUNT:-0}" "${REJECT_COUNT:-0}" "${DEFER_COUNT:-0}"
+        printf '    "recent_sends": %s, "dns_errors": %s,\n'             "${RECENT_SENDS:-0}" "${DNS_ERRORS:-0}"
+        printf '    "mainlog_size_mb": %s\n' "${MAINLOG_SIZE_MB:-0}"
+        printf '  },\n'
+        printf '  "hourly_stats": [%s],\n' "$_hs_json"
+        printf '  "top_auth_user": "%s", "top_auth_count": %s,\n'             "$TOP_AUTH_USER" "${TOP_AUTH_COUNT:-0}"
+        printf '  "top_ip": "%s", "top_ip_count": %s,\n'             "$TOP_IP" "${TOP_IP_COUNT:-0}"
+        printf '  "top_rejected_domains": %s,\n' "$_rejected_json"
+        printf '  "top_defer_domains": %s,\n' "$_defer_json"
+        printf '  "diagnosis": {\n'
+        printf '    "problem": "%s", "severity": "%s",\n' "$PROBLEM" "$SEVERITY"
+        printf '    "description": "%s",\n' "$PROBLEM_DESC"
+        printf '    "actions_recommended": [%s]\n' "$_ar_json"
+        printf '  },\n'
+        printf '  "exim": { "processes": %s, "uptime": "%s", "version": "%s" }\n'             "${EXIM_PROCS:-0}" "$EXIM_UPTIME" "$EXIM_VER_STR"
+        printf '}\n'
+        return
     fi
+
+    # Modo full: saída completa com todos os campos.
+    # T2-2: campo error; T2-1: collect_timed_out; T2-4: script_version; T2-5: mainlog_size_mb
+    local _err_esc _timed_out_str="false"
+    _err_esc=$(printf '%s' "${COLLECT_ERROR:-}" | sed 's/"/\\"/g; s/\//\\\//g')
+    [ "${COLLECT_TIMED_OUT:-0}" -eq 1 ] && _timed_out_str="true"
+
+    printf '{\n'
+    printf '  "timestamp": "%s",\n' "$DATE"
+    printf '  "hostname": "%s",\n' "$HOSTNAME"
+    printf '  "script_version": "%s",\n' "$VERSION"
+    printf '  "version": "%s",\n' "$VERSION"
+    printf '  "mode": "%s",\n' "$_mode"
+    printf '  "collect_timed_out": %s,\n' "$_timed_out_str"
+    [ -n "$_err_esc" ] && printf '  "error": "%s",\n' "$_err_esc"
+    printf '  "queue": {\n'
+    printf '    "total": %s, "frozen": %s, "bounces": %s,\n'         "${QUEUE:-0}" "${FROZEN_COUNT:-0}" "${BOUNCE_COUNT:-0}"
+    printf '    "size_kb": "%s",\n' "${QUEUE_SIZE:-N/A}"
+    printf '    "age": { "days": %s, "hours": %s, "minutes": %s }\n'         "${OLD_DAYS:-0}" "${OLD_HOURS:-0}" "${OLD_MINS:-0}"
+    printf '  },\n'
+    printf '  "log": {\n'
+    printf '    "delivered": %s, "rejected": %s, "deferred": %s,\n'         "${DELIVERED_COUNT:-0}" "${REJECT_COUNT:-0}" "${DEFER_COUNT:-0}"
+    printf '    "recent_sends": %s, "dns_errors": %s,\n'         "${RECENT_SENDS:-0}" "${DNS_ERRORS:-0}"
+    printf '    "mainlog_size_mb": %s\n' "${MAINLOG_SIZE_MB:-0}"
+    printf '  },\n'
+    printf '  "top_sender": "%s", "top_sender_count": %s,\n'         "$TOP_SENDER" "${TOP_SENDER_COUNT:-0}"
+    printf '  "top_auth_user": "%s", "top_auth_count": %s,\n'         "$TOP_AUTH_USER" "${TOP_AUTH_COUNT:-0}"
+    printf '  "top_ip": "%s", "top_ip_count": %s,\n'         "$TOP_IP" "${TOP_IP_COUNT:-0}"
+    printf '  "top_recipient": "%s", "top_recipient_count": %s,\n'         "$TOP_RECIPIENT" "${TOP_RECIPIENT_COUNT:-0}"
+    printf '  "relay_suspect": "%s", "relay_suspect_send": %s, "relay_suspect_bounce": %s,\n'         "$RELAY_SUSPECT" "${RELAY_SUSPECT_SEND:-0}" "${RELAY_SUSPECT_BOUNCE:-0}"
+    printf '  "top_rejected_domains": %s,\n' "$_rejected_json"
+    printf '  "top_defer_domains": %s,\n' "$_defer_json"
+    printf '  "php_mailers": {\n'
+    printf '    "suspicious": %s, "mail_calls": %s,\n'         "${PHP_MAILER_SUSPICIOUS:-0}" "${PHP_MAILER_MAIL_COUNT:-0}"
+    printf '    "top_suspect": "%s"\n' "$PHP_MAILER_TOP_SUSPECT"
+    printf '  },\n'
+    printf '  "diagnosis": {\n'
+    printf '    "problem": "%s", "severity": "%s",\n' "$PROBLEM" "$SEVERITY"
+    printf '    "description": "%s",\n' "$PROBLEM_DESC"
+    printf '    "actions_recommended": [%s]\n' "$_ar_json"
+    printf '  },\n'
+    printf '  "exim": { "processes": %s, "uptime": "%s", "version": "%s" }\n'         "${EXIM_PROCS:-0}" "$EXIM_UPTIME" "$EXIM_VER_STR"
+    printf '}\n'
 }
 
 # ============================================================
@@ -923,18 +1016,16 @@ EOF
 # ============================================================
 output_action_json() {
     local success="$1" action="$2" message="$3"
-    # Escapa aspas simples dentro da mensagem para JSON válido
     message=$(printf '%s' "$message" | sed 's/"/\\"/g')
-    cat <<EOF
-{
-  "timestamp": "$DATE",
-  "hostname": "$HOSTNAME",
-  "version": "$VERSION",
-  "success": $success,
-  "action": "$action",
-  "message": "$message"
-}
-EOF
+    printf '{\n'
+    printf '  "timestamp": "%s",\n' "$DATE"
+    printf '  "hostname": "%s",\n' "$HOSTNAME"
+    printf '  "script_version": "%s",\n' "$VERSION"
+    printf '  "version": "%s",\n' "$VERSION"
+    printf '  "success": %s,\n' "$success"
+    printf '  "action": "%s",\n' "$action"
+    printf '  "message": "%s"\n' "$message"
+    printf '}\n'
 }
 
 # ============================================================
@@ -965,29 +1056,29 @@ execute_action() {
     case "$cmd" in
 
         clean-full)
-            local count; count=$($SUDO_EXIM "$EXIM_BIN" -bpc 2>/dev/null || echo 0)
-            timeout 120 $SUDO_EXIM "$EXIM_BIN" -bp 2>/dev/null \
+            local count; count=$("$EXIM_BIN" -bpc 2>/dev/null || echo 0)
+            timeout "$GLOBAL_TIMEOUT" "$EXIM_BIN" -bp 2>/dev/null \
                 | awk '{print $3}' \
                 | grep -E '^[A-Za-z0-9-]{6,}$' \
-                | xargs -r -P4 $SUDO_EXIM "$EXIM_BIN" -Mrm 2>/dev/null
+                | xargs -r -P4 "$EXIM_BIN" -Mrm 2>/dev/null
             output_action_json "true" "$cmd" \
                 "Fila limpa — $count mensagens removidas"
             ;;
 
         clean-frozen)
-            local ids; ids=$($SUDO_EXIM exiqgrep -z -i 2>/dev/null \
+            local ids; ids=$(exiqgrep -z -i 2>/dev/null \
                 | grep -E '^[A-Za-z0-9-]{6,}$')
             local count; count=$(echo "$ids" | grep -c . 2>/dev/null); count=${count:-0}
-            echo "$ids" | xargs -r -P4 $SUDO_EXIM "$EXIM_BIN" -Mrm 2>/dev/null
+            echo "$ids" | xargs -r -P4 "$EXIM_BIN" -Mrm 2>/dev/null
             output_action_json "true" "$cmd" \
                 "$count mensagens frozen removidas"
             ;;
 
         clean-bounces)
-            local ids; ids=$($SUDO_EXIM exiqgrep -f '<>' -i 2>/dev/null \
+            local ids; ids=$(exiqgrep -f '<>' -i 2>/dev/null \
                 | grep -E '^[A-Za-z0-9-]{6,}$')
             local count; count=$(echo "$ids" | grep -c . 2>/dev/null); count=${count:-0}
-            echo "$ids" | xargs -r -P4 $SUDO_EXIM "$EXIM_BIN" -Mrm 2>/dev/null
+            echo "$ids" | xargs -r -P4 "$EXIM_BIN" -Mrm 2>/dev/null
             output_action_json "true" "$cmd" \
                 "$count bounces (<>) removidos"
             ;;
@@ -1003,10 +1094,10 @@ execute_action() {
                     "Parâmetro inválido: '$param' contém caracteres não permitidos"
                 exit 1
             fi
-            local ids; ids=$($SUDO_EXIM exiqgrep -f "$param" -i 2>/dev/null \
+            local ids; ids=$(exiqgrep -f "$param" -i 2>/dev/null \
                 | grep -E '^[A-Za-z0-9-]{6,}$')
             local count; count=$(echo "$ids" | grep -c . 2>/dev/null); count=${count:-0}
-            echo "$ids" | xargs -r -P4 $SUDO_EXIM "$EXIM_BIN" -Mrm 2>/dev/null
+            echo "$ids" | xargs -r -P4 "$EXIM_BIN" -Mrm 2>/dev/null
             output_action_json "true" "$cmd" \
                 "$count mensagens de '$param' removidas"
             ;;
@@ -1023,9 +1114,9 @@ execute_action() {
                 exit 1
             fi
             local removed=0
-            for mid in $($SUDO_EXIM exiqgrep -f "" -i 2>/dev/null | head -500); do
-                $SUDO_EXIM "$EXIM_BIN" -Mvh "$mid" 2>/dev/null | grep -q "auth_id.*${param}" \
-                    && { $SUDO_EXIM "$EXIM_BIN" -Mrm "$mid" 2>/dev/null; removed=$((removed+1)); }
+            for mid in $(exiqgrep -f "" -i 2>/dev/null | head -500); do
+                "$EXIM_BIN" -Mvh "$mid" 2>/dev/null | grep -q "auth_id.*${param}" \
+                    && { "$EXIM_BIN" -Mrm "$mid" 2>/dev/null; removed=$((removed+1)); }
             done
             output_action_json "true" "$cmd" \
                 "$removed mensagens do usuário '$param' removidas"
@@ -1066,7 +1157,7 @@ execute_action() {
             ;;
 
         retry-queue)
-            $SUDO_EXIM "$EXIM_BIN" -qff 2>/dev/null
+            "$EXIM_BIN" -qff 2>/dev/null
             output_action_json "true" "$cmd" \
                 "Reprocessamento forçado da fila ($EXIM_BIN -qff) concluído"
             ;;
@@ -1489,32 +1580,32 @@ maybe_delete_script() {
 
 clean_full() {
     echo -e "${YELLOW}[AÇÃO] Limpando toda a fila...${RESET}"
-    $SUDO_EXIM exim -bp 2>/dev/null | awk '{print $3}' | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 $SUDO_EXIM exim -Mrm 2>/dev/null
+    exim -bp 2>/dev/null | awk '{print $3}' | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 exim -Mrm 2>/dev/null
     echo -e "${GREEN}[OK] Fila limpa.${RESET}"
     QUEUE_CLEANED=1
 }
 clean_frozen() {
     echo -e "${YELLOW}[AÇÃO] Removendo frozen...${RESET}"
-    $SUDO_EXIM exiqgrep -z -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 $SUDO_EXIM exim -Mrm 2>/dev/null
+    exiqgrep -z -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 exim -Mrm 2>/dev/null
     echo -e "${GREEN}[OK] Frozen removidos.${RESET}"
     QUEUE_CLEANED=1
 }
 clean_bounces() {
     echo -e "${YELLOW}[AÇÃO] Removendo bounces (<>)...${RESET}"
-    $SUDO_EXIM exiqgrep -f '<>' -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 $SUDO_EXIM exim -Mrm 2>/dev/null
+    exiqgrep -f '<>' -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 exim -Mrm 2>/dev/null
     echo -e "${GREEN}[OK] Bounces removidos.${RESET}"
     QUEUE_CLEANED=1
 }
 clean_by_sender() {
     echo -e "${YELLOW}[AÇÃO] Removendo fila de $1...${RESET}"
-    $SUDO_EXIM exiqgrep -f "$1" -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 $SUDO_EXIM exim -Mrm 2>/dev/null
+    exiqgrep -f "$1" -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 exim -Mrm 2>/dev/null
     echo -e "${GREEN}[OK]${RESET}"
     QUEUE_CLEANED=1
 }
 clean_by_auth_user() {
     echo -e "${YELLOW}[AÇÃO] Removendo fila do usuário $1...${RESET}"
-    for mid in $($SUDO_EXIM exiqgrep -f "" -i 2>/dev/null | head -200); do
-        $SUDO_EXIM exim -Mvh "$mid" 2>/dev/null | grep -q "auth_id.*$1" && $SUDO_EXIM exim -Mrm "$mid" 2>/dev/null
+    for mid in $(exiqgrep -f "" -i 2>/dev/null | head -200); do
+        exim -Mvh "$mid" 2>/dev/null | grep -q "auth_id.*$1" && exim -Mrm "$mid" 2>/dev/null
     done
     echo -e "${GREEN}[OK]${RESET}"
     QUEUE_CLEANED=1
@@ -1586,7 +1677,7 @@ block_ip_firewall_d() {
 }
 retry_queue() {
     echo -e "${YELLOW}[AÇÃO] Forçando reprocessamento...${RESET}"
-    $SUDO_EXIM exim -qff 2>/dev/null
+    exim -qff 2>/dev/null
     echo -e "${GREEN}[OK]${RESET}"
 }
 check_blacklists() {
@@ -1798,7 +1889,7 @@ print_menu() {
         b) check_blacklists;    read -rp "  [Enter]" ;;
         s) check_dkim_spf;      read -rp "  [Enter]" ;;
         e) show_last_log_errors | less -R ;;
-        v) $SUDO_EXIM "$EXIM_BIN" -bp 2>/dev/null | less -R ;;
+        v) "$EXIM_BIN" -bp 2>/dev/null | less -R ;;
         h) print_hourly_stats;  read -rp "  [Enter para continuar]" ;;
         d) [ "$PROBLEM" = "SPAM_RELAY" ] && show_relay_detail | less -R ;;
         f) [ "${DEFER_DETAIL_AVAILABLE:-0}" -eq 1 ] && { print_defers; read -rp "  [Enter para continuar]"; } ;;
@@ -1844,7 +1935,7 @@ print_menu() {
                 SPAM_MASSIVO)  clean_frozen ;;
                 IP_FLOOD)      clean_frozen ;;
                 ALTO_DEFERIMENTO|BOUNCE_STORM|ALTA_REJEICAO) retry_queue ;;
-                FILA_TRAVADA|BOUNCE_CONCENTRADO|FILA_ALTA|NORMAL) $SUDO_EXIM "$EXIM_BIN" -bp 2>/dev/null | less -R ;;
+                FILA_TRAVADA|BOUNCE_CONCENTRADO|FILA_ALTA|NORMAL) "$EXIM_BIN" -bp 2>/dev/null | less -R ;;
             esac; read -rp "  [Enter]" ;;
         *) echo -e "  ${DIM}Opção inválida.${RESET}"; sleep 1 ;;
     esac
@@ -1861,6 +1952,12 @@ auto_clean() {
 
 main() {
     check_deps
+
+    # ── Modo --check: verifica pré-requisitos do servidor (T2-3) ────
+    if [ "$CHECK_MODE" -eq 1 ]; then
+        run_check
+        exit 0
+    fi
 
     # ── Modo --action: executa ação pontual e sai imediatamente ────
     # Não requer análise, não lê fila nem log — apenas roda a ação
