@@ -77,17 +77,20 @@ def run_quick(profile: str = "light") -> Dict[str, Any]:
     """Coleta leve (~1s) — usada pelo heartbeat do dashboard.
 
     profile: perfil de coleta passado ao script via --profile=
-             (suportado a partir de diag-exim.sh v5.1+; ignorado em versões anteriores)
+             (suportado a partir de diag-exim.sh v5.2+, quando T3-4 for implementado)
     """
-    return _run(f"--quick --profile={profile}")
+    # TODO T3-4: reativar --profile= após implementar no script
+    return _run("--quick")
 
 
 def run_full(profile: str = "full") -> Dict[str, Any]:
     """Coleta completa — usada a cada 5 min e no botão de refresh.
 
     profile: perfil de coleta passado ao script via --profile=
+             (suportado a partir de diag-exim.sh v5.2+, quando T3-4 for implementado)
     """
-    return _run(f"--json --profile={profile}")
+    # TODO T3-4: reativar --profile= após implementar no script
+    return _run("--json")
 
 
 def run_action(

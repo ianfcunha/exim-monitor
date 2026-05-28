@@ -327,7 +327,7 @@ collect() {
     if [ "$QUICK_MODE" -eq 1 ]; then
         # Watchdog global (T2-1)
         local _WDOG_FILE; _WDOG_FILE=$(mktemp /tmp/eximmon_wdog.XXXXXX)
-        ( sleep "$GLOBAL_TIMEOUT" && echo "1" > "$_WDOG_FILE" ) &
+        ( sleep "$GLOBAL_TIMEOUT" && echo "1" > "$_WDOG_FILE" ) </dev/null >/dev/null 2>&1 &
         local _WDOG_PID=$!
         _FOUND_LOG=""
         for candidate in "$LOG_PATH" /var/log/exim4/mainlog /var/log/exim/mainlog /var/log/mail.log; do
@@ -360,7 +360,7 @@ collect() {
     # ── Modo normal: coleta completa ────────────────────────────────
     # Watchdog global (T2-1)
     local _WDOG_FILE; _WDOG_FILE=$(mktemp /tmp/eximmon_wdog.XXXXXX)
-    ( sleep "$GLOBAL_TIMEOUT" && echo "1" > "$_WDOG_FILE" ) &
+    ( sleep "$GLOBAL_TIMEOUT" && echo "1" > "$_WDOG_FILE" ) </dev/null >/dev/null 2>&1 &
     local _WDOG_PID=$!
     # Decide limite de leitura da fila baseado no tamanho
     QUEUE_SAMPLED=0
