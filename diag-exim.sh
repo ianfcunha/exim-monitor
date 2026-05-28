@@ -139,6 +139,12 @@ EXIM_BIN=""
 for _eb in exim4 exim; do
     command -v "$_eb" &>/dev/null && { EXIM_BIN="$_eb"; break; }
 done
+# Prefixar sudo quando não for root (ambientes sem acesso root direto)
+if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+    SUDO="sudo"
+else
+    SUDO=""
+fi
 
 
 AUTO_MODE=0; JSON_MODE=0; CLEAN_SPAM_AUTO=0; QUICK_MODE=0; CHECK_MODE=0

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from ..auth import get_current_user
 from ..limiter import limiter
-from ..ssh import SSHError, get_log_entries, get_queue_items
+from ..ssh import SSHError, get_log_entries, get_log_tail, get_queue_items
 
 router = APIRouter(prefix="/api/messages", tags=["messages"])
 
@@ -22,6 +22,20 @@ def queue_messages(
 ):
     try:
         return get_queue_items()
+    except SSHError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+
+@router.get("/tail", summary="Tail do mainlog — todas as entradas recentes")
+@limiter.limit("30/minute")
+def log_tail(
+    request: Request,
+    response: Response,
+    limit: int = Query(300, ge=50, le=1000, description="Máximo de linhas"),
+    current_user: str = Depends(get_current_user),
+):
+    try:
+        return get_log_tail(limit)
     except SSHError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
