@@ -13,8 +13,10 @@ import DeliveryRateCard from '../components/DeliveryRateCard'
 import MessagesDrawer from '../components/MessagesDrawer'
 import LogViewerDrawer from '../components/LogViewerDrawer'
 import MetricCard from '../components/MetricCard'
+import ServerSelector from '../components/ServerSelector'
 import StatusBadge from '../components/StatusBadge'
 import TopTable from '../components/TopTable'
+import { useServer } from '../contexts/ServerContext'
 import { useFullStatus, useQuickStatus } from '../hooks/useStatus'
 
 function fmt(n) {
@@ -77,7 +79,8 @@ function HBtn({ onClick, disabled, title, children, danger }) {
   )
 }
 
-export default function Dashboard({ onLogout, onSettings }) {
+export default function Dashboard({ onLogout, onSettings, onServers }) {
+  const { activeServer } = useServer()
   const quick = useQuickStatus()
   const full  = useFullStatus()
   const [refreshing, setRefreshing] = useState(false)
@@ -191,6 +194,26 @@ export default function Dashboard({ onLogout, onSettings }) {
                     {eximVersion}
                   </span>
                 )}
+              </div>
+            )}
+
+            {/* Seletor de servidor + badge SSH */}
+            <ServerSelector />
+            {activeServer && (
+              <div
+                className="hidden sm:flex items-center gap-1.5"
+                title={
+                  activeServer.ssh_status === 'ok'
+                    ? `SSH ok · último contato ${activeServer.last_connected_at ? new Date(activeServer.last_connected_at).toLocaleString('pt-BR') : 'desconhecido'}`
+                    : activeServer.ssh_error_msg ?? 'Status SSH desconhecido'
+                }
+                style={{ fontSize: 11, cursor: 'default' }}
+              >
+                <span style={{
+                  width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+                  background: { ok: '#16A34A', error: '#DC2626', timeout: '#D97706', unknown: '#94A3B8' }[activeServer.ssh_status] ?? '#94A3B8',
+                }} />
+                <span style={{ color: '#94A3B8' }}>SSH</span>
               </div>
             )}
 

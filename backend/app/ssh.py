@@ -1,10 +1,23 @@
 """
 Wrapper SSH para executar o script diag-exim.sh no servidor remoto.
-Usa Paramiko com suporte a chave privada e senha.
+
+Todas as funções públicas aceitam um parâmetro opcional `server_cfg` (dict).
+Quando omitido, usam as configurações do .env (retrocompatibilidade).
+
+server_cfg = {
+    "host":          str,
+    "port":          int,
+    "ssh_user":      str,
+    "ssh_auth_type": "password" | "key",
+    "ssh_secret":    str,   # senha ou conteúdo da chave privada (já decriptografado)
+    "script_path":   str,
+}
 """
+import io
 import json
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional
 
 import paramiko
@@ -16,43 +29,72 @@ class SSHError(Exception):
     """Erro de conexão SSH ou execução remota do script."""
 
 
-def _get_client() -> paramiko.SSHClient:
+def _default_cfg() -> Dict[str, Any]:
+    """Configuração SSH a partir do .env (retrocompatibilidade)."""
+    return {
+        "host":          settings.ssh_host,
+        "port":          settings.ssh_port,
+        "ssh_user":      settings.ssh_user,
+        "ssh_auth_type": "key" if not settings.ssh_password else "password",
+        "ssh_secret":    settings.ssh_password or "",
+        "script_path":   settings.script_path,
+    }
+
+
+def _get_client(server_cfg: Optional[Dict[str, Any]] = None) -> paramiko.SSHClient:
     """Abre e retorna uma conexão SSH autenticada."""
+    cfg = server_cfg or _default_cfg()
+
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
     kwargs: Dict[str, Any] = {
-        "hostname": settings.ssh_host,
-        "port": settings.ssh_port,
-        "username": settings.ssh_user,
-        "timeout": 15,
+        "hostname": cfg["host"],
+        "port":     cfg["port"],
+        "username": cfg["ssh_user"],
+        "timeout":  15,
     }
 
-    if settings.ssh_password:
-        kwargs["password"] = settings.ssh_password
-    else:
+    auth_type  = cfg.get("ssh_auth_type", "password")
+    ssh_secret = cfg.get("ssh_secret", "")
+
+    if auth_type == "key" and ssh_secret:
+        # ssh_secret contém o conteúdo da chave privada
+        try:
+            pkey = paramiko.RSAKey.from_private_key(io.StringIO(ssh_secret))
+            kwargs["pkey"] = pkey
+        except Exception:
+            try:
+                pkey = paramiko.Ed25519Key.from_private_key(io.StringIO(ssh_secret))
+                kwargs["pkey"] = pkey
+            except Exception as exc:
+                raise SSHError(f"Não foi possível carregar a chave privada: {exc}") from exc
+    elif auth_type == "key" and not ssh_secret:
+        # Fallback: tenta chave do .env
         key_path = os.path.expanduser(settings.ssh_key_path)
         kwargs["key_filename"] = key_path
+    else:
+        kwargs["password"] = ssh_secret
 
     try:
         client.connect(**kwargs)
     except Exception as exc:
-        raise SSHError(f"Não foi possível conectar a {settings.ssh_host}:{settings.ssh_port} — {exc}") from exc
+        raise SSHError(
+            f"Não foi possível conectar a {cfg['host']}:{cfg['port']} — {exc}"
+        ) from exc
 
     return client
 
 
-def _run(args: str) -> Dict[str, Any]:
-    """
-    Executa o script com os argumentos fornecidos via SSH.
-    Retorna o JSON parseado ou lança SSHError.
-    """
-    cmd = f"bash {settings.script_path} {args}"
-    client = _get_client()
+def _run(args: str, server_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Executa o script com os argumentos fornecidos via SSH."""
+    cfg = server_cfg or _default_cfg()
+    cmd = f"bash {cfg['script_path']} {args}"
+    client = _get_client(cfg)
     try:
         _stdin, stdout, stderr = client.exec_command(cmd, timeout=90)
         output = stdout.read().decode("utf-8", errors="replace").strip()
-        error = stderr.read().decode("utf-8", errors="replace").strip()
+        error  = stderr.read().decode("utf-8", errors="replace").strip()
     finally:
         client.close()
 
@@ -71,59 +113,51 @@ def _run(args: str) -> Dict[str, Any]:
         ) from exc
 
 
-# ── API pública ────────────────────────────────────────────────────────
-
-def run_quick(profile: str = "light") -> Dict[str, Any]:
-    """Coleta leve (~1s) — usada pelo heartbeat do dashboard.
-
-    profile: perfil de coleta passado ao script via --profile=
-             (suportado a partir de diag-exim.sh v5.2+, quando T3-4 for implementado)
-    """
-    # TODO T3-4: reativar --profile= após implementar no script
-    return _run("--quick")
-
-
-def run_full(profile: str = "full") -> Dict[str, Any]:
-    """Coleta completa — usada a cada 5 min e no botão de refresh.
-
-    profile: perfil de coleta passado ao script via --profile=
-             (suportado a partir de diag-exim.sh v5.2+, quando T3-4 for implementado)
-    """
-    # TODO T3-4: reativar --profile= após implementar no script
-    return _run("--json")
-
-
-def run_action(
-    action: str,
-    param: Optional[str] = None,
-    actor: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Executa uma ação isolada e retorna o JSON de resultado.
-
-    actor: usuário autenticado que disparou a ação — passado como --actor=
-           para que o script registre no log de auditoria local (T3-3).
-    """
-    action_arg = f"{action}:{param}" if param else action
-    args = f"--action={action_arg}"
-    if actor:
-        # Sanitiza: mantém apenas caracteres seguros para o shell
-        safe_actor = "".join(c for c in actor if c.isalnum() or c in "-_@.")
-        if safe_actor:
-            args += f" --actor={safe_actor}"
-    return _run(args)
-
-
-# ── Mensagens: fila e log ──────────────────────────────────────────────
-
-def _run_raw(cmd: str, timeout: int = 20) -> str:
+def _run_raw(cmd: str, timeout: int = 20,
+             server_cfg: Optional[Dict[str, Any]] = None) -> str:
     """Executa comando arbitrário via SSH e retorna stdout como string."""
-    client = _get_client()
+    client = _get_client(server_cfg)
     try:
         _stdin, stdout, _stderr = client.exec_command(cmd, timeout=timeout)
         return stdout.read().decode("utf-8", errors="replace")
     finally:
         client.close()
 
+
+# ── Teste de conexão ───────────────────────────────────────────────────────
+
+def test_connection(server_cfg: Optional[Dict[str, Any]] = None) -> int:
+    """
+    Abre e fecha uma conexão SSH de teste.
+    Retorna a latência em milissegundos.
+    Lança SSHError em caso de falha.
+    """
+    t0 = time.monotonic()
+    client = _get_client(server_cfg)
+    client.close()
+    return int((time.monotonic() - t0) * 1000)
+
+
+# ── API pública ────────────────────────────────────────────────────────────
+
+def run_quick(server_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Coleta leve (~1s) — usada pelo heartbeat do dashboard."""
+    return _run("--quick", server_cfg)
+
+
+def run_full(server_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Coleta completa — usada a cada 5 min e no botão de refresh."""
+    return _run("--json", server_cfg)
+
+
+def run_action(action: str, param: Optional[str] = None,
+               server_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Executa uma ação isolada e retorna o JSON de resultado."""
+    action_arg = f"{action}:{param}" if param else action
+    return _run(f"--action={action_arg}", server_cfg)
+
+
+# ── Mensagens: fila e log ──────────────────────────────────────────────────
 
 def _parse_queue(raw: str) -> List[Dict[str, Any]]:
     """Converte saída de `exim -bp` em lista de dicts."""
@@ -138,8 +172,6 @@ def _parse_queue(raw: str) -> List[Dict[str, Any]]:
                 current = None
             continue
 
-        # Linha de cabeçalho da mensagem:
-        # "  1m  3.4K 1tFN9b-000FqO-01 <sender@example.com>"
         m = re.match(
             r'^\s{0,4}(\S+)\s+(\S+)\s+([A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+)\s+(.*?)(\s+\*\*\* frozen \*\*\*)?$',
             line,
@@ -151,14 +183,13 @@ def _parse_queue(raw: str) -> List[Dict[str, Any]]:
             sender = sender_raw.strip('<>').strip()
             current = {
                 "message_id": msg_id,
-                "age": age,
-                "size": size,
-                "sender": sender,
+                "age":        age,
+                "size":       size,
+                "sender":     sender,
                 "recipients": [],
-                "frozen": bool(frozen_marker),
+                "frozen":     bool(frozen_marker),
             }
         elif current and stripped and not stripped.startswith("***"):
-            # Linha de destinatário (muito indentada)
             current["recipients"].append(stripped)
 
     if current:
@@ -183,12 +214,11 @@ _LOG_GREP: Dict[str, str] = {
 
 def _parse_log_line(line: str, msg_type: str) -> Optional[Dict[str, str]]:
     """Parse de uma linha do mainlog do EXIM."""
-    # 2026-05-26 10:15:23[.mmm] [pid] msg-id flag address ...
     m = re.match(
-        r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?:\.\d+)?'
+        r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})'
         r'(?:\s+\[\d+\])?'
         r'\s+([A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+)'
-        r'\s+(\S+)'       # flag (=>, **, ==, <=)
+        r'\s+(\S+)'
         r'\s*(.*)',
         line.strip(),
     )
@@ -197,38 +227,33 @@ def _parse_log_line(line: str, msg_type: str) -> Optional[Dict[str, str]]:
 
     ts, msg_id, flag, rest = m.groups()
 
-    # Remetente F=<...>
     sender_m = re.search(r'F=<([^>]*)>', rest)
-    sender = sender_m.group(1) if sender_m else ""
+    sender   = sender_m.group(1) if sender_m else ""
 
-    # Endereço logo após o flag (primeiro token)
     first_token = rest.split()[0] if rest.split() else ""
-    recipient = first_token.strip("<>") if "@" in first_token else ""
+    recipient   = first_token.strip("<>") if "@" in first_token else ""
 
-    # Detalhe: host de entrega ou motivo de rejeição
     detail = ""
     if msg_type == "delivered":
         h = re.search(r'H=(\S+)', rest)
         detail = h.group(1) if h else ""
     elif msg_type in ("rejected", "deferred"):
-        # Tenta capturar mensagem após ":"
         d = re.search(r'(?:SMTP error[^:]*:|rejected after|temporarily rejected)[:\s]+(.+)', rest, re.I)
         if d:
             detail = d.group(1)[:100].strip()
         else:
-            # Fallback: tudo depois do recipient
-            parts = rest.split(None, 1)
+            parts  = rest.split(None, 1)
             detail = (parts[1][:100] if len(parts) > 1 else rest[:100]).strip()
     elif msg_type == "sent":
         s = re.search(r'S=(\d+)', rest)
         detail = f"{int(s.group(1)) // 1024} KB" if s else ""
 
     return {
-        "timestamp": ts,
+        "timestamp":  ts,
         "message_id": msg_id,
-        "sender": sender,
-        "recipient": recipient,
-        "detail": detail,
+        "sender":     sender,
+        "recipient":  recipient,
+        "detail":     detail,
     }
 
 
@@ -240,18 +265,16 @@ _TYPE_MARKERS = {
 }
 
 
-def get_log_tail(limit: int = 300) -> List[Dict[str, str]]:
-    """
-    Retorna as últimas N linhas do mainlog com tipo detectado automaticamente.
-    Usado pelo Log Viewer do dashboard.
-    """
+def get_log_tail(limit: int = 300,
+                 server_cfg: Optional[Dict[str, Any]] = None) -> List[Dict[str, str]]:
+    """Retorna as últimas N linhas do mainlog com tipo detectado automaticamente."""
     candidates = " ".join(f'"{p}"' for p in _LOG_CANDIDATES)
     cmd = (
         f"for f in {candidates}; do "
         f'  [ -f "$f" ] && tail -{limit} "$f" 2>/dev/null && break; '
         f"done"
     )
-    raw = _run_raw(cmd)
+    raw = _run_raw(cmd, server_cfg=server_cfg)
 
     entries = []
     for line in raw.splitlines():
@@ -268,31 +291,26 @@ def get_log_tail(limit: int = 300) -> List[Dict[str, str]]:
     return list(reversed(entries))
 
 
-def get_queue_items() -> List[Dict[str, Any]]:
+def get_queue_items(server_cfg: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """Retorna itens da fila EXIM via `exim -bp`."""
-    raw = _run_raw("exim -bp 2>/dev/null | head -1000")
+    raw = _run_raw("exim -bp 2>/dev/null | head -1000", server_cfg=server_cfg)
     return _parse_queue(raw)
 
 
-def get_log_entries(msg_type: str, limit: int = 200) -> List[Dict[str, str]]:
-    """
-    Retorna entradas do mainlog filtradas por tipo.
-
-    msg_type: 'delivered' | 'rejected' | 'deferred' | 'sent'
-    limit:    número máximo de linhas retornadas (mais recentes)
-    """
+def get_log_entries(msg_type: str, limit: int = 200,
+                    server_cfg: Optional[Dict[str, Any]] = None) -> List[Dict[str, str]]:
+    """Retorna entradas do mainlog filtradas por tipo."""
     pattern = _LOG_GREP.get(msg_type)
     if not pattern:
         return []
 
-    # Tenta cada path de log em ordem
     candidates = " ".join(f'"{p}"' for p in _LOG_CANDIDATES)
     cmd = (
         f"for f in {candidates}; do "
         f'  [ -f "$f" ] && grep -E \'{pattern}\' "$f" 2>/dev/null | tail -{limit} && break; '
         f"done"
     )
-    raw = _run_raw(cmd)
+    raw = _run_raw(cmd, server_cfg=server_cfg)
 
     entries = []
     for line in raw.splitlines():
@@ -300,5 +318,4 @@ def get_log_entries(msg_type: str, limit: int = 200) -> List[Dict[str, str]]:
         if parsed:
             entries.append(parsed)
 
-    # Mais recentes primeiro
     return list(reversed(entries))

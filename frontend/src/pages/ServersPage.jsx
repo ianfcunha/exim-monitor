@@ -1,0 +1,379 @@
+/**
+ * ServersPage — CRUD de servidores EXIM.
+ * Apenas admins acessam esta página.
+ */
+import { ArrowLeft, CheckCircle, Edit2, Plus, RefreshCw, Server, Trash2, WifiOff, XCircle, Zap } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { createServer, deleteServer, fetchServers, testServerConn, updateServer } from '../api/client'
+import { useServer } from '../contexts/ServerContext'
+
+const SSH_STATUS = {
+  ok:      { color: '#16A34A', bg: '#F0FDF4', label: 'Online',      icon: CheckCircle },
+  error:   { color: '#DC2626', bg: '#FEF2F2', label: 'Erro SSH',    icon: XCircle     },
+  timeout: { color: '#D97706', bg: '#FFFBEB', label: 'Timeout',     icon: WifiOff     },
+  unknown: { color: '#94A3B8', bg: '#F8FAFC', label: 'Desconhecido',icon: Server      },
+}
+
+const inputStyle = {
+  width: '100%', borderRadius: 8,
+  background: '#F8FAFC', border: '1px solid #E2E8F0',
+  padding: '9px 13px', fontSize: 12, color: '#0F172A', outline: 'none',
+  boxSizing: 'border-box', transition: 'border-color 0.15s',
+}
+
+const EMPTY_FORM = {
+  name: '', host: '', port: 22, ssh_user: 'root',
+  ssh_auth_type: 'password', ssh_secret: '', script_path: '/root/diag-exim.sh',
+}
+
+/* ── Sub-componentes ── */
+
+function Field({ label, hint, children }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#64748B', marginBottom: 5 }}>
+        {label}
+      </label>
+      {hint && <p style={{ fontSize: 11, color: '#94A3B8', marginBottom: 6 }}>{hint}</p>}
+      {children}
+    </div>
+  )
+}
+
+function Input({ value, onChange, type = 'text', placeholder = '', required }) {
+  return (
+    <input
+      type={type} value={value ?? ''} onChange={e => onChange(e.target.value)}
+      placeholder={placeholder} required={required} style={inputStyle}
+      onFocus={e => e.target.style.borderColor = '#0EA5E9'}
+      onBlur={e  => e.target.style.borderColor = '#E2E8F0'}
+    />
+  )
+}
+
+function ServerStatusBadge({ status }) {
+  const cfg = SSH_STATUS[status] ?? SSH_STATUS.unknown
+  const Icon = cfg.icon
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 4,
+      padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 600,
+      background: cfg.bg, color: cfg.color,
+    }}>
+      <Icon size={11} />
+      {cfg.label}
+    </span>
+  )
+}
+
+function ServerForm({ initial, onSave, onCancel, saving }) {
+  const [form, setForm] = useState(initial ?? EMPTY_FORM)
+  const set = key => val => setForm(prev => ({ ...prev, [key]: val }))
+
+  return (
+    <form onSubmit={e => { e.preventDefault(); onSave(form) }}
+      style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+        <Field label="Nome do servidor *">
+          <Input value={form.name} onChange={set('name')} placeholder="Prod EXIM" required />
+        </Field>
+        <Field label="Host / IP *">
+          <Input value={form.host} onChange={set('host')} placeholder="192.168.1.10" required />
+        </Field>
+        <Field label="Porta SSH">
+          <Input value={form.port} onChange={v => set('port')(Number(v))} type="number" placeholder="22" />
+        </Field>
+        <Field label="Usuário SSH">
+          <Input value={form.ssh_user} onChange={set('ssh_user')} placeholder="root" />
+        </Field>
+      </div>
+
+      <Field label="Tipo de autenticação">
+        <select
+          value={form.ssh_auth_type}
+          onChange={e => set('ssh_auth_type')(e.target.value)}
+          style={{ ...inputStyle, cursor: 'pointer' }}
+        >
+          <option value="password">Senha SSH</option>
+          <option value="key">Chave privada (conteúdo)</option>
+        </select>
+      </Field>
+
+      <Field
+        label={form.ssh_auth_type === 'key' ? 'Conteúdo da chave privada *' : 'Senha SSH *'}
+        hint={
+          form.ssh_auth_type === 'key'
+            ? 'Cole o conteúdo completo da chave privada (id_rsa, id_ed25519, etc). Nunca preenchido automaticamente.'
+            : 'Nunca preenchida automaticamente — insira manualmente.'
+        }
+      >
+        {form.ssh_auth_type === 'key' ? (
+          <textarea
+            value={form.ssh_secret ?? ''}
+            onChange={e => set('ssh_secret')(e.target.value)}
+            placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..."
+            rows={6}
+            style={{ ...inputStyle, fontFamily: 'monospace', fontSize: 11, resize: 'vertical' }}
+            onFocus={e => e.target.style.borderColor = '#0EA5E9'}
+            onBlur={e  => e.target.style.borderColor = '#E2E8F0'}
+          />
+        ) : (
+          <Input
+            value={form.ssh_secret ?? ''}
+            onChange={set('ssh_secret')}
+            type="password"
+            placeholder="••••••••"
+          />
+        )}
+      </Field>
+
+      <Field label="Caminho do script remoto">
+        <Input value={form.script_path} onChange={set('script_path')} placeholder="/root/diag-exim.sh" />
+      </Field>
+
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
+        <button type="button" onClick={onCancel}
+          style={{
+            padding: '8px 18px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+            border: '1px solid #E2E8F0', background: '#F8FAFC', color: '#64748B', cursor: 'pointer',
+          }}>
+          Cancelar
+        </button>
+        <button type="submit" disabled={saving}
+          style={{
+            padding: '8px 20px', borderRadius: 8, fontSize: 12, fontWeight: 700,
+            border: 'none', background: saving ? '#7DD3F0' : '#0EA5E9',
+            color: '#fff', cursor: saving ? 'not-allowed' : 'pointer',
+          }}>
+          {saving ? 'Salvando…' : 'Salvar servidor'}
+        </button>
+      </div>
+    </form>
+  )
+}
+
+/* ── Principal ── */
+export default function ServersPage({ onBack }) {
+  const { refresh: refreshCtx } = useServer()
+  const [servers, setServers]     = useState([])
+  const [loading, setLoading]     = useState(true)
+  const [showForm, setShowForm]   = useState(false)
+  const [editTarget, setEditTarget] = useState(null)
+  const [saving, setSaving]       = useState(false)
+  const [testing, setTesting]     = useState({})
+  const [testResult, setTestResult] = useState({})
+  const [error, setError]         = useState(null)
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      setServers(await fetchServers())
+    } catch (e) {
+      setError(e?.response?.data?.detail ?? e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { load() }, [])
+
+  const handleSave = async (form) => {
+    setSaving(true)
+    setError(null)
+    try {
+      if (editTarget) {
+        await updateServer(editTarget.id, form)
+      } else {
+        await createServer(form)
+      }
+      setShowForm(false)
+      setEditTarget(null)
+      await load()
+      refreshCtx()
+    } catch (e) {
+      setError(e?.response?.data?.detail ?? e.message ?? 'Erro ao salvar.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async (id) => {
+    if (!confirm('Remover este servidor? Esta ação não pode ser desfeita.')) return
+    try {
+      await deleteServer(id)
+      await load()
+      refreshCtx()
+    } catch (e) {
+      setError(e?.response?.data?.detail ?? e.message)
+    }
+  }
+
+  const handleTest = async (id) => {
+    setTesting(t => ({ ...t, [id]: true }))
+    setTestResult(r => ({ ...r, [id]: null }))
+    try {
+      const res = await testServerConn(id)
+      setTestResult(r => ({ ...r, [id]: res }))
+      await load()
+    } catch (e) {
+      setTestResult(r => ({ ...r, [id]: { ok: false, error: e?.response?.data?.detail ?? e.message } }))
+    } finally {
+      setTesting(t => ({ ...t, [id]: false }))
+    }
+  }
+
+  return (
+    <div style={{ minHeight: '100vh', background: '#F1F5F9' }}>
+      {/* Header */}
+      <header style={{
+        position: 'sticky', top: 0, zIndex: 10,
+        padding: '0 24px', background: '#fff',
+        borderBottom: '1px solid #E2E8F0',
+        boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
+      }}>
+        <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 56, gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <button onClick={onBack}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#94A3B8', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+              onMouseEnter={e => e.currentTarget.style.color = '#0EA5E9'}
+              onMouseLeave={e => e.currentTarget.style.color = '#94A3B8'}
+            >
+              <ArrowLeft size={14} /> Dashboard
+            </button>
+            <span style={{ color: '#E2E8F0' }}>|</span>
+            <span style={{ fontSize: 10, letterSpacing: '0.28em', textTransform: 'uppercase', color: '#0EA5E9', fontWeight: 700 }}>
+              Servidores
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={load} title="Atualizar lista"
+              style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748B' }}>
+              <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} />
+            </button>
+            <button onClick={() => { setEditTarget(null); setShowForm(true) }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700, border: 'none', background: '#0EA5E9', color: '#fff', cursor: 'pointer' }}>
+              <Plus size={13} /> Adicionar servidor
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <div style={{ maxWidth: 900, margin: '0 auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+        {error && (
+          <div style={{ padding: '10px 14px', borderRadius: 10, background: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B', fontSize: 12 }}>
+            {error}
+          </div>
+        )}
+
+        {/* Formulário de adição/edição */}
+        {showForm && (
+          <div style={{ background: '#fff', border: '1px solid #E2E8F0', borderRadius: 12, padding: '20px 20px 16px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+            <p style={{ fontSize: 10, letterSpacing: '0.28em', textTransform: 'uppercase', color: '#0EA5E9', fontWeight: 700, marginBottom: 16 }}>
+              {editTarget ? 'Editar Servidor' : 'Novo Servidor'}
+            </p>
+            {error && (
+              <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 8, background: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B', fontSize: 12 }}>
+                {error}
+              </div>
+            )}
+            <ServerForm
+              initial={editTarget ? { ...editTarget, ssh_secret: '' } : undefined}
+              onSave={handleSave}
+              onCancel={() => { setShowForm(false); setEditTarget(null); setError(null) }}
+              saving={saving}
+            />
+          </div>
+        )}
+
+        {/* Lista de servidores */}
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '60px 0', color: '#94A3B8', fontSize: 13 }}>
+            <RefreshCw size={18} style={{ animation: 'spin 1s linear infinite', marginBottom: 8 }} />
+            <div>Carregando servidores…</div>
+          </div>
+        ) : servers.length === 0 ? (
+          <div style={{
+            background: '#fff', border: '1px solid #E2E8F0', borderRadius: 12,
+            padding: '48px 24px', textAlign: 'center',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+          }}>
+            <Server size={32} color="#E2E8F0" style={{ marginBottom: 12 }} />
+            <p style={{ color: '#64748B', fontSize: 14, fontWeight: 600, marginBottom: 4 }}>Nenhum servidor cadastrado</p>
+            <p style={{ color: '#94A3B8', fontSize: 12 }}>Clique em "Adicionar servidor" para começar.</p>
+          </div>
+        ) : (
+          servers.map(s => {
+            const tr = testResult[s.id]
+            return (
+              <div key={s.id} style={{
+                background: '#fff', border: '1px solid #E2E8F0', borderRadius: 12,
+                padding: '16px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
+              }}>
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: '#0F172A' }}>{s.name}</span>
+                    <ServerStatusBadge status={s.ssh_status} />
+                    {!s.is_enabled && (
+                      <span style={{ fontSize: 10, padding: '1px 7px', borderRadius: 999, background: '#F1F5F9', color: '#94A3B8', fontWeight: 600 }}>
+                        Desativado
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#64748B' }}>
+                    {s.ssh_user}@{s.host}:{s.port} · {s.script_path}
+                  </div>
+                  {s.last_connected_at && (
+                    <div style={{ fontSize: 10, color: '#94A3B8', marginTop: 2 }}>
+                      Último contato: {new Date(s.last_connected_at).toLocaleString('pt-BR')}
+                    </div>
+                  )}
+                  {s.ssh_error_msg && (
+                    <div style={{ fontSize: 11, color: '#DC2626', marginTop: 4 }}>{s.ssh_error_msg}</div>
+                  )}
+                  {tr && (
+                    <div style={{ fontSize: 11, marginTop: 4, color: tr.ok ? '#16A34A' : '#DC2626', fontWeight: 600 }}>
+                      {tr.ok ? `✓ Conectado em ${tr.latency_ms}ms` : `✗ ${tr.error}`}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                  <button
+                    onClick={() => handleTest(s.id)}
+                    disabled={testing[s.id]}
+                    title="Testar conexão SSH"
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 5,
+                      padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 600,
+                      border: '1px solid #BAE6FD', background: '#F0F9FF', color: '#0369A1',
+                      cursor: testing[s.id] ? 'wait' : 'pointer',
+                    }}>
+                    <Zap size={11} style={{ animation: testing[s.id] ? 'spin 1s linear infinite' : undefined }} />
+                    {testing[s.id] ? 'Testando…' : 'Testar'}
+                  </button>
+                  <button
+                    onClick={() => { setEditTarget(s); setShowForm(true); setError(null) }}
+                    title="Editar servidor"
+                    style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748B' }}>
+                    <Edit2 size={13} />
+                  </button>
+                  <button
+                    onClick={() => handleDelete(s.id)}
+                    title="Remover servidor"
+                    style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #FECACA', background: '#FEF2F2', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#DC2626' }}>
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              </div>
+            )
+          })
+        )}
+      </div>
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  )
+}

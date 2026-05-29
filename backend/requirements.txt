@@ -1,5 +1,6 @@
 # EXIM Monitor — dependências do backend
 fastapi==0.111.0
+cryptography==42.0.8
 uvicorn[standard]==0.30.1
 pydantic-settings==2.3.3
 sqlalchemy==2.0.31

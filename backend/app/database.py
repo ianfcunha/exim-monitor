@@ -7,9 +7,9 @@ Modelos:
 """
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Index, Integer, String, create_engine
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, create_engine
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, relationship, sessionmaker
 from sqlalchemy.pool import QueuePool
 
 from .config import settings
@@ -29,6 +29,68 @@ class Base(DeclarativeBase):
     pass
 
 
+class User(Base):
+    """
+    Usuário da plataforma.
+    role: 'admin' — gerencia servidores e convida membros.
+          'viewer' — acesso somente leitura aos servidores do admin que o convidou.
+    """
+    __tablename__ = "users"
+
+    id                 = Column(Integer, primary_key=True)
+    email              = Column(String(255), unique=True, nullable=False)
+    username           = Column(String(100), unique=True, nullable=False)
+    password_hash      = Column(String(500), nullable=True)   # null enquanto convite pendente
+    role               = Column(String(20),  default="admin", nullable=False)  # admin | viewer
+    is_active          = Column(Boolean,     default=True,    nullable=False)
+    email_verified     = Column(Boolean,     default=False,   nullable=False)
+
+    # Convite
+    invite_token       = Column(String(200), nullable=True, unique=True)
+    invite_expires_at  = Column(DateTime,    nullable=True)
+    invited_by         = Column(Integer,     ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    created_at         = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_login_at      = Column(DateTime, nullable=True)
+
+    # Relacionamentos
+    servers  = relationship("Server", back_populates="owner", foreign_keys="Server.owner_id")
+    invitees = relationship("User",   foreign_keys=[invited_by])
+
+
+class Server(Base):
+    """
+    Servidor EXIM gerenciado — pertence a um usuário (owner).
+    Viewers do owner têm acesso somente leitura.
+    """
+    __tablename__ = "servers"
+    __table_args__ = (
+        Index("ix_servers_owner_id", "owner_id"),
+    )
+
+    id              = Column(Integer, primary_key=True)
+    owner_id        = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    name            = Column(String(100), nullable=False)
+    host            = Column(String(255), nullable=False)
+    port            = Column(Integer,     default=22,     nullable=False)
+    ssh_user        = Column(String(100), default="root", nullable=False)
+    # 'password' ou 'key'
+    ssh_auth_type   = Column(String(20),  default="password", nullable=False)
+    # Fernet-encrypted: senha SSH ou conteúdo da chave privada
+    ssh_secret      = Column(String(4000), default="", nullable=False)
+    script_path     = Column(String(500),  default="/root/diag-exim.sh", nullable=False)
+    is_enabled      = Column(Boolean,      default=True,  nullable=False)
+    last_connected_at = Column(DateTime,   nullable=True)
+    ssh_status      = Column(String(20),   default="unknown", nullable=False)  # ok | error | timeout | unknown
+    ssh_error_msg   = Column(String(500),  nullable=True)
+    created_at      = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at      = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    # Relacionamentos
+    owner     = relationship("User",     back_populates="servers", foreign_keys=[owner_id])
+    snapshots = relationship("Snapshot", back_populates="server")
+
+
 class Snapshot(Base):
     __tablename__ = "snapshots"
     __table_args__ = (
@@ -38,6 +100,7 @@ class Snapshot(Base):
     )
 
     id            = Column(Integer, primary_key=True, index=True)
+    server_id     = Column(Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=True)
     timestamp     = Column(DateTime, default=datetime.utcnow, nullable=False)
     mode          = Column(String(10), default="full", nullable=False)
     queue_total   = Column(Integer,    default=0,        nullable=False)
@@ -49,6 +112,8 @@ class Snapshot(Base):
     recent_sends  = Column(Integer,    default=0,        nullable=False)
     data          = Column(JSONB, nullable=True)
 
+    server = relationship("Server", back_populates="snapshots")
+
 
 class AlertSettings(Base):
     """
@@ -57,7 +122,8 @@ class AlertSettings(Base):
     """
     __tablename__ = "alert_settings"
 
-    id = Column(Integer, primary_key=True, default=1)
+    id        = Column(Integer, primary_key=True, default=1)
+    server_id = Column(Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=True)
 
     # ── E-mail ───────────────────────────────────────────────────────────
     email_enabled  = Column(Boolean, default=False, nullable=False)
@@ -105,6 +171,29 @@ class AlertHistory(Base):
     queue_total= Column(Integer,     nullable=False, default=0)
     success    = Column(Boolean,     nullable=False, default=True)
     error_msg  = Column(String(500), nullable=True)
+
+
+def get_user_by_email(db, email: str):
+    return db.query(User).filter(User.email == email).first()
+
+
+def get_user_by_username(db, username: str):
+    return db.query(User).filter(User.username == username).first()
+
+
+def get_servers_for_user(db, user: User):
+    """
+    Admin: retorna seus próprios servidores.
+    Viewer: retorna os servidores do admin que o convidou.
+    """
+    owner_id = user.id if user.role == "admin" else user.invited_by
+    return db.query(Server).filter(Server.owner_id == owner_id, Server.is_enabled == True).all()
+
+
+def get_server_owned_by(db, server_id: int, user: User):
+    """Retorna o servidor se o usuário tem acesso a ele, None caso contrário."""
+    owner_id = user.id if user.role == "admin" else user.invited_by
+    return db.query(Server).filter(Server.id == server_id, Server.owner_id == owner_id).first()
 
 
 def get_alert_settings(db) -> AlertSettings:

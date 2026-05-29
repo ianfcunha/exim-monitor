@@ -1,7 +1,7 @@
 """
 Endpoints de ações sobre o servidor EXIM.
 
-POST /api/actions/{action}
+POST /api/actions/{action}?server_id=
 
 Ações disponíveis:
   clean-full     →  limpa toda a fila
@@ -14,14 +14,17 @@ Ações disponíveis:
   retry-queue    →  força reprocessamento (exim -qff)
 
 Body JSON: { "param": "valor" }  (opcional conforme a ação)
-O actor (usuário autenticado) é passado ao script via --actor= para auditoria.
+Viewer não pode executar ações.
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
-from ..auth import get_current_user
+from ..auth import require_admin
+from ..crypto import decrypt_secret
+from ..database import User, get_db, get_server_owned_by
 from ..limiter import limiter
 from ..ssh import SSHError, run_action
 
@@ -50,14 +53,16 @@ class ActionRequest(BaseModel):
     param: Optional[str] = None
 
 
-@router.post("/{action}", summary="Executa ação no servidor EXIM")
-@limiter.limit("20/minute")         # ações SSH — evita flood acidental
+@router.post("/{action}", summary="Executa ação no servidor EXIM (admin only)")
+@limiter.limit("20/minute")
 def execute_action(
     request: Request,
     response: Response,
     action: str,
+    server_id: Optional[int] = Query(None),
     body: ActionRequest = ActionRequest(),
-    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
 ):
     if action not in ALLOWED_ACTIONS:
         raise HTTPException(
@@ -74,9 +79,23 @@ def execute_action(
             detail=f"A ação '{action}' requer o campo 'param' no body.",
         )
 
+    # Resolve server_cfg
+    server_cfg = None
+    if server_id is not None:
+        server = get_server_owned_by(db, server_id, current_user)
+        if not server:
+            raise HTTPException(404, f"Servidor {server_id} não encontrado.")
+        server_cfg = {
+            "host":          server.host,
+            "port":          server.port,
+            "ssh_user":      server.ssh_user,
+            "ssh_auth_type": server.ssh_auth_type,
+            "ssh_secret":    decrypt_secret(server.ssh_secret),
+            "script_path":   server.script_path,
+        }
+
     try:
-        # current_user é passado como actor para auditoria no script (T3-3)
-        result = run_action(action, body.param, actor=current_user)
+        result = run_action(action, body.param, server_cfg=server_cfg)
     except SSHError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 

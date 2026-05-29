@@ -21,7 +21,7 @@ from .collector import background_collector
 from .config import settings
 from .database import run_retention
 from .limiter import limiter
-from .routers import actions, auth, history, messages, status
+from .routers import actions, auth, history, messages, servers, status, users
 from .routers import settings as settings_router
 
 logging.basicConfig(
@@ -31,7 +31,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Versão atual do schema — atualizar junto com cada nova migration
-_SCHEMA_VERSION = "002"
+_SCHEMA_VERSION = "003"
 
 _DDL_ALEMBIC_VERSION = """
     CREATE TABLE IF NOT EXISTS alembic_version (
@@ -118,6 +118,133 @@ def run_migrations() -> None:
                 {"v": "002"},
             )
             logger.info("Migration 002 aplicada com sucesso")
+            current = {"002"}
+
+        if "002" in current and "003" not in current:
+            logger.info("Aplicando migration 002 → 003 (users, servers, server_id)...")
+
+            # ── Tabela users ──────────────────────────────────────────
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id                SERIAL PRIMARY KEY,
+                    email             VARCHAR(255) NOT NULL UNIQUE,
+                    username          VARCHAR(100) NOT NULL UNIQUE,
+                    password_hash     VARCHAR(500),
+                    role              VARCHAR(20)  NOT NULL DEFAULT 'admin',
+                    is_active         BOOLEAN      NOT NULL DEFAULT TRUE,
+                    email_verified    BOOLEAN      NOT NULL DEFAULT FALSE,
+                    invite_token      VARCHAR(200) UNIQUE,
+                    invite_expires_at TIMESTAMP,
+                    invited_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
+                    last_login_at     TIMESTAMP
+                )
+            """))
+
+            # ── Tabela servers ────────────────────────────────────────
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS servers (
+                    id                SERIAL PRIMARY KEY,
+                    owner_id          INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    name              VARCHAR(100)  NOT NULL,
+                    host              VARCHAR(255)  NOT NULL,
+                    port              INTEGER       NOT NULL DEFAULT 22,
+                    ssh_user          VARCHAR(100)  NOT NULL DEFAULT 'root',
+                    ssh_auth_type     VARCHAR(20)   NOT NULL DEFAULT 'password',
+                    ssh_secret        VARCHAR(4000) NOT NULL DEFAULT '',
+                    script_path       VARCHAR(500)  NOT NULL DEFAULT '/root/diag-exim.sh',
+                    is_enabled        BOOLEAN       NOT NULL DEFAULT TRUE,
+                    last_connected_at TIMESTAMP,
+                    ssh_status        VARCHAR(20)   NOT NULL DEFAULT 'unknown',
+                    ssh_error_msg     VARCHAR(500),
+                    created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
+                    updated_at        TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+            """))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_servers_owner_id ON servers (owner_id)"
+            ))
+
+            # ── Migrar admin do .env para tabela users ────────────────
+            from .config import settings as cfg
+            from .auth import pwd_context
+            pw_hash = pwd_context.hash(cfg.admin_password[:72])
+            conn.execute(text("""
+                INSERT INTO users (email, username, password_hash, role, is_active, email_verified, created_at)
+                VALUES (:email, :username, :pw, 'admin', TRUE, TRUE, NOW())
+                ON CONFLICT (username) DO NOTHING
+            """), {"email": cfg.admin_email, "username": cfg.admin_username, "pw": pw_hash})
+
+            admin_row = conn.execute(
+                text("SELECT id FROM users WHERE username = :u"), {"u": cfg.admin_username}
+            ).fetchone()
+            admin_id = admin_row[0] if admin_row else None
+
+            # ── Migrar servidor do .env para tabela servers ───────────
+            if admin_id:
+                from .crypto import encrypt_secret
+                ssh_secret = encrypt_secret(cfg.ssh_password or "")
+                auth_type  = "password" if cfg.ssh_password else "key"
+                if not cfg.ssh_password and cfg.ssh_key_path:
+                    try:
+                        import os
+                        key_content = open(os.path.expanduser(cfg.ssh_key_path)).read()
+                        ssh_secret  = encrypt_secret(key_content)
+                        auth_type   = "key"
+                    except Exception:
+                        ssh_secret = ""
+
+                conn.execute(text("""
+                    INSERT INTO servers
+                        (owner_id, name, host, port, ssh_user, ssh_auth_type,
+                         ssh_secret, script_path, is_enabled, created_at, updated_at)
+                    VALUES
+                        (:owner, :name, :host, :port, :user, :auth_type,
+                         :secret, :script, TRUE, NOW(), NOW())
+                """), {
+                    "owner":     admin_id,
+                    "name":      cfg.ssh_host,
+                    "host":      cfg.ssh_host,
+                    "port":      cfg.ssh_port,
+                    "user":      cfg.ssh_user,
+                    "auth_type": auth_type,
+                    "secret":    ssh_secret,
+                    "script":    cfg.script_path,
+                })
+                logger.info("Servidor %s migrado para a tabela servers", cfg.ssh_host)
+
+            # ── Adicionar server_id aos snapshots ─────────────────────
+            conn.execute(text("""
+                ALTER TABLE snapshots
+                    ADD COLUMN IF NOT EXISTS server_id INTEGER
+                    REFERENCES servers(id) ON DELETE CASCADE
+            """))
+
+            # Vincular snapshots existentes ao servidor migrado
+            if admin_id:
+                server_row = conn.execute(
+                    text("SELECT id FROM servers WHERE owner_id = :o ORDER BY id LIMIT 1"),
+                    {"o": admin_id}
+                ).fetchone()
+                if server_row:
+                    conn.execute(
+                        text("UPDATE snapshots SET server_id = :sid WHERE server_id IS NULL"),
+                        {"sid": server_row[0]}
+                    )
+
+            # ── Adicionar server_id ao alert_settings ─────────────────
+            conn.execute(text("""
+                ALTER TABLE alert_settings
+                    ADD COLUMN IF NOT EXISTS server_id INTEGER
+                    REFERENCES servers(id) ON DELETE CASCADE
+            """))
+
+            conn.execute(text("DELETE FROM alembic_version"))
+            conn.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
+                {"v": "003"},
+            )
+            logger.info("Migration 003 aplicada com sucesso")
 
         logger.info("Banco de dados pronto (schema %s)", _SCHEMA_VERSION)
 
@@ -195,6 +322,8 @@ app.add_middleware(
 
 # Routers
 app.include_router(auth.router)
+app.include_router(users.router)
+app.include_router(servers.router)
 app.include_router(status.router)
 app.include_router(actions.router)
 app.include_router(history.router)

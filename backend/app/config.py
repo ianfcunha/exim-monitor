@@ -26,6 +26,18 @@ class Settings(BaseSettings):
 
     admin_username: str = "admin"
     admin_password: str = "admin"  # TROQUE no .env
+    admin_email: str = "admin@localhost"  # e-mail do admin inicial
+
+    # ── Criptografia de segredos SSH ─────────────────────────────────
+    # Gere com: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    ssh_encryption_key: str = "TROQUE-ME-EM-PRODUCAO-FERNET-KEY-32BYTES="
+
+    # ── Resend (convites e verificação de e-mail) ────────────────────
+    resend_api_key: str = ""
+    resend_from: str = "Mail IQ <noreply@seudominio.com>"
+
+    # ── URL pública do frontend (usada nos links de convite) ─────────
+    app_url: str = "http://localhost:5173"
 
     # ── Banco de dados PostgreSQL ────────────────────────────────────
     # Formato: postgresql://usuario:senha@host:porta/banco
