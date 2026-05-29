@@ -107,7 +107,7 @@
 #          (evita pegar local-parts com ponto, ex: case.file@domain → domain)
 # ============================================================
 
-VERSION="5.1"
+VERSION="5.2"
 LOG_PATH="/var/log/exim4/mainlog"
 LOG_LINES=10000
 QUEUE_SAMPLE_THRESHOLD=10000  # acima disso usa amostra da fila
@@ -149,6 +149,8 @@ fi
 
 AUTO_MODE=0; JSON_MODE=0; CLEAN_SPAM_AUTO=0; QUICK_MODE=0; CHECK_MODE=0
 ACTION_CMD=""; ACTION_PARAM=""
+ACTOR_NAME=""          # T3-3: usuário que disparou a ação (--actor=)
+PROFILE="standard"     # T3-4: perfil de coleta (light|standard|full)
 for arg in "$@"; do
     case "$arg" in
         --auto)        AUTO_MODE=1 ;;
@@ -164,6 +166,8 @@ for arg in "$@"; do
             [ "$ACTION_CMD" = "$ACTION_PARAM" ] && ACTION_PARAM=""
             JSON_MODE=1
             ;;
+        --actor=*)     ACTOR_NAME="${arg#--actor=}" ;;
+        --profile=*)   PROFILE="${arg#--profile=}" ;;
     esac
 done
 
@@ -948,6 +952,7 @@ output_json() {
         printf '  "script_version": "%s",\n' "$VERSION"
         printf '  "version": "%s",\n' "$VERSION"
         printf '  "mode": "%s",\n' "$_mode"
+        printf '  "profile": "%s",\n' "${PROFILE:-standard}"
         printf '  "collect_timed_out": %s,\n' "$_timed_out_str"
         [ -n "$_err_esc" ] && printf '  "error": "%s",\n' "$_err_esc"
         printf '  "queue": { "total": %s, "frozen": %s },\n' "${QUEUE:-0}" "${FROZEN_COUNT:-0}"
@@ -983,6 +988,7 @@ output_json() {
     printf '  "script_version": "%s",\n' "$VERSION"
     printf '  "version": "%s",\n' "$VERSION"
     printf '  "mode": "%s",\n' "$_mode"
+    printf '  "profile": "%s",\n' "${PROFILE:-standard}"
     printf '  "collect_timed_out": %s,\n' "$_timed_out_str"
     [ -n "$_err_esc" ] && printf '  "error": "%s",\n' "$_err_esc"
     printf '  "queue": {\n'
@@ -1022,6 +1028,7 @@ output_json() {
 # ============================================================
 output_action_json() {
     local success="$1" action="$2" message="$3"
+    _audit_log "$action" "$ACTION_PARAM" "$success" "$message"
     message=$(printf '%s' "$message" | sed 's/"/\\"/g')
     printf '{\n'
     printf '  "timestamp": "%s",\n' "$DATE"
@@ -1030,8 +1037,29 @@ output_action_json() {
     printf '  "version": "%s",\n' "$VERSION"
     printf '  "success": %s,\n' "$success"
     printf '  "action": "%s",\n' "$action"
+    printf '  "actor": "%s",\n' "${ACTOR_NAME:-system}"
     printf '  "message": "%s"\n' "$message"
     printf '}\n'
+}
+
+# ============================================================
+# T3-3 — LOG DE AUDITORIA DE AÇÕES
+# Registra cada ação executada em /var/log/exim-monitor/actions.log
+# com timestamp, actor, ação e resultado.
+# ============================================================
+_audit_log() {
+    local action="$1" param="$2" success="$3" message="$4"
+    local log_dir="/var/log/exim-monitor"
+    local log_file="$log_dir/actions.log"
+    # Cria diretório se não existir
+    [ -d "$log_dir" ] || { $SUDO mkdir -p "$log_dir" 2>/dev/null; $SUDO chmod 750 "$log_dir" 2>/dev/null; }
+    local actor_str="${ACTOR_NAME:-system}"
+    local param_str="${param:+ param=$param}"
+    local entry
+    entry=$(printf '[%s] actor=%s action=%s%s success=%s msg=%s
+'         "$DATE" "$actor_str" "$action" "$param_str" "$success" "$message")
+    printf '%s
+' "$entry" | $SUDO tee -a "$log_file" >/dev/null 2>&1 || true
 }
 
 # ============================================================
@@ -1081,7 +1109,7 @@ execute_action() {
             ;;
 
         clean-bounces)
-            local ids; ids=$(exiqgrep -f '<>' -i 2>/dev/null \
+            local ids; ids=$($SUDO exiqgrep -f '<>' -i 2>/dev/null \
                 | grep -E '^[A-Za-z0-9-]{6,}$')
             local count; count=$(echo "$ids" | grep -c . 2>/dev/null); count=${count:-0}
             echo "$ids" | xargs -r -P4 "$EXIM_BIN" -Mrm 2>/dev/null
@@ -1100,7 +1128,7 @@ execute_action() {
                     "Parâmetro inválido: '$param' contém caracteres não permitidos"
                 exit 1
             fi
-            local ids; ids=$(exiqgrep -f "$param" -i 2>/dev/null \
+            local ids; ids=$($SUDO exiqgrep -f "$param" -i 2>/dev/null \
                 | grep -E '^[A-Za-z0-9-]{6,}$')
             local count; count=$(echo "$ids" | grep -c . 2>/dev/null); count=${count:-0}
             echo "$ids" | xargs -r -P4 "$EXIM_BIN" -Mrm 2>/dev/null
@@ -1134,32 +1162,80 @@ execute_action() {
                     "Parâmetro obrigatório: --action=block-ip:<ip>"
                 exit 1
             fi
-            # Valida formato de IP (IPv4 básico)
-            if ! echo "$param" | grep -qE \
-                '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
+            # T3-1: Validação IPv4 e IPv6
+            local _ip_valid=0
+            echo "$param" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$' && _ip_valid=1
+            echo "$param" | grep -qE '^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$' && _ip_valid=1
+            if [ "$_ip_valid" -eq 0 ]; then
                 output_action_json "false" "$cmd" \
-                    "Endereço IP inválido: '$param'"
+                    "Endereço IP inválido: '$param' (esperado IPv4 ou IPv6)"
                 exit 1
             fi
+            local _result_msgs=""
+            # T3-1: Bloquear via iptables diretamente
+            if $SUDO iptables -C INPUT -s "$param" -j DROP 2>/dev/null; then
+                _result_msgs="iptables: já bloqueado"
+            else
+                if $SUDO iptables -I INPUT -s "$param" -j DROP 2>/dev/null; then
+                    _result_msgs="iptables: bloqueado"
+                else
+                    _result_msgs="iptables: sem permissão"
+                fi
+            fi
+            # T3-1: Persistir em /etc/firewall.d/03_custom (cria arquivo se não existir)
             local fw_file="/etc/firewall.d/03_custom"
-            if [ ! -d "$(dirname "$fw_file")" ]; then
+            local fw_dir="/etc/firewall.d"
+            if $SUDO mkdir -p "$fw_dir" 2>/dev/null || [ -d "$fw_dir" ]; then
+                if grep -qF "$param" "$fw_file" 2>/dev/null; then
+                    _result_msgs="$_result_msgs; firewall.d: já presente"
+                else
+                    if [ ! -f "$fw_file" ]; then
+                        printf '#!/bin/sh\n# Regras customizadas — gerado por diag-exim.sh\n' \
+                            | $SUDO tee "$fw_file" >/dev/null 2>&1
+                        $SUDO chmod 640 "$fw_file" 2>/dev/null
+                    fi
+                    printf '\n# Bloqueado via API em %s\n$IPTABLES -I INPUT -s %s -j DROP\n' \
+                        "$DATE" "$param" | $SUDO tee -a "$fw_file" >/dev/null 2>&1
+                    $SUDO systemctl restart firewall.service 2>/dev/null \
+                        && _result_msgs="$_result_msgs; firewall.d: adicionado e reiniciado" \
+                        || _result_msgs="$_result_msgs; firewall.d: adicionado (reinicie firewall.service)"
+                fi
+            else
+                _result_msgs="$_result_msgs; firewall.d: falha ao criar $fw_dir"
+            fi
+            output_action_json "true" "$cmd" \
+                "IP $param processado — $_result_msgs"
+            ;;
+
+        block-sender)
+            # T3-2: Bloqueia remetente na blacklist do EXIM
+            if [ -z "$param" ]; then
                 output_action_json "false" "$cmd" \
-                    "Diretório $(dirname "$fw_file") não encontrado neste servidor"
+                    "Parâmetro obrigatório: --action=block-sender:<endereço>"
                 exit 1
             fi
-            if [ -f "$fw_file" ] && grep -qF "$param" "$fw_file" 2>/dev/null; then
+            if ! _validate_action_param "$param"; then
                 output_action_json "false" "$cmd" \
-                    "IP $param já está bloqueado em $fw_file"
+                    "Parâmetro inválido: '$param' contém caracteres não permitidos"
+                exit 1
+            fi
+            # Valida formato de e-mail básico
+            if ! echo "$param" | grep -qE '^[^@]+@[^@]+\.[^@]+$'; then
+                output_action_json "false" "$cmd" \
+                    "Endereço inválido: '$param' (esperado formato email@dominio.tld)"
+                exit 1
+            fi
+            local exim_bl_s="/etc/exim4/spammer_sender"
+            if [ -f "$exim_bl_s" ] && grep -qF "$param" "$exim_bl_s" 2>/dev/null; then
+                output_action_json "false" "$cmd" \
+                    "Remetente $param já está na blacklist ($exim_bl_s)"
                 exit 0
             fi
-            [ ! -f "$fw_file" ] && touch "$fw_file" && chmod 640 "$fw_file"
-            printf '\n#Bloqueado via API em %s\n$IPTABLES -I INPUT -s %s -j DROP\n' \
-                "$DATE" "$param" >> "$fw_file"
-            local svc_msg="firewall.service não reiniciado (sem systemctl)"
-            systemctl restart firewall.service 2>/dev/null \
-                && svc_msg="firewall.service reiniciado com sucesso"
+            printf '%s\n' "$param" | $SUDO tee -a "$exim_bl_s" >/dev/null 2>&1 \
+                || { output_action_json "false" "$cmd" \
+                    "Falha ao escrever em $exim_bl_s"; exit 1; }
             output_action_json "true" "$cmd" \
-                "IP $param bloqueado em $fw_file — $svc_msg"
+                "Remetente $param adicionado à blacklist ($exim_bl_s)"
             ;;
 
         retry-queue)
@@ -1170,7 +1246,7 @@ execute_action() {
 
         *)
             output_action_json "false" "$cmd" \
-                "Ação desconhecida: '$cmd'. Opções: clean-full, clean-frozen, clean-bounces, clean-sender:<addr>, clean-auth:<user>, block-ip:<ip>, retry-queue"
+                "Ação desconhecida: '$cmd'. Opções: clean-full, clean-frozen, clean-bounces, clean-sender:<addr>, clean-auth:<user>, block-ip:<ip>, block-sender:<email>, retry-queue"
             exit 1
             ;;
     esac
@@ -2048,8 +2124,7 @@ main() {
     print_senders
     print_recipients
     print_auth
-    print_ips
-    print_errors
+    print_ips    print_errors
     [ "$DEFER_COUNT" -gt 200 ] && [ "${DEFER_DETAIL_AVAILABLE:-0}" -eq 1 ] && print_defers
 
     auto_clean
@@ -2057,3 +2132,4 @@ main() {
 }
 
 main
+                                  
