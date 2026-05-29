@@ -197,27 +197,36 @@ export default function Dashboard({ onLogout, onSettings, onServers }) {
               </div>
             )}
 
-            {/* Seletor de servidor + badge SSH */}
+            {/* Seletor de servidor */}
             <ServerSelector />
-            {activeServer && (
-              <div
-                className="hidden sm:flex items-center gap-1.5"
-                title={
-                  activeServer.ssh_status === 'ok'
-                    ? `SSH ok · último contato ${activeServer.last_connected_at ? new Date(activeServer.last_connected_at).toLocaleString('pt-BR') : 'desconhecido'}`
-                    : activeServer.ssh_error_msg ?? 'Status SSH desconhecido'
-                }
-                style={{ fontSize: 11, cursor: 'default' }}
-              >
-                <span style={{
-                  width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-                  background: { ok: '#16A34A', error: '#DC2626', timeout: '#D97706', unknown: '#94A3B8' }[activeServer.ssh_status] ?? '#94A3B8',
-                }} />
-                <span style={{ color: '#94A3B8' }}>SSH</span>
-              </div>
-            )}
 
-            {/* Status */}
+            {/* Badge SSH — conexão com o servidor */}
+            {activeServer && (() => {
+              const sshColors = { ok: '#16A34A', error: '#DC2626', timeout: '#D97706', unknown: '#94A3B8' }
+              const sshLabels = { ok: 'SSH ok', error: 'SSH erro', timeout: 'SSH timeout', unknown: 'SSH?' }
+              const color = sshColors[activeServer.ssh_status] ?? '#94A3B8'
+              const tooltip = activeServer.ssh_status === 'ok'
+                ? `Conexão SSH ativa · último contato: ${activeServer.last_connected_at ? new Date(activeServer.last_connected_at).toLocaleString('pt-BR') : '—'}`
+                : `Problema SSH: ${activeServer.ssh_error_msg ?? 'desconhecido'}`
+              return (
+                <div
+                  className="hidden sm:flex items-center gap-1.5"
+                  title={tooltip}
+                  style={{
+                    fontSize: 11, fontWeight: 500, cursor: 'default',
+                    padding: '3px 8px', borderRadius: 999,
+                    background: `${color}12`,
+                    border: `1px solid ${color}30`,
+                    color,
+                  }}
+                >
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
+                  {sshLabels[activeServer.ssh_status] ?? 'SSH'}
+                </div>
+              )
+            })()}
+
+            {/* Badge diagnóstico EXIM — severidade do servidor de e-mail */}
             <StatusBadge severity={diag.severity ?? 'OK'} problem={diag.problem} />
 
             {/* Staleness */}

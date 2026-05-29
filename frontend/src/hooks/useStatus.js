@@ -4,58 +4,25 @@
  * useQuickStatus()  — atualiza a cada 30s (heartbeat)
  * useFullStatus()   — atualiza a cada 5min (diagnóstico completo)
  *
- * Ambos passam automaticamente o server_id do ServerContext ativo.
- * Quando não há ServerContext disponível (ex: durante migração), usa null.
+ * Ambos passam automaticamente o server_id do servidor ativo no ServerContext.
+ * Quando o servidor ativo muda, reinicia o polling automaticamente.
  */
-import { useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchFullStatus, fetchQuickStatus } from '../api/client'
-
-// Import lazy para evitar erro circular se ServerContext não estiver montado ainda
-let _ServerContext = null
-function getServerContext() {
-  if (!_ServerContext) {
-    try {
-      _ServerContext = require('../contexts/ServerContext').default
-    } catch {
-      return null
-    }
-  }
-  return _ServerContext
-}
-
-function useActiveServerId() {
-  try {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    const { useServer } = require('../contexts/ServerContext')
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    const { activeServer } = useServer()
-    return activeServer?.id ?? null
-  } catch {
-    return null
-  }
-}
+import { useServer } from '../contexts/ServerContext'
 
 function usePolling(fetcherFn, intervalMs) {
+  const { activeServer } = useServer()
+  const serverId = activeServer?.id ?? null
+
   const [data, setData]       = useState(null)
   const [error, setError]     = useState(null)
   const [loading, setLoading] = useState(true)
   const timerRef              = useRef(null)
-  const serverIdRef           = useRef(null)
-
-  // Tenta usar o server_id do contexto
-  let serverId = null
-  try {
-    const { useServer } = require('../contexts/ServerContext')
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    const { activeServer } = useServer()
-    serverId = activeServer?.id ?? null
-  } catch {
-    serverId = null
-  }
 
   const fetcher = useCallback(async () => {
     try {
-      const result = await fetcherFn(serverIdRef.current)
+      const result = await fetcherFn(serverId)
       setData(result)
       setError(null)
     } catch (err) {
@@ -63,14 +30,9 @@ function usePolling(fetcherFn, intervalMs) {
     } finally {
       setLoading(false)
     }
-  }, [fetcherFn])
+  }, [fetcherFn, serverId])
 
-  // Atualiza ref sem recriar o fetcher
-  useEffect(() => {
-    serverIdRef.current = serverId
-  }, [serverId])
-
-  // Reinicia o polling quando o servidor ativo muda
+  // Reinicia polling quando servidor ativo ou fetcher muda
   useEffect(() => {
     setLoading(true)
     setData(null)
@@ -79,7 +41,7 @@ function usePolling(fetcherFn, intervalMs) {
     clearInterval(timerRef.current)
     timerRef.current = setInterval(fetcher, intervalMs)
     return () => clearInterval(timerRef.current)
-  }, [fetcher, intervalMs, serverId])
+  }, [fetcher, intervalMs])
 
   return { data, error, loading, refresh: fetcher }
 }
