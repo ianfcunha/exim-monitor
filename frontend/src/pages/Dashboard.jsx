@@ -2,7 +2,7 @@
  * Dashboard principal — identidade AVILI light profissional.
  * Estilo admin dashboard: header branco, fundo slate-100, cards brancos com sombra.
  */
-import { CheckCircle, Clock, FileText, Inbox, LogOut, MailOpen, RefreshCw, Server, Settings, XCircle } from 'lucide-react'
+import { CheckCircle, ChevronDown, Clock, FileText, Inbox, LogOut, MailOpen, RefreshCw, Server, Settings, Users, XCircle } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { refreshStatus } from '../api/client'
 import ActionPanel from '../components/ActionPanel'
@@ -14,7 +14,6 @@ import MessagesDrawer from '../components/MessagesDrawer'
 import LogViewerDrawer from '../components/LogViewerDrawer'
 import MetricCard from '../components/MetricCard'
 import ServerSelector from '../components/ServerSelector'
-import StatusBadge from '../components/StatusBadge'
 import TopTable from '../components/TopTable'
 import { useServer } from '../contexts/ServerContext'
 import { useFullStatus, useQuickStatus } from '../hooks/useStatus'
@@ -51,28 +50,101 @@ function LogoMark({ size = 20 }) {
 }
 
 
-/* ── Botão header ── */
-function HBtn({ onClick, disabled, title, children, danger }) {
+/* ── Botão header simples ── */
+function HBtn({ onClick, disabled, title, children }) {
   const [hov, setHov] = useState(false)
   return (
     <button
       onClick={onClick} disabled={disabled} title={title}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
+      onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
       style={{
         display: 'flex', alignItems: 'center', gap: 6,
-        borderRadius: 8,
-        border: hov ? (danger ? '1px solid #FECACA' : '1px solid #BAE6FD') : '1px solid #E2E8F0',
+        borderRadius: 7, border: '1px solid #E2E8F0',
         padding: '6px 12px', fontSize: 11, fontWeight: 500, cursor: 'pointer',
-        color: hov ? (danger ? '#991B1B' : '#0369A1') : '#64748B',
-        background: hov ? (danger ? '#FEF2F2' : '#F0F9FF') : '#fff',
-        transition: 'all 0.15s',
-        opacity: disabled ? 0.4 : 1,
-        whiteSpace: 'nowrap',
+        color: hov ? '#0369A1' : '#64748B',
+        background: hov ? '#F0F9FF' : '#fff',
+        transition: 'all 0.15s', opacity: disabled ? 0.4 : 1, whiteSpace: 'nowrap',
       }}
-    >
-      {children}
-    </button>
+    >{children}</button>
+  )
+}
+
+/* ── Badge de status clicável ── */
+function StatusPill({ color, label, children }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [])
+  return (
+    <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
+      <button onClick={() => setOpen(v => !v)} style={{
+        display: 'flex', alignItems: 'center', gap: 5,
+        padding: '4px 10px', borderRadius: 999, fontSize: 11, fontWeight: 600,
+        border: `1px solid ${color}25`, background: `${color}0f`,
+        color, cursor: 'pointer',
+      }}>
+        <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
+        {label}
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 200,
+          background: '#fff', border: '1px solid #E2E8F0', borderRadius: 10,
+          boxShadow: '0 4px 20px rgba(0,0,0,0.10)', padding: '12px 14px', minWidth: 210, fontSize: 12,
+        }}>
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── Dropdown de configurações ── */
+function SettingsMenu({ onSettings, onServers, onUsers, onLogout }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [])
+
+  const item = (icon, label, onClick, danger) => (
+    <button onClick={() => { onClick(); setOpen(false) }} style={{
+      width: '100%', display: 'flex', alignItems: 'center', gap: 9,
+      padding: '8px 10px', borderRadius: 7, fontSize: 12, fontWeight: 500,
+      border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left',
+      color: danger ? '#DC2626' : '#0F172A',
+    }}
+    onMouseEnter={e => e.currentTarget.style.background = danger ? '#FEF2F2' : '#F8FAFC'}
+    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+    >{icon}{label}</button>
+  )
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <HBtn onClick={() => setOpen(v => !v)} title="Configurações">
+        <Settings size={12} />
+        <span className="hidden sm:inline">Configurações</span>
+        <ChevronDown size={11} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+      </HBtn>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 200,
+          background: '#fff', border: '1px solid #E2E8F0', borderRadius: 10,
+          boxShadow: '0 4px 20px rgba(0,0,0,0.10)', padding: '6px', minWidth: 180,
+        }}>
+          {item(<Server size={13} />, 'Servidores', onServers)}
+          {item(<Settings size={13} />, 'Alertas', onSettings)}
+          {item(<Users size={13} />, 'Usuários', onUsers)}
+          <div style={{ height: 1, background: '#F1F5F9', margin: '4px 0' }} />
+          {item(<LogOut size={13} />, 'Sair', onLogout, true)}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -137,97 +209,116 @@ export default function Dashboard({ onLogout, onSettings, onServers }) {
     <div style={{ minHeight: '100vh', background: '#F1F5F9' }}>
 
       {/* ── Header ── */}
-      <header
-        className="header-accent"
-        style={{
-          position: 'sticky', top: 0, zIndex: 10,
-          padding: '0 24px',
-          background: '#fff',
-          borderBottom: '1px solid #E2E8F0',
-          boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
-        }}
-      >
+      <header style={{
+        position: 'sticky', top: 0, zIndex: 10,
+        padding: '0 24px', background: '#fff',
+        borderBottom: '1px solid #E2E8F0',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+      }}>
         <div style={{
           maxWidth: 1280, margin: '0 auto',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          gap: 12, height: 56,
+          gap: 12, height: 54,
         }}>
-          {/* Esquerda */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0 }}>
-              <div style={{
-                width: 36, height: 36, borderRadius: 10,
-                background: '#F0F9FF', border: '1px solid #BAE6FD',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>
-                <LogoMark size={20} />
+
+          {/* ── Esquerda: logo | servidor | EXIM | SSH | tempo ── */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+
+            {/* Logo */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+              <div style={{ width: 34, height: 34, borderRadius: 9, background: '#F0F9FF', border: '1px solid #BAE6FD', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <LogoMark size={19} />
               </div>
-              <div className="hidden sm:block" style={{ lineHeight: 1.15 }}>
-                <div style={{ fontSize: 14, fontWeight: 800, letterSpacing: '-0.01em' }}>
-                  <span style={{ color: '#0F172A' }}>Mail </span>
-                  <span style={{ color: '#0EA5E9' }}>IQ</span>
+              <div className="hidden sm:block" style={{ lineHeight: 1.2 }}>
+                <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: '-0.01em' }}>
+                  <span style={{ color: '#0F172A' }}>Mail </span><span style={{ color: '#0EA5E9' }}>IQ</span>
                 </div>
-                <div style={{ fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 600, color: '#94A3B8' }}>
+                <div style={{ fontSize: 8.5, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 600, color: '#94A3B8' }}>
                   by <span style={{ color: '#0EA5E9' }}>AVILI</span>
                 </div>
               </div>
             </div>
 
-            <span style={{ color: '#E2E8F0', fontSize: 18 }} className="hidden md:block">|</span>
+            {/* Divider */}
+            <span style={{ width: 1, height: 18, background: '#E2E8F0', flexShrink: 0 }} />
 
-            {(q.hostname || f.hostname) && (
-              <div className="hidden md:flex items-center gap-2 min-w-0">
-                <span className="truncate font-mono" style={{ fontSize: 11, color: '#94A3B8' }}>
-                  {q.hostname || f.hostname}
-                </span>
-                {eximVersion && (
-                  <span style={{
-                    fontSize: 10, padding: '1px 7px', borderRadius: 999,
-                    background: '#F0F9FF', border: '1px solid #BAE6FD', color: '#0369A1', fontWeight: 600,
-                  }}>
-                    {eximVersion}
-                  </span>
-                )}
-              </div>
-            )}
-
+            {/* Seletor de servidor */}
             <ServerSelector />
-            <StatusBadge severity={diag.severity ?? 'OK'} problem={diag.problem} />
 
+            {/* Badge EXIM */}
+            {(() => {
+              const sev = diag.severity ?? 'OK'
+              const ok  = sev === 'OK' || sev === 'LOW'
+              const color = ok ? '#16A34A' : sev === 'MEDIUM' || sev === 'HIGH' ? '#D97706' : '#DC2626'
+              return (
+                <StatusPill color={color} label={ok ? 'EXIM' : sev}>
+                  <div style={{ fontWeight: 700, color: '#0F172A', marginBottom: 8 }}>Diagnóstico EXIM</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />
+                    <span style={{ color, fontWeight: 600 }}>{sev}</span>
+                  </div>
+                  {diag.problem && diag.problem !== 'NORMAL' && (
+                    <div style={{ color: '#64748B', fontSize: 11, marginTop: 4 }}>{diag.problem}</div>
+                  )}
+                </StatusPill>
+              )
+            })()}
+
+            {/* Badge SSH */}
+            {activeServer && (() => {
+              const ok    = activeServer.ssh_status === 'ok'
+              const color = ok ? '#16A34A' : activeServer.ssh_status === 'unknown' ? '#94A3B8' : '#DC2626'
+              const label = { ok: 'SSH', error: 'SSH', timeout: 'SSH', unknown: 'SSH' }[activeServer.ssh_status] ?? 'SSH'
+              return (
+                <StatusPill color={color} label={label}>
+                  <div style={{ fontWeight: 700, color: '#0F172A', marginBottom: 8 }}>Conexão SSH</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />
+                    <span style={{ color, fontWeight: 600 }}>
+                      {{ ok: 'Conectado', error: 'Erro', timeout: 'Timeout', unknown: 'Desconhecido' }[activeServer.ssh_status]}
+                    </span>
+                  </div>
+                  {activeServer.ssh_error_msg && (
+                    <div style={{ color: '#DC2626', fontSize: 11, marginTop: 4, wordBreak: 'break-word' }}>
+                      {activeServer.ssh_error_msg}
+                    </div>
+                  )}
+                  {activeServer.last_connected_at && (
+                    <div style={{ color: '#94A3B8', fontSize: 11, marginTop: 4 }}>
+                      Último contato: {new Date(activeServer.last_connected_at).toLocaleString('pt-BR')}
+                    </div>
+                  )}
+                </StatusPill>
+              )
+            })()}
+
+            {/* Tempo desde última coleta */}
             {staleness && (
-              <div className="hidden sm:flex items-center gap-1.5" style={{ fontSize: 11, color: staleness.color }}>
-                <span style={{
-                  width: 6, height: 6, borderRadius: '50%',
-                  background: staleness.dot, flexShrink: 0,
-                  animation: staleness.pulse ? 'pulse-sky 2s ease-in-out infinite' : undefined,
-                }} />
+              <div className="hidden sm:flex items-center gap-1.5" style={{ fontSize: 11, color: staleness.color, flexShrink: 0 }}>
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: staleness.dot, flexShrink: 0, animation: staleness.pulse ? 'pulse-sky 2s ease-in-out infinite' : undefined }} />
                 {staleness.label}
               </div>
             )}
           </div>
 
-          {/* Direita */}
+          {/* ── Direita: refresh | logs | configurações ── */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
             <HBtn onClick={handleRefresh} disabled={refreshing} title="Forçar atualização">
               <RefreshCw size={12} style={{ animation: refreshing ? 'spin 1s linear infinite' : undefined }} />
               <span className="hidden sm:inline">{refreshing ? 'Atualizando…' : 'Refresh'}</span>
             </HBtn>
-            <HBtn onClick={() => setLogViewer(true)} title="Abrir visualizador de log">
+
+            <HBtn onClick={() => setLogViewer(true)} title="Visualizador de log">
               <FileText size={12} />
               <span className="hidden sm:inline">Logs</span>
             </HBtn>
-            <HBtn onClick={onServers} title="Gerenciar servidores">
-              <Server size={12} />
-              <span className="hidden sm:inline">Servidores</span>
-            </HBtn>
-            <HBtn onClick={onSettings} title="Configurações de alertas">
-              <Settings size={12} />
-              <span className="hidden sm:inline">Alertas</span>
-            </HBtn>
-            <HBtn onClick={onLogout} title="Sair" danger>
-              <LogOut size={12} />
-              <span className="hidden sm:inline">Sair</span>
-            </HBtn>
+
+            <SettingsMenu
+              onSettings={onSettings}
+              onServers={onServers}
+              onUsers={() => { onSettings(); }}
+              onLogout={onLogout}
+            />
           </div>
         </div>
       </header>
