@@ -149,7 +149,7 @@ function SettingsMenu({ onSettings, onServers, onUsers, onLogout }) {
 }
 
 
-export default function Dashboard({ onLogout, onSettings, onServers }) {
+export default function Dashboard({ onLogout, onSettings, onServers, onUsers }) {
   const { activeServer } = useServer()
   const quick = useQuickStatus()
   const full  = useFullStatus()
@@ -316,7 +316,7 @@ export default function Dashboard({ onLogout, onSettings, onServers }) {
             <SettingsMenu
               onSettings={onSettings}
               onServers={onServers}
-              onUsers={() => { onSettings(); }}
+              onUsers={onUsers}
               onLogout={onLogout}
             />
           </div>

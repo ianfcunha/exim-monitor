@@ -6,6 +6,7 @@ import InviteAccept from './pages/InviteAccept'
 import Login from './pages/Login'
 import ServersPage from './pages/ServersPage'
 import Settings from './pages/Settings'
+import UsersPage from './pages/UsersPage'
 
 // Rota /invite/:token — detectada antes do login
 function getInviteToken() {
@@ -48,11 +49,15 @@ export default function App() {
         {page === 'servers' && (
           <ServersPage onBack={() => setPage('dashboard')} />
         )}
+        {page === 'users' && (
+          <UsersPage onBack={() => setPage('dashboard')} />
+        )}
         {page === 'dashboard' && (
           <Dashboard
             onLogout={logout}
             onSettings={() => setPage('settings')}
             onServers={() => setPage('servers')}
+            onUsers={() => setPage('users')}
           />
         )}
       </ServerProvider>
