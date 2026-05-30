@@ -1,17 +1,28 @@
 /**
  * Dashboard principal — identidade AVILI light profissional.
  * Estilo admin dashboard: header branco, fundo slate-100, cards brancos com sombra.
+ *
+ * Melhorias UX incluídas:
+ *   - Título dinâmico da aba conforme severidade
+ *   - Badge de role (Admin/Viewer) + username no header
+ *   - Tendência nos MetricCards (seta ↑↓ vs coleta anterior)
+ *   - Tooltips explicativos nos cards
+ *   - DiagnosisPanel colapsável (auto-colapsa em OK, auto-expande em CRITICAL)
+ *   - Atalhos de teclado: R=Refresh, L=Logs
  */
-import { CheckCircle, ChevronDown, Clock, FileText, Inbox, LogOut, MailOpen, RefreshCw, Server, Settings, Users, XCircle } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  CheckCircle, ChevronDown, Clock, FileText, Inbox,
+  LogOut, MailOpen, RefreshCw, Server, Settings, Users, XCircle,
+} from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { refreshStatus } from '../api/client'
 import ActionPanel from '../components/ActionPanel'
+import DeliveryRateCard from '../components/DeliveryRateCard'
 import DiagnosisPanel from '../components/DiagnosisPanel'
 import HistoryChart from '../components/HistoryChart'
 import HourlyBarChart from '../components/HourlyBarChart'
-import DeliveryRateCard from '../components/DeliveryRateCard'
-import MessagesDrawer from '../components/MessagesDrawer'
 import LogViewerDrawer from '../components/LogViewerDrawer'
+import MessagesDrawer from '../components/MessagesDrawer'
 import MetricCard from '../components/MetricCard'
 import ServerSelector from '../components/ServerSelector'
 import TopTable from '../components/TopTable'
@@ -19,6 +30,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useServer } from '../contexts/ServerContext'
 import { useFullStatus, useQuickStatus } from '../hooks/useStatus'
 
+// ── Formatação de números ────────────────────────────────────────────────────
 function fmt(n) {
   if (n == null) return '—'
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
@@ -26,6 +38,7 @@ function fmt(n) {
   return String(n)
 }
 
+// ── Staleness do dado ────────────────────────────────────────────────────────
 function useStaleness(ts) {
   const [, tick] = useState(0)
   useEffect(() => {
@@ -39,7 +52,7 @@ function useStaleness(ts) {
   return               { color: '#DC2626', dot: '#EF4444', label: `${Math.floor(diffS/60)}min · desatualizado`, pulse: true  }
 }
 
-/* ── Logo SVG AVILI ── */
+// ── Logo SVG AVILI ───────────────────────────────────────────────────────────
 function LogoMark({ size = 20 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 60 60" fill="none" aria-hidden>
@@ -50,8 +63,7 @@ function LogoMark({ size = 20 }) {
   )
 }
 
-
-/* ── Botão header simples ── */
+// ── Botão do header ──────────────────────────────────────────────────────────
 function HBtn({ onClick, disabled, title, children }) {
   const [hov, setHov] = useState(false)
   return (
@@ -70,7 +82,7 @@ function HBtn({ onClick, disabled, title, children }) {
   )
 }
 
-/* ── Badge de status clicável ── */
+// ── StatusPill clicável ──────────────────────────────────────────────────────
 function StatusPill({ color, label, children }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
@@ -103,7 +115,7 @@ function StatusPill({ color, label, children }) {
   )
 }
 
-/* ── Dropdown de configurações ── */
+// ── Dropdown de configurações ────────────────────────────────────────────────
 function SettingsMenu({ onSettings, onServers, onUsers, onLogout, isAdmin }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
@@ -149,15 +161,24 @@ function SettingsMenu({ onSettings, onServers, onUsers, onLogout, isAdmin }) {
   )
 }
 
+// ── Tooltips por métrica ─────────────────────────────────────────────────────
+const METRIC_TOOLTIPS = {
+  queue:     'Total de mensagens aguardando entrega na fila do EXIM',
+  delivered: 'Mensagens entregues com sucesso no período amostrado do log',
+  rejected:  'Mensagens rejeitadas (erro 5xx) — recusadas pelo servidor destino',
+  deferred:  'Entregas adiadas temporariamente (erro 4xx) — serão retentadas automaticamente',
+  sent:      'Mensagens recebidas/aceitas pelo EXIM para envio no período amostrado',
+}
 
+// ── Componente principal ─────────────────────────────────────────────────────
 export default function Dashboard({ onLogout, onSettings, onServers, onUsers }) {
-  const { isAdmin } = useAuth()
-  const { activeServer } = useServer()
-  const quick = useQuickStatus()
-  const full  = useFullStatus()
+  const { isAdmin, username } = useAuth()
+  const { activeServer }      = useServer()
+  const quick                 = useQuickStatus()
+  const full                  = useFullStatus()
   const [refreshing, setRefreshing] = useState(false)
   const [chartKey, setChartKey]     = useState(0)
-  const [drawer, setDrawer]         = useState(null) // 'queue'|'delivered'|'rejected'|'deferred'|'sent'
+  const [drawer, setDrawer]         = useState(null)
   const [logViewer, setLogViewer]   = useState(false)
 
   const q     = quick.data ?? {}
@@ -167,10 +188,66 @@ export default function Dashboard({ onLogout, onSettings, onServers, onUsers }) 
   const queue = q.queue     ?? f.queue     ?? {}
 
   const hourlyStats        = q.hourly_stats ?? []
-  const eximVersion        = q.exim?.version ?? f.exim?.version ?? null
   const recommendedActions = diag.actions_recommended ?? []
 
-  // Converte {domain, count} → {label, count} para TopTable
+  // ── Tendência: compara valor atual vs coleta anterior ─────────────────────
+  const prevRef = useRef(null)
+
+  const trend = useMemo(() => {
+    const prev = prevRef.current
+    if (!prev) return {}
+    return {
+      queue:     (queue.total       ?? 0) - prev.queue,
+      delivered: (log.delivered     ?? 0) - prev.delivered,
+      rejected:  (log.rejected      ?? 0) - prev.rejected,
+      deferred:  (log.deferred      ?? 0) - prev.deferred,
+      sent:      (log.recent_sends  ?? 0) - prev.sent,
+    }
+  }, [quick.data]) // eslint-disable-line
+
+  useEffect(() => {
+    if (!quick.loading && quick.data) {
+      prevRef.current = {
+        queue:     queue.total      ?? 0,
+        delivered: log.delivered    ?? 0,
+        rejected:  log.rejected     ?? 0,
+        deferred:  log.deferred     ?? 0,
+        sent:      log.recent_sends ?? 0,
+      }
+    }
+  }, [quick.data]) // eslint-disable-line
+
+  // ── Título dinâmico da aba ────────────────────────────────────────────────
+  useEffect(() => {
+    const sev   = diag.severity ?? 'OK'
+    const icons = { MEDIUM: '⚠️', HIGH: '🚨', CRITICAL: '🔴' }
+    const icon  = icons[sev] ?? ''
+    document.title = (sev === 'OK' || sev === 'LOW')
+      ? 'Mail IQ — AVILI'
+      : `${icon} ${sev} — Mail IQ`
+    return () => { document.title = 'Mail IQ — AVILI' }
+  }, [diag.severity])
+
+  // ── Atalhos de teclado ────────────────────────────────────────────────────
+  useEffect(() => {
+    const handler = (e) => {
+      const tag = e.target.tagName?.toUpperCase()
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault()
+        if (!refreshing) handleRefresh()
+      }
+      if (e.key === 'l' || e.key === 'L') {
+        e.preventDefault()
+        setLogViewer(v => !v)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [refreshing]) // eslint-disable-line
+
+  // ── Top tables ────────────────────────────────────────────────────────────
   const domainRows = (arr) =>
     (arr ?? []).map(({ domain, count }) => ({ label: domain, count })).filter(r => r.label)
 
@@ -207,6 +284,11 @@ export default function Dashboard({ onLogout, onSettings, onServers, onUsers }) 
     q.top_auth_user && { label: q.top_auth_user, count: q.top_auth_count ?? 0, tag: 'auth' },
   ].filter(Boolean).filter(r => r.label).sort((a, b) => b.count - a.count)
 
+  // ── Cor do badge de role ──────────────────────────────────────────────────
+  const roleStyle = isAdmin
+    ? { bg: '#EFF6FF', border: '#BFDBFE', color: '#1D4ED8', label: 'Admin' }
+    : { bg: '#F8FAFC', border: '#E2E8F0', color: '#64748B', label: 'Viewer' }
+
   return (
     <div style={{ minHeight: '100vh', background: '#F1F5F9' }}>
 
@@ -223,8 +305,8 @@ export default function Dashboard({ onLogout, onSettings, onServers, onUsers }) 
           gap: 12, height: 54,
         }}>
 
-          {/* ── Esquerda: logo | servidor | EXIM | SSH | tempo ── */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+          {/* ── Esquerda ── */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, overflow: 'hidden' }}>
 
             {/* Logo */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
@@ -241,16 +323,14 @@ export default function Dashboard({ onLogout, onSettings, onServers, onUsers }) 
               </div>
             </div>
 
-            {/* Divider */}
             <span style={{ width: 1, height: 18, background: '#E2E8F0', flexShrink: 0 }} />
 
-            {/* Seletor de servidor */}
             <ServerSelector />
 
             {/* Badge EXIM */}
             {(() => {
-              const sev = diag.severity ?? 'OK'
-              const ok  = sev === 'OK' || sev === 'LOW'
+              const sev   = diag.severity ?? 'OK'
+              const ok    = sev === 'OK' || sev === 'LOW'
               const color = ok ? '#16A34A' : sev === 'MEDIUM' || sev === 'HIGH' ? '#D97706' : '#DC2626'
               return (
                 <StatusPill color={color} label={ok ? 'EXIM' : sev}>
@@ -270,9 +350,8 @@ export default function Dashboard({ onLogout, onSettings, onServers, onUsers }) 
             {activeServer && (() => {
               const ok    = activeServer.ssh_status === 'ok'
               const color = ok ? '#16A34A' : activeServer.ssh_status === 'unknown' ? '#94A3B8' : '#DC2626'
-              const label = { ok: 'SSH', error: 'SSH', timeout: 'SSH', unknown: 'SSH' }[activeServer.ssh_status] ?? 'SSH'
               return (
-                <StatusPill color={color} label={label}>
+                <StatusPill color={color} label="SSH">
                   <div style={{ fontWeight: 700, color: '#0F172A', marginBottom: 8 }}>Conexão SSH</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />
@@ -294,23 +373,53 @@ export default function Dashboard({ onLogout, onSettings, onServers, onUsers }) 
               )
             })()}
 
-            {/* Tempo desde última coleta */}
+            {/* Staleness */}
             {staleness && (
               <div className="hidden sm:flex items-center gap-1.5" style={{ fontSize: 11, color: staleness.color, flexShrink: 0 }}>
-                <span style={{ width: 5, height: 5, borderRadius: '50%', background: staleness.dot, flexShrink: 0, animation: staleness.pulse ? 'pulse-sky 2s ease-in-out infinite' : undefined }} />
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: staleness.dot, flexShrink: 0 }} />
                 {staleness.label}
               </div>
             )}
           </div>
 
-          {/* ── Direita: refresh | logs | configurações ── */}
+          {/* ── Direita ── */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-            <HBtn onClick={handleRefresh} disabled={refreshing} title="Forçar atualização">
+
+            {/* Badge usuário + role */}
+            {username && (
+              <div
+                className="hidden md:flex items-center gap-1.5"
+                style={{
+                  fontSize: 11, fontWeight: 600,
+                  padding: '3px 9px', borderRadius: 999,
+                  background: roleStyle.bg,
+                  border: `1px solid ${roleStyle.border}`,
+                  color: roleStyle.color,
+                  flexShrink: 0, whiteSpace: 'nowrap',
+                }}
+                title={`Logado como ${username}`}
+              >
+                <span style={{ opacity: 0.7, fontWeight: 400 }}>{username}</span>
+                <span style={{ opacity: 0.35 }}>·</span>
+                <span>{roleStyle.label}</span>
+              </div>
+            )}
+
+            {/* Hint de atalhos */}
+            <span
+              className="hidden lg:inline"
+              style={{ fontSize: 9, color: '#CBD5E1', userSelect: 'none', letterSpacing: '0.05em' }}
+              title="Atalhos de teclado disponíveis"
+            >
+              [R] refresh · [L] logs
+            </span>
+
+            <HBtn onClick={handleRefresh} disabled={refreshing} title="Forçar atualização (R)">
               <RefreshCw size={12} style={{ animation: refreshing ? 'spin 1s linear infinite' : undefined }} />
               <span className="hidden sm:inline">{refreshing ? 'Atualizando…' : 'Refresh'}</span>
             </HBtn>
 
-            <HBtn onClick={() => setLogViewer(true)} title="Visualizador de log">
+            <HBtn onClick={() => setLogViewer(true)} title="Visualizador de log (L)">
               <FileText size={12} />
               <span className="hidden sm:inline">Logs</span>
             </HBtn>
@@ -343,11 +452,58 @@ export default function Dashboard({ onLogout, onSettings, onServers, onUsers }) 
 
         {/* Métricas */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-          <MetricCard icon={Inbox}       label="Fila total"      value={fmt(queue.total)}      sub={queue.frozen != null ? `${queue.frozen} frozen` : undefined} loading={loading} onClick={() => setDrawer('queue')}     />
-          <MetricCard icon={CheckCircle} label="Entregues"       value={fmt(log.delivered)}    sub="no log amostrado"   loading={loading} onClick={() => setDrawer('delivered')} />
-          <MetricCard icon={XCircle}     label="Rejeitados"      value={fmt(log.rejected)}                              loading={loading} onClick={() => setDrawer('rejected')}  />
-          <MetricCard icon={Clock}       label="Deferidos"       value={fmt(log.deferred)}                              loading={loading} onClick={() => setDrawer('deferred')}  />
-          <MetricCard icon={MailOpen}    label="Recebidos"       value={fmt(log.recent_sends)}                          loading={loading} onClick={() => setDrawer('sent')}       />
+          <MetricCard
+            icon={Inbox}
+            label="Fila total"
+            value={fmt(queue.total)}
+            sub={queue.frozen != null ? `${queue.frozen} frozen` : undefined}
+            loading={loading}
+            onClick={() => setDrawer('queue')}
+            trend={trend.queue}
+            trendPositive="down"
+            tooltip={METRIC_TOOLTIPS.queue}
+          />
+          <MetricCard
+            icon={CheckCircle}
+            label="Entregues"
+            value={fmt(log.delivered)}
+            sub="no log amostrado"
+            loading={loading}
+            onClick={() => setDrawer('delivered')}
+            trend={trend.delivered}
+            trendPositive="up"
+            tooltip={METRIC_TOOLTIPS.delivered}
+          />
+          <MetricCard
+            icon={XCircle}
+            label="Rejeitados"
+            value={fmt(log.rejected)}
+            loading={loading}
+            onClick={() => setDrawer('rejected')}
+            trend={trend.rejected}
+            trendPositive="down"
+            tooltip={METRIC_TOOLTIPS.rejected}
+          />
+          <MetricCard
+            icon={Clock}
+            label="Deferidos"
+            value={fmt(log.deferred)}
+            loading={loading}
+            onClick={() => setDrawer('deferred')}
+            trend={trend.deferred}
+            trendPositive="down"
+            tooltip={METRIC_TOOLTIPS.deferred}
+          />
+          <MetricCard
+            icon={MailOpen}
+            label="Recebidos"
+            value={fmt(log.recent_sends)}
+            loading={loading}
+            onClick={() => setDrawer('sent')}
+            trend={trend.sent}
+            trendPositive="up"
+            tooltip={METRIC_TOOLTIPS.sent}
+          />
           <DeliveryRateCard
             delivered={log.delivered ?? 0}
             rejected={log.rejected   ?? 0}
@@ -357,7 +513,7 @@ export default function Dashboard({ onLogout, onSettings, onServers, onUsers }) 
         </div>
 
         {/* Diagnóstico */}
-        <DiagnosisPanel diagnosis={diag} />
+        <DiagnosisPanel diagnosis={diag} onAction={handleActionComplete} />
 
         {/* Tabelas + Ações */}
         <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${isAdmin ? 'lg:grid-cols-3' : ''}`}>
@@ -366,7 +522,7 @@ export default function Dashboard({ onLogout, onSettings, onServers, onUsers }) 
           {isAdmin && <ActionPanel onActionComplete={handleActionComplete} recommendedActions={recommendedActions} />}
         </div>
 
-        {/* Domínios com erros — só aparece se houver dados */}
+        {/* Domínios com erros */}
         {(topRejected.length > 0 || topDeferred.length > 0) && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {topRejected.length > 0 && (
@@ -398,7 +554,7 @@ export default function Dashboard({ onLogout, onSettings, onServers, onUsers }) 
 
       </main>
 
-      {/* ── Drawer de mensagens ── */}
+      {/* Drawer de mensagens */}
       {drawer && (
         <MessagesDrawer
           cardType={drawer}
@@ -406,7 +562,7 @@ export default function Dashboard({ onLogout, onSettings, onServers, onUsers }) 
         />
       )}
 
-      {/* ── Log Viewer ── */}
+      {/* Log Viewer */}
       {logViewer && (
         <LogViewerDrawer onClose={() => setLogViewer(false)} />
       )}
