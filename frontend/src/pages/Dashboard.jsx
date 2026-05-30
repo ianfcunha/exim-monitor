@@ -14,6 +14,7 @@ import MessagesDrawer from '../components/MessagesDrawer'
 import LogViewerDrawer from '../components/LogViewerDrawer'
 import MetricCard from '../components/MetricCard'
 import ServerSelector from '../components/ServerSelector'
+import StatusBadge from '../components/StatusBadge'
 import TopTable from '../components/TopTable'
 import { useServer } from '../contexts/ServerContext'
 import { useFullStatus, useQuickStatus } from '../hooks/useStatus'
@@ -50,8 +51,8 @@ function LogoMark({ size = 20 }) {
 }
 
 
-/* ── Botão ícone do header ── */
-function IconBtn({ onClick, disabled, title, children, danger }) {
+/* ── Botão header ── */
+function HBtn({ onClick, disabled, title, children, danger }) {
   const [hov, setHov] = useState(false)
   return (
     <button
@@ -59,14 +60,15 @@ function IconBtn({ onClick, disabled, title, children, danger }) {
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
-        width: 32, height: 32, borderRadius: 7,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        border: 'none',
-        background: hov ? (danger ? '#FEF2F2' : '#F0F9FF') : 'transparent',
-        color: hov ? (danger ? '#DC2626' : '#0369A1') : '#94A3B8',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.4 : 1,
+        display: 'flex', alignItems: 'center', gap: 6,
+        borderRadius: 8,
+        border: hov ? (danger ? '1px solid #FECACA' : '1px solid #BAE6FD') : '1px solid #E2E8F0',
+        padding: '6px 12px', fontSize: 11, fontWeight: 500, cursor: 'pointer',
+        color: hov ? (danger ? '#991B1B' : '#0369A1') : '#64748B',
+        background: hov ? (danger ? '#FEF2F2' : '#F0F9FF') : '#fff',
         transition: 'all 0.15s',
+        opacity: disabled ? 0.4 : 1,
+        whiteSpace: 'nowrap',
       }}
     >
       {children}
@@ -74,135 +76,6 @@ function IconBtn({ onClick, disabled, title, children, danger }) {
   )
 }
 
-/* ── Badge SSH clicável ── */
-const SSH_COLOR = { ok: '#16A34A', error: '#DC2626', timeout: '#D97706', unknown: '#94A3B8' }
-
-function SshBadge({ server }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef(null)
-  const color = SSH_COLOR[server.ssh_status] ?? '#94A3B8'
-  const isOk  = server.ssh_status === 'ok'
-
-  useEffect(() => {
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
-    document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
-  }, [])
-
-  return (
-    <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
-      <button
-        onClick={() => setOpen(v => !v)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 5,
-          padding: '3px 9px', borderRadius: 999, fontSize: 11, fontWeight: 600,
-          border: `1px solid ${color}30`,
-          background: `${color}10`,
-          color, cursor: 'pointer',
-        }}
-      >
-        <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
-        SSH
-      </button>
-
-      {open && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 8px)', left: 0,
-          background: '#fff', border: '1px solid #E2E8F0', borderRadius: 10,
-          boxShadow: '0 4px 16px rgba(0,0,0,0.10)',
-          padding: '12px 14px', minWidth: 220, zIndex: 200,
-          fontSize: 12,
-        }}>
-          <div style={{ fontWeight: 700, color: '#0F172A', marginBottom: 6 }}>
-            Conexão SSH
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0 }} />
-            <span style={{ color, fontWeight: 600 }}>
-              {{ ok: 'Conectado', error: 'Erro', timeout: 'Timeout', unknown: 'Desconhecido' }[server.ssh_status] ?? server.ssh_status}
-            </span>
-          </div>
-          {server.ssh_error_msg && (
-            <div style={{ color: '#DC2626', fontSize: 11, marginBottom: 6, wordBreak: 'break-word' }}>
-              {server.ssh_error_msg}
-            </div>
-          )}
-          {server.last_connected_at && (
-            <div style={{ color: '#94A3B8', fontSize: 11 }}>
-              Último contato: {new Date(server.last_connected_at).toLocaleString('pt-BR')}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/* ── Badge EXIM clicável ── */
-const EXIM_COLOR = {
-  OK:       '#16A34A',
-  LOW:      '#16A34A',
-  MEDIUM:   '#D97706',
-  HIGH:     '#D97706',
-  CRITICAL: '#DC2626',
-}
-
-function EximBadge({ severity, problem, staleness }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef(null)
-  const sev   = severity ?? 'OK'
-  const color = EXIM_COLOR[sev] ?? '#94A3B8'
-
-  useEffect(() => {
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
-    document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
-  }, [])
-
-  return (
-    <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
-      <button
-        onClick={() => setOpen(v => !v)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 5,
-          padding: '3px 9px', borderRadius: 999, fontSize: 11, fontWeight: 600,
-          border: `1px solid ${color}30`,
-          background: `${color}10`,
-          color, cursor: 'pointer',
-        }}
-      >
-        <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
-        {sev === 'OK' || sev === 'LOW' ? 'EXIM ok' : sev}
-      </button>
-
-      {open && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 8px)', left: 0,
-          background: '#fff', border: '1px solid #E2E8F0', borderRadius: 10,
-          boxShadow: '0 4px 16px rgba(0,0,0,0.10)',
-          padding: '12px 14px', minWidth: 220, zIndex: 200,
-          fontSize: 12,
-        }}>
-          <div style={{ fontWeight: 700, color: '#0F172A', marginBottom: 6 }}>
-            Diagnóstico EXIM
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0 }} />
-            <span style={{ color, fontWeight: 600 }}>{sev}</span>
-          </div>
-          {problem && problem !== 'NORMAL' && (
-            <div style={{ color: '#64748B', fontSize: 11, marginBottom: 6 }}>{problem}</div>
-          )}
-          {staleness && (
-            <div style={{ color: '#94A3B8', fontSize: 11 }}>
-              Dados: {staleness.label}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
 
 export default function Dashboard({ onLogout, onSettings, onServers }) {
   const { activeServer } = useServer()
@@ -264,87 +137,97 @@ export default function Dashboard({ onLogout, onSettings, onServers }) {
     <div style={{ minHeight: '100vh', background: '#F1F5F9' }}>
 
       {/* ── Header ── */}
-      <header style={{
-        position: 'sticky', top: 0, zIndex: 10,
-        padding: '0 24px',
-        background: '#fff',
-        borderBottom: '1px solid #E2E8F0',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-      }}>
+      <header
+        className="header-accent"
+        style={{
+          position: 'sticky', top: 0, zIndex: 10,
+          padding: '0 24px',
+          background: '#fff',
+          borderBottom: '1px solid #E2E8F0',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
+        }}
+      >
         <div style={{
           maxWidth: 1280, margin: '0 auto',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          height: 52,
+          gap: 12, height: 56,
         }}>
-
-          {/* ── Esquerda: logo · servidor · badges ── */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-
-            {/* Logo */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          {/* Esquerda */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0 }}>
               <div style={{
-                width: 32, height: 32, borderRadius: 9,
+                width: 36, height: 36, borderRadius: 10,
                 background: '#F0F9FF', border: '1px solid #BAE6FD',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
-                <LogoMark size={18} />
+                <LogoMark size={20} />
               </div>
-              <div className="hidden sm:block" style={{ lineHeight: 1.2 }}>
-                <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: '-0.01em' }}>
+              <div className="hidden sm:block" style={{ lineHeight: 1.15 }}>
+                <div style={{ fontSize: 14, fontWeight: 800, letterSpacing: '-0.01em' }}>
                   <span style={{ color: '#0F172A' }}>Mail </span>
                   <span style={{ color: '#0EA5E9' }}>IQ</span>
                 </div>
-                <div style={{ fontSize: 8, letterSpacing: '0.20em', textTransform: 'uppercase', fontWeight: 600, color: '#CBD5E1' }}>
-                  by AVILI
+                <div style={{ fontSize: 9, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 600, color: '#94A3B8' }}>
+                  by <span style={{ color: '#0EA5E9' }}>AVILI</span>
                 </div>
               </div>
             </div>
 
-            {/* Divider */}
-            <span style={{ width: 1, height: 20, background: '#E2E8F0', flexShrink: 0 }} />
+            <span style={{ color: '#E2E8F0', fontSize: 18 }} className="hidden md:block">|</span>
 
-            {/* Seletor de servidor */}
+            {(q.hostname || f.hostname) && (
+              <div className="hidden md:flex items-center gap-2 min-w-0">
+                <span className="truncate font-mono" style={{ fontSize: 11, color: '#94A3B8' }}>
+                  {q.hostname || f.hostname}
+                </span>
+                {eximVersion && (
+                  <span style={{
+                    fontSize: 10, padding: '1px 7px', borderRadius: 999,
+                    background: '#F0F9FF', border: '1px solid #BAE6FD', color: '#0369A1', fontWeight: 600,
+                  }}>
+                    {eximVersion}
+                  </span>
+                )}
+              </div>
+            )}
+
             <ServerSelector />
+            <StatusBadge severity={diag.severity ?? 'OK'} problem={diag.problem} />
 
-            {/* Badge SSH */}
-            {activeServer && <SshBadge server={activeServer} />}
-
-            {/* Badge EXIM */}
-            <EximBadge severity={diag.severity} problem={diag.problem} staleness={staleness} />
+            {staleness && (
+              <div className="hidden sm:flex items-center gap-1.5" style={{ fontSize: 11, color: staleness.color }}>
+                <span style={{
+                  width: 6, height: 6, borderRadius: '50%',
+                  background: staleness.dot, flexShrink: 0,
+                  animation: staleness.pulse ? 'pulse-sky 2s ease-in-out infinite' : undefined,
+                }} />
+                {staleness.label}
+              </div>
+            )}
           </div>
 
-          {/* ── Direita: ações ── */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-            {/* Refresh */}
-            <IconBtn onClick={handleRefresh} disabled={refreshing} title={refreshing ? 'Atualizando…' : 'Atualizar dados'}>
-              <RefreshCw size={14} style={{ animation: refreshing ? 'spin 1s linear infinite' : undefined }} />
-            </IconBtn>
-
-            {/* Logs */}
-            <IconBtn onClick={() => setLogViewer(true)} title="Visualizador de log">
-              <FileText size={14} />
-            </IconBtn>
-
-            {/* Divider */}
-            <span style={{ width: 1, height: 16, background: '#E2E8F0', margin: '0 4px' }} />
-
-            {/* Servidores */}
-            <IconBtn onClick={onServers} title="Gerenciar servidores">
-              <Server size={14} />
-            </IconBtn>
-
-            {/* Configurações */}
-            <IconBtn onClick={onSettings} title="Configurações e alertas">
-              <Settings size={14} />
-            </IconBtn>
-
-            {/* Divider */}
-            <span style={{ width: 1, height: 16, background: '#E2E8F0', margin: '0 4px' }} />
-
-            {/* Sair */}
-            <IconBtn onClick={onLogout} title="Sair" danger>
-              <LogOut size={14} />
-            </IconBtn>
+          {/* Direita */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            <HBtn onClick={handleRefresh} disabled={refreshing} title="Forçar atualização">
+              <RefreshCw size={12} style={{ animation: refreshing ? 'spin 1s linear infinite' : undefined }} />
+              <span className="hidden sm:inline">{refreshing ? 'Atualizando…' : 'Refresh'}</span>
+            </HBtn>
+            <HBtn onClick={() => setLogViewer(true)} title="Abrir visualizador de log">
+              <FileText size={12} />
+              <span className="hidden sm:inline">Logs</span>
+            </HBtn>
+            <HBtn onClick={onServers} title="Gerenciar servidores">
+              <Server size={12} />
+              <span className="hidden sm:inline">Servidores</span>
+            </HBtn>
+            <HBtn onClick={onSettings} title="Configurações de alertas">
+              <Settings size={12} />
+              <span className="hidden sm:inline">Alertas</span>
+            </HBtn>
+            <HBtn onClick={onLogout} title="Sair" danger>
+              <LogOut size={12} />
+              <span className="hidden sm:inline">Sair</span>
+            </HBtn>
           </div>
         </div>
       </header>
