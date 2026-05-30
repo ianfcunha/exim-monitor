@@ -97,11 +97,13 @@ export const testServerConn    = (id) => api.post(`/servers/${id}/test`).then(r 
 export const fetchServerSshStatus = (id) => api.get(`/servers/${id}/ssh-status`).then(r => r.data)
 
 // ── Usuários ──────────────────────────────────────────────────────────────
-export const fetchUsers    = () => api.get('/users').then(r => r.data)
-export const inviteUser    = (payload) => api.post('/users/invite', payload).then(r => r.data)
-export const deleteUser    = (id) => api.delete(`/users/${id}`).then(r => r.data)
-export const checkInvite   = (token) => api.get(`/users/accept/${token}`).then(r => r.data)
-export const acceptInvite  = (token, payload) => api.post(`/users/accept/${token}`, payload).then(r => r.data)
+export const fetchUsers     = () => api.get('/users').then(r => r.data)
+export const inviteUser     = (payload) => api.post('/users/invite', payload).then(r => r.data)
+export const deleteUser     = (id) => api.delete(`/users/${id}`).then(r => r.data)
+export const checkInvite    = (token) => api.get(`/users/accept/${token}`).then(r => r.data)
+export const acceptInvite   = (token, payload) => api.post(`/users/accept/${token}`, payload).then(r => r.data)
+export const resendInvite   = (id) => api.post(`/users/${id}/resend-invite`).then(r => r.data)
+export const getInviteLink  = (id) => api.get(`/users/${id}/invite-link`).then(r => r.data)
 
 // ── Configuracoes de alertas ──────────────────────────────────────────────
 export const fetchAlertHistory  = (limit = 50) =>

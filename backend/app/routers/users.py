@@ -1,11 +1,13 @@
 """
 Gestão de usuários — convites e listagem.
 
-POST /api/users/invite          → admin envia convite por e-mail
-GET  /api/users/accept/{token}  → verifica token e retorna dados para setup
-POST /api/users/accept/{token}  → convidado define username+senha e ativa conta
-GET  /api/users                 → lista membros (admin only)
-DELETE /api/users/{id}          → remove membro (admin only, não pode remover a si mesmo)
+POST /api/users/invite              → admin envia convite por e-mail
+GET  /api/users/accept/{token}      → verifica token e retorna dados para setup
+POST /api/users/accept/{token}      → convidado define username+senha e ativa conta
+GET  /api/users                     → lista membros (admin only)
+POST /api/users/{id}/resend-invite  → reenvia convite e renova o token (admin only)
+GET  /api/users/{id}/invite-link    → retorna o link do convite pendente (admin only)
+DELETE /api/users/{id}              → remove membro (admin only)
 """
 import secrets
 from datetime import datetime, timedelta
@@ -188,6 +190,65 @@ def list_users(
         }
         for u in users
     ]
+
+
+@router.post("/{user_id}/resend-invite", summary="Reenviar convite (admin only)")
+def resend_invite(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(404, "Usuário não encontrado.")
+    if not user.invite_token:
+        raise HTTPException(400, "Este usuário já aceitou o convite.")
+
+    # Renova o token e a validade
+    token   = secrets.token_urlsafe(32)
+    expires = datetime.utcnow() + timedelta(hours=INVITE_EXPIRE_HOURS)
+    user.invite_token      = token
+    user.invite_expires_at = expires
+    db.commit()
+
+    invite_url = f"{settings.app_url}/invite/{token}"
+
+    try:
+        _send_invite_email(user.email, current_user.username, token)
+        return {"ok": True, "message": f"Convite reenviado para {user.email}.", "invite_url": invite_url}
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).error("Falha ao reenviar convite: %s", exc)
+        return {
+            "ok": False,
+            "message": f"Token renovado, mas falha ao enviar e-mail: {exc}",
+            "invite_url": invite_url,
+        }
+
+
+@router.get("/{user_id}/invite-link", summary="Ver link do convite pendente (admin only)")
+def get_invite_link(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(404, "Usuário não encontrado.")
+    if not user.invite_token:
+        raise HTTPException(400, "Este usuário já aceitou o convite.")
+
+    expires_in_h = None
+    if user.invite_expires_at:
+        delta = user.invite_expires_at - datetime.utcnow()
+        expires_in_h = max(0, int(delta.total_seconds() / 3600))
+
+    return {
+        "email":      user.email,
+        "invite_url": f"{settings.app_url}/invite/{user.invite_token}",
+        "expires_at": user.invite_expires_at.isoformat() if user.invite_expires_at else None,
+        "expires_in_hours": expires_in_h,
+    }
 
 
 @router.delete("/{user_id}", summary="Remover membro (admin only)")

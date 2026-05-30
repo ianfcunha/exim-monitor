@@ -2,9 +2,9 @@
  * UsersPage — gerenciamento de usuários e convites.
  * Acessível via dropdown Configurações → Usuários.
  */
-import { ArrowLeft, Clock, Mail, RefreshCw, Shield, Trash2, UserPlus, Users } from 'lucide-react'
+import { ArrowLeft, Clock, Copy, Link, Mail, RefreshCw, RotateCcw, Shield, Trash2, UserPlus, Users, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { deleteUser, fetchUsers, inviteUser } from '../api/client'
+import { deleteUser, fetchUsers, getInviteLink, inviteUser, resendInvite } from '../api/client'
 
 const ROLE_LABEL = { admin: 'Admin', viewer: 'Viewer' }
 const ROLE_COLOR = { admin: '#0369A1', viewer: '#64748B' }
@@ -26,6 +26,9 @@ export default function UsersPage({ onBack }) {
   const [role, setRole]           = useState('viewer')
   const [sending, setSending]     = useState(false)
   const [inviteMsg, setInviteMsg] = useState(null)
+  const [resending, setResending] = useState({})   // { [userId]: true }
+  const [linkModal, setLinkModal] = useState(null) // { email, url, expires_in_hours }
+  const [copied, setCopied]       = useState(false)
 
   const load = () => {
     setLoading(true)
@@ -52,6 +55,36 @@ export default function UsersPage({ onBack }) {
       setInviteMsg({ ok: false, text: e?.response?.data?.detail ?? 'Erro ao enviar convite.' })
     } finally {
       setSending(false)
+    }
+  }
+
+  const handleResend = async (id) => {
+    setResending(r => ({ ...r, [id]: true }))
+    try {
+      const res = await resendInvite(id)
+      setInviteMsg({ ok: res.ok, text: res.message, url: res.invite_url })
+    } catch (e) {
+      setInviteMsg({ ok: false, text: e?.response?.data?.detail ?? 'Erro ao reenviar convite.' })
+    } finally {
+      setResending(r => ({ ...r, [id]: false }))
+    }
+  }
+
+  const handleViewLink = async (id) => {
+    try {
+      const res = await getInviteLink(id)
+      setLinkModal(res)
+      setCopied(false)
+    } catch (e) {
+      setError(e?.response?.data?.detail ?? 'Erro ao obter link.')
+    }
+  }
+
+  const handleCopy = () => {
+    if (linkModal?.invite_url) {
+      navigator.clipboard.writeText(linkModal.invite_url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
     }
   }
 
@@ -284,6 +317,40 @@ export default function UsersPage({ onBack }) {
                   </div>
                 </div>
 
+                {/* Ações para convites pendentes */}
+                {u.invite_pending && (
+                  <>
+                    <button
+                      onClick={() => handleViewLink(u.id)}
+                      title="Ver link do convite"
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 4,
+                        padding: '5px 10px', borderRadius: 7, fontSize: 11, fontWeight: 500,
+                        border: '1px solid #E2E8F0', background: '#F8FAFC',
+                        color: '#64748B', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
+                      }}
+                    >
+                      <Link size={11} /> Ver link
+                    </button>
+                    <button
+                      onClick={() => handleResend(u.id)}
+                      disabled={resending[u.id]}
+                      title="Reenviar convite por e-mail"
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 4,
+                        padding: '5px 10px', borderRadius: 7, fontSize: 11, fontWeight: 500,
+                        border: '1px solid #BAE6FD', background: '#F0F9FF',
+                        color: '#0369A1', cursor: resending[u.id] ? 'wait' : 'pointer',
+                        whiteSpace: 'nowrap', flexShrink: 0,
+                        opacity: resending[u.id] ? 0.6 : 1,
+                      }}
+                    >
+                      <RotateCcw size={11} style={{ animation: resending[u.id] ? 'spin 1s linear infinite' : undefined }} />
+                      {resending[u.id] ? 'Enviando…' : 'Reenviar'}
+                    </button>
+                  </>
+                )}
+
                 {/* Remover */}
                 {u.id !== 0 && (
                   <button
@@ -306,6 +373,76 @@ export default function UsersPage({ onBack }) {
       </div>
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+
+      {/* ── Modal de link de convite ── */}
+      {linkModal && (
+        <>
+          <div onClick={() => setLinkModal(null)} style={{
+            position: 'fixed', inset: 0, zIndex: 100,
+            background: 'rgba(15,23,42,0.35)', backdropFilter: 'blur(2px)',
+          }} />
+          <div style={{
+            position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+            zIndex: 101, background: '#fff', borderRadius: 14,
+            border: '1px solid #E2E8F0', boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+            padding: '24px', width: 'min(520px, 90vw)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#0F172A', marginBottom: 2 }}>
+                  Link de Convite
+                </div>
+                <div style={{ fontSize: 12, color: '#94A3B8' }}>
+                  Para: <strong style={{ color: '#64748B' }}>{linkModal.email}</strong>
+                  {linkModal.expires_in_hours != null && (
+                    <span> · expira em {linkModal.expires_in_hours}h</span>
+                  )}
+                </div>
+              </div>
+              <button onClick={() => setLinkModal(null)} style={{
+                width: 28, height: 28, borderRadius: 7, border: '1px solid #E2E8F0',
+                background: '#F8FAFC', cursor: 'pointer', display: 'flex',
+                alignItems: 'center', justifyContent: 'center', color: '#94A3B8',
+              }}>
+                <X size={13} />
+              </button>
+            </div>
+
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '10px 12px', borderRadius: 8,
+              background: '#F8FAFC', border: '1px solid #E2E8F0',
+              marginBottom: 14,
+            }}>
+              <span style={{
+                flex: 1, fontSize: 11, fontFamily: 'monospace', color: '#0F172A',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>
+                {linkModal.invite_url}
+              </span>
+              <button onClick={handleCopy} style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                padding: '5px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                border: 'none', background: copied ? '#F0FDF4' : '#0EA5E9',
+                color: copied ? '#16A34A' : '#fff', cursor: 'pointer', flexShrink: 0,
+                transition: 'all 0.2s',
+              }}>
+                <Copy size={11} />
+                {copied ? 'Copiado!' : 'Copiar'}
+              </button>
+            </div>
+
+            <a href={linkModal.invite_url} target="_blank" rel="noreferrer" style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              padding: '8px 0', borderRadius: 8, fontSize: 12, fontWeight: 600,
+              border: '1px solid #E2E8F0', background: '#F8FAFC',
+              color: '#64748B', textDecoration: 'none',
+            }}>
+              <Link size={12} /> Abrir link em nova aba
+            </a>
+          </div>
+        </>
+      )}
     </div>
   )
 }
