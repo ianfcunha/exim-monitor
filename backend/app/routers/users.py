@@ -48,7 +48,7 @@ def _send_invite_email(to_email: str, inviter_username: str, token: str) -> None
         raise RuntimeError("RESEND_API_KEY não configurada — não é possível enviar convites.")
 
     resend.api_key = settings.resend_api_key
-    accept_url = f"{settings.app_url}/invite/{token}"
+    accept_url = f"{settings.app_url}/?invite={token}"
 
     html = f"""
 <!DOCTYPE html><html><body style="font-family:sans-serif;background:#f8fafc;margin:0;padding:24px">
@@ -123,7 +123,7 @@ def invite_user(
         return {
             "ok": False,
             "message": f"Convite criado, mas falha ao enviar e-mail: {exc}",
-            "invite_url": f"{settings.app_url}/invite/{token}",
+            "invite_url": f"{settings.app_url}/?invite={token}",
         }
 
     return {"ok": True, "message": f"Convite enviado para {payload.email}."}
@@ -211,7 +211,7 @@ def resend_invite(
     user.invite_expires_at = expires
     db.commit()
 
-    invite_url = f"{settings.app_url}/invite/{token}"
+    invite_url = f"{settings.app_url}/?invite={token}"
 
     try:
         _send_invite_email(user.email, current_user.username, token)
@@ -245,7 +245,7 @@ def get_invite_link(
 
     return {
         "email":      user.email,
-        "invite_url": f"{settings.app_url}/invite/{user.invite_token}",
+        "invite_url": f"{settings.app_url}/?invite={user.invite_token}",
         "expires_at": user.invite_expires_at.isoformat() if user.invite_expires_at else None,
         "expires_in_hours": expires_in_h,
     }

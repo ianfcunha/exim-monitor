@@ -8,10 +8,9 @@ import ServersPage from './pages/ServersPage'
 import Settings from './pages/Settings'
 import UsersPage from './pages/UsersPage'
 
-// Rota /invite/:token — detectada antes do login
+// Convite via query param ?invite=TOKEN — funciona em qualquer proxy
 function getInviteToken() {
-  const m = window.location.pathname.match(/^\/invite\/([A-Za-z0-9_-]+)$/)
-  return m ? m[1] : null
+  return new URLSearchParams(window.location.search).get('invite') ?? null
 }
 
 export default function App() {
