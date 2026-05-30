@@ -14,8 +14,8 @@ from typing import Optional
 from fastapi import Query
 
 from ..alerts import send_test_email, send_test_telegram
-from ..auth import get_current_user
-from ..database import AlertHistory, AlertSettings, get_alert_settings, get_db
+from ..auth import get_current_user, require_admin
+from ..database import AlertHistory, AlertSettings, User, get_alert_settings, get_db
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -84,7 +84,7 @@ def get_settings(
 def update_settings(
     payload: AlertSettingsSchema,
     db: Session = Depends(get_db),
-    _: str = Depends(get_current_user),
+    _: User = Depends(require_admin),
 ):
     cfg = get_alert_settings(db)
 
@@ -117,7 +117,7 @@ def update_settings(
 @router.post("/test/email", summary="Envia e-mail de teste")
 async def test_email(
     db: Session = Depends(get_db),
-    _: str = Depends(get_current_user),
+    _: User = Depends(require_admin),
 ):
     cfg = get_alert_settings(db)
     if not cfg.email_to or (not cfg.resend_api_key and not cfg.smtp_password):
@@ -159,7 +159,7 @@ def get_alert_history(
 @router.post("/test/telegram", summary="Envia mensagem de teste no Telegram")
 async def test_telegram(
     db: Session = Depends(get_db),
-    _: str = Depends(get_current_user),
+    _: User = Depends(require_admin),
 ):
     cfg = get_alert_settings(db)
     if not cfg.telegram_bot_token or not cfg.telegram_chat_id:

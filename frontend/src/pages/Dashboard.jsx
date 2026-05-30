@@ -15,6 +15,7 @@ import LogViewerDrawer from '../components/LogViewerDrawer'
 import MetricCard from '../components/MetricCard'
 import ServerSelector from '../components/ServerSelector'
 import TopTable from '../components/TopTable'
+import { useAuth } from '../contexts/AuthContext'
 import { useServer } from '../contexts/ServerContext'
 import { useFullStatus, useQuickStatus } from '../hooks/useStatus'
 
@@ -103,7 +104,7 @@ function StatusPill({ color, label, children }) {
 }
 
 /* ── Dropdown de configurações ── */
-function SettingsMenu({ onSettings, onServers, onUsers, onLogout }) {
+function SettingsMenu({ onSettings, onServers, onUsers, onLogout, isAdmin }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
   useEffect(() => {
@@ -137,10 +138,10 @@ function SettingsMenu({ onSettings, onServers, onUsers, onLogout }) {
           background: '#fff', border: '1px solid #E2E8F0', borderRadius: 10,
           boxShadow: '0 4px 20px rgba(0,0,0,0.10)', padding: '6px', minWidth: 180,
         }}>
-          {item(<Server size={13} />, 'Servidores', onServers)}
-          {item(<Settings size={13} />, 'Alertas', onSettings)}
-          {item(<Users size={13} />, 'Usuários', onUsers)}
-          <div style={{ height: 1, background: '#F1F5F9', margin: '4px 0' }} />
+          {isAdmin && item(<Server size={13} />, 'Servidores', onServers)}
+          {isAdmin && item(<Settings size={13} />, 'Alertas', onSettings)}
+          {isAdmin && item(<Users size={13} />, 'Usuários', onUsers)}
+          {isAdmin && <div style={{ height: 1, background: '#F1F5F9', margin: '4px 0' }} />}
           {item(<LogOut size={13} />, 'Sair', onLogout, true)}
         </div>
       )}
@@ -150,6 +151,7 @@ function SettingsMenu({ onSettings, onServers, onUsers, onLogout }) {
 
 
 export default function Dashboard({ onLogout, onSettings, onServers, onUsers }) {
+  const { isAdmin } = useAuth()
   const { activeServer } = useServer()
   const quick = useQuickStatus()
   const full  = useFullStatus()
@@ -318,6 +320,7 @@ export default function Dashboard({ onLogout, onSettings, onServers, onUsers }) 
               onServers={onServers}
               onUsers={onUsers}
               onLogout={onLogout}
+              isAdmin={isAdmin}
             />
           </div>
         </div>
@@ -357,10 +360,10 @@ export default function Dashboard({ onLogout, onSettings, onServers, onUsers }) 
         <DiagnosisPanel diagnosis={diag} />
 
         {/* Tabelas + Ações */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${isAdmin ? 'lg:grid-cols-3' : ''}`}>
           <TopTable title="Top Remetentes" rows={topSenders} emptyMsg="Disponível no próximo ciclo completo" loading={full.loading}  />
           <TopTable title="Top IPs / Auth"  rows={topIPs}    emptyMsg="Disponível no próximo ciclo completo" loading={quick.loading} />
-          <ActionPanel onActionComplete={handleActionComplete} recommendedActions={recommendedActions} />
+          {isAdmin && <ActionPanel onActionComplete={handleActionComplete} recommendedActions={recommendedActions} />}
         </div>
 
         {/* Domínios com erros — só aparece se houver dados */}

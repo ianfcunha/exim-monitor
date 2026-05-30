@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { AuthProvider } from './contexts/AuthContext'
 import { ServerProvider } from './contexts/ServerContext'
 import { ToastProvider } from './contexts/ToastContext'
 import Dashboard from './pages/Dashboard'
@@ -41,6 +42,7 @@ export default function App() {
 
   return (
     <ToastProvider>
+      <AuthProvider>
       <ServerProvider>
         {page === 'settings' && (
           <Settings onBack={() => setPage('dashboard')} />
@@ -60,6 +62,7 @@ export default function App() {
           />
         )}
       </ServerProvider>
+      </AuthProvider>
     </ToastProvider>
   )
 }
