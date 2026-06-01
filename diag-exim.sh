@@ -107,7 +107,7 @@
 #          (evita pegar local-parts com ponto, ex: case.file@domain → domain)
 # ============================================================
 
-VERSION="5.2"
+VERSION="5.3"
 LOG_PATH="/var/log/exim4/mainlog"
 LOG_LINES=10000
 QUEUE_SAMPLE_THRESHOLD=10000  # acima disso usa amostra da fila
@@ -783,6 +783,26 @@ classify() {
         PROBLEM="SPAM_RELAY"; SEVERITY="CRITICAL"
         PROBLEM_DESC="Relay de spam — ${RELAY_SUSPECT} disparou e-mails usando este servidor"
         ACTIONS_RECOMMENDED=("clean-sender" "block-ip" "clean-frozen")
+
+    elif [ "$TOP_SENDER_COUNT" -gt "$TH_SPAM_MASSIVO_SENDER" ] && \
+         [ -n "$TOP_AUTH_USER" ] && \
+         [ "${BOUNCE_COUNT:-0}" -lt 50 ] && \
+         [ "${DEFER_COUNT:-0}" -gt 200 ]; then
+        # Fila dominada por um único remetente autenticado com alto deferimento
+        # e baixo bounce → envio legítimo em massa sendo throttled por provedores.
+        local _top_sender_domain="${TOP_SENDER##*@}"
+        local _auth_domain="${TOP_AUTH_USER##*@}"
+        # Valida que o domínio do remetente bate com o do autenticado
+        if [ "$_top_sender_domain" = "$_auth_domain" ] || \
+           [ "${TOP_SENDER_COUNT:-0}" -gt 500 ]; then
+            PROBLEM="ENVIO_THROTTLED"; SEVERITY="HIGH"
+            PROBLEM_DESC="Envio em massa autenticado — $TOP_SENDER ($TOP_SENDER_COUNT msgs) sendo limitado por provedores"
+            ACTIONS_RECOMMENDED=("retry-queue")
+        else
+            PROBLEM="SPAM_MASSIVO"; SEVERITY="CRITICAL"
+            PROBLEM_DESC="Spam massivo — $TOP_SENDER ($TOP_SENDER_COUNT msgs na fila)"
+            ACTIONS_RECOMMENDED=("clean-sender" "clean-frozen" "clean-full")
+        fi
 
     elif [ "$QUEUE" -gt "$TH_SPAM_MASSIVO_QUEUE" ] && \
          [ "$RECENT_SENDS" -gt "$TH_SPAM_MASSIVO_SENDS" ] && \
@@ -1508,6 +1528,22 @@ print_diagnosis() {
             echo -e "  ${CYAN}  [b]${RESET} Verificar blacklists"
             ;;
 
+        ENVIO_THROTTLED)
+            echo -e "  ${YELLOW}▶ ENVIO EM MASSA AUTENTICADO — LIMITADO POR PROVEDORES${RESET}"
+            echo -e "  Remetente: ${BOLD}$TOP_SENDER${RESET} (${YELLOW}$TOP_SENDER_COUNT mensagens na fila${RESET})"
+            echo -e "  Conta autenticada: ${BOLD}$TOP_AUTH_USER${RESET}"
+            echo
+            echo -e "  ${DIM}Este é um envio legítimo autenticado via SMTP, mas os provedores${RESET}"
+            echo -e "  ${DIM}de destino (Gmail, Hotmail etc.) estão aplicando rate limiting —${RESET}"
+            echo -e "  ${DIM}limitando quantos e-mails aceitam por hora/dia deste IP.${RESET}"
+            echo
+            echo -e "  ${DIM}Ações recomendadas:${RESET}"
+            echo -e "  ${DIM}  1. Aguardar: o EXIM vai retentar automaticamente.${RESET}"
+            echo -e "  ${DIM}  2. Verificar reputação do IP: https://postmaster.google.com${RESET}"
+            echo -e "  ${DIM}  3. Checar se SPF/DKIM/DMARC estão configurados corretamente.${RESET}"
+            echo -e "  ${DIM}  4. Considerar reduzir volume ou usar serviço de relay transacional.${RESET}"
+            ;;
+
         SPAM_MASSIVO)
             echo -e "  ${LRED}▶ SPAM MASSIVO DETECTADO${RESET}"
             echo -e "  Remetente: ${BOLD}$TOP_SENDER${RESET} (${LRED}$TOP_SENDER_COUNT mensagens${RESET})"
@@ -1575,6 +1611,45 @@ print_diagnosis() {
 # SEÇÃO VISUAL — DETALHE DE DEFERIMENTOS
 # Exibida automaticamente quando DEFER_COUNT > 200
 # ============================================================
+
+# Traduz códigos internos do EXIM e mensagens de erro comuns para texto legível.
+# Entrada: linha no formato "  N  <código ou mensagem>"
+# Saída:   linha com explicação anexada
+_explain_defer_error() {
+    local msg="$1"
+    # Códigos internos EXIM (errno do kernel capturado como "defer (N)")
+    case "$msg" in
+        -44) echo "Conexão recusada pelo servidor remoto (Connection refused)" ;;
+        -45) echo "Host inacessível — rota de rede não encontrada (No route to host)" ;;
+        -47) echo "Timeout de conexão — servidor remoto não respondeu a tempo" ;;
+        -48) echo "Rede inacessível (Network unreachable)" ;;
+        -52) echo "Timeout durante transferência de dados (connection timed out)" ;;
+        -53) echo "DNS: domínio não encontrado (NXDOMAIN / lookup failure)" ;;
+        -54) echo "Conexão encerrada pelo servidor remoto (Connection reset by peer)" ;;
+        -61) echo "Recusa de conexão — porta 25 bloqueada ou serviço parado (Connection refused)" ;;
+        *)
+            # Mensagens SMTP 4xx conhecidas
+            case "$msg" in
+                *"daily rate"*|*"rate limit"*|*"too many"*|*"frequency"*)
+                    echo "$msg → Rate limiting: o provedor limita o volume de mensagens por dia/hora deste IP" ;;
+                *"Greylisted"*|*"greylisting"*)
+                    echo "$msg → Greylisting: servidor temporariamente recusando novos remetentes (normal, reenvio automático resolve)" ;;
+                *"IP reputation"*|*"blocked"*|*"blacklist"*|*"blacklisted"*)
+                    echo "$msg → IP com má reputação ou em blacklist — verifique: https://mxtoolbox.com/blacklists.aspx" ;;
+                *"SPF"*|*"DKIM"*|*"DMARC"*)
+                    echo "$msg → Falha de autenticação de e-mail — verifique registros SPF/DKIM/DMARC no DNS" ;;
+                *"452"*|*"insufficient"*|*"quota"*|*"full"*)
+                    echo "$msg → Caixa do destinatário cheia ou cota do servidor esgotada" ;;
+                *"421"*)
+                    echo "$msg → Servidor remoto temporariamente indisponível (421) — EXIM vai retentar" ;;
+                *"450"*|*"451"*)
+                    echo "$msg → Recusa temporária (4xx) — EXIM vai retentar automaticamente" ;;
+                *)
+                    echo "$msg" ;;
+            esac ;;
+    esac
+}
+
 print_defers() {
     [ "$DEFER_DETAIL_AVAILABLE" -eq 0 ] && return
 
@@ -1599,7 +1674,7 @@ print_defers() {
     echo
     subsec "Erros retornados pelo servidor remoto:"
     if [ -n "$DEFER_ERRORS" ]; then
-        echo -e "  ${DIM}Count  Mensagem${RESET}"
+        echo -e "  ${DIM}Count  Mensagem / Explicação${RESET}"
         hr_thin
         local i=0
         while IFS= read -r line; do
@@ -1608,7 +1683,12 @@ print_defers() {
             cnt=$(echo "$line" | awk '{print $1}')
             msg=$(echo "$line" | awk '{$1=""; print}' | sed 's/^ //')
             [ "$i" -eq 1 ] && color="$LRED" || color="$WHITE"
-            printf "  ${color}%-6s${RESET} %s\n" "$cnt" "$msg"
+            explained=$(_explain_defer_error "$msg")
+            if [ "$explained" = "$msg" ]; then
+                printf "  ${color}%-6s${RESET} %s\n" "$cnt" "$msg"
+            else
+                printf "  ${color}%-6s${RESET} %s\n" "$cnt" "$explained"
+            fi
         done <<< "$DEFER_ERRORS"
     else
         echo -e "  ${DIM}Não foi possível extrair mensagens de erro do log.${RESET}"
@@ -1772,7 +1852,13 @@ check_blacklists() {
     done
 }
 check_dkim_spf() {
-    local domain; domain=$(echo "$RELAY_SUSPECT$TOP_SENDER$TOP_AUTH_USER" | grep -oP '@\K[^@\s]+' | head -1)
+    # Extrai domínio do remetente top, com fallbacks
+    local domain=""
+    for _src in "$TOP_SENDER" "$RELAY_SUSPECT" "$TOP_AUTH_USER"; do
+        [ -z "$_src" ] && continue
+        domain=$(echo "$_src" | grep -oP '@\K[^@\s]+' | head -1)
+        [ -n "$domain" ] && break
+    done
     [ -z "$domain" ] && domain=$(hostname -d 2>/dev/null || hostname -f | cut -d. -f2-)
     echo -e "${CYAN}Verificando SPF/DKIM para: ${BOLD}$domain${RESET}"
     command -v host &>/dev/null || { echo -e "  ${DIM}'host' não disponível.${RESET}"; return; }
@@ -1918,7 +2004,6 @@ print_menu() {
     echo -e "  ${CYAN}[v]${RESET} Ver fila completa (paginado)"
     echo -e "  ${CYAN}[h]${RESET} Tráfego por hora (últimas ${HOURS_WINDOW}h)"
     [ "$PROBLEM" = "SPAM_RELAY" ] && echo -e "  ${CYAN}[d]${RESET} Detalhar mensagens do relay suspeito"
-    [ "${DEFER_DETAIL_AVAILABLE:-0}" -eq 1 ] && echo -e "  ${CYAN}[f]${RESET} Detalhar deferimentos (erros, destinatários, taxa)"
     echo -e "  ${CYAN}[p]${RESET} Procurar scripts PHP com mail()"
     echo
     echo -e "  ${BOLD}${WHITE}── Limpeza ──────────────────────────────────────────────${RESET}"
@@ -1931,6 +2016,11 @@ print_menu() {
         BOUNCE_CONCENTRADO)
             echo -e "  ${RED}[1]${RESET} Limpar bounces (<>)"
             echo -e "  ${YELLOW}[2]${RESET} Limpar toda a fila"
+            ;;
+        ENVIO_THROTTLED)
+            echo -e "  ${CYAN}[1]${RESET} Forçar reprocessamento da fila (retentar entregas)"
+            echo -e "  ${CYAN}[2]${RESET} Ver detalhes de deferimentos"
+            echo -e "  ${DIM}[3]${RESET} Limpar fila do remetente: ${BOLD}$TOP_SENDER${RESET} ${DIM}(use com cuidado — envio legítimo)${RESET}"
             ;;
         SPAM_MASSIVO)
             echo -e "  ${RED}[1]${RESET} Limpar toda a fila"
@@ -1974,7 +2064,6 @@ print_menu() {
         v) "$EXIM_BIN" -bp 2>/dev/null | less -R ;;
         h) print_hourly_stats;  read -rp "  [Enter para continuar]" ;;
         d) [ "$PROBLEM" = "SPAM_RELAY" ] && show_relay_detail | less -R ;;
-        f) [ "${DEFER_DETAIL_AVAILABLE:-0}" -eq 1 ] && { print_defers; read -rp "  [Enter para continuar]"; } ;;
         p) find_php_mailers;    read -rp "  [Enter]" ;;
         r) main; return ;;
         0)
@@ -2004,6 +2093,7 @@ print_menu() {
             case "$PROBLEM" in
                 SPAM_RELAY)                                  clean_bounces ;;
                 BOUNCE_CONCENTRADO)                          clean_full ;;
+                ENVIO_THROTTLED)                             { print_defers; read -rp "  [Enter para continuar]"; } ;;
                 SPAM_MASSIVO)                                clean_by_sender "$TOP_SENDER" ;;
                 AUTH_ABUSE)                                  clean_frozen ;;
                 IP_FLOOD)                                    clean_full ;;
@@ -2014,6 +2104,7 @@ print_menu() {
         3)
             case "$PROBLEM" in
                 SPAM_RELAY)    [ -n "$TOP_IP" ] && block_ip_firewall_d "$TOP_IP" ;;
+                ENVIO_THROTTLED)                             clean_by_sender "$TOP_SENDER" ;;
                 SPAM_MASSIVO)  clean_frozen ;;
                 IP_FLOOD)      clean_frozen ;;
                 ALTO_DEFERIMENTO|BOUNCE_STORM|ALTA_REJEICAO) retry_queue ;;
@@ -2042,8 +2133,6 @@ main() {
     fi
 
     # ── Modo --action: executa ação pontual e sai imediatamente ────
-    # Não requer análise, não lê fila nem log — apenas roda a ação
-    # correspondente e emite JSON de resultado para a API REST.
     if [ -n "$ACTION_CMD" ]; then
         execute_action "$ACTION_CMD" "$ACTION_PARAM"
         exit $?
@@ -2052,23 +2141,17 @@ main() {
     get_server_ips
     detect_exim_version
 
-    # Mostra cabeçalho imediatamente enquanto coleta dados em background
     [ "$JSON_MODE" -eq 0 ] && print_header
 
-    collect   # paralelo com spinner de progresso (ou quick se --quick)
+    collect
 
-    # ── Modo --quick: análise mínima baseada só no log ──────────────
-    # Pula tudo que depende de QUEUE_RAW (senders, recipients, age).
-    # Ideal para polling de dashboard a cada 30s.
     if [ "$QUICK_MODE" -eq 1 ]; then
         analyze_log
         analyze_hourly_stats
-        # Classificação simplificada: só cenários detectáveis pelo log
         TOP_SENDER=""; TOP_SENDER_COUNT=0
         BOUNCE_COUNT=0; TOP_RECIPIENT=""; TOP_RECIPIENT_COUNT=0
         RELAY_SUSPECT=""; RELAY_SUSPECT_SEND=0; RELAY_SUSPECT_BOUNCE=0
         OLD_DAYS=0
-        # FROZEN_COUNT já definido em collect() via exiqgrep -z
         classify
         output_json
         exit 0
@@ -2083,12 +2166,6 @@ main() {
 
     _prog() { [ "$AUTO_MODE" -eq 0 ] && printf "  ${DIM}▸ %s...${RESET}\r" "$1"; }
 
-    # ══════════════════════════════════════════════════════════════════
-    # FASE DE ANÁLISE — tudo roda antes de imprimir qualquer coisa.
-    # Isso permite mostrar Status + Diagnóstico no topo da saída,
-    # para que o operador veja imediatamente o problema e a ação
-    # recomendada sem precisar scrollar até o final.
-    # ══════════════════════════════════════════════════════════════════
     _prog "analisando remetentes e destinatários"
     analyze_senders
     analyze_recipients
@@ -2101,22 +2178,8 @@ main() {
     _prog "classificando cenário"
     analyze_age
     classify
-    printf "\r%-60s\r" " "   # limpa linha de progresso
+    printf "\r%-60s\r" " "
 
-    # ══════════════════════════════════════════════════════════════════
-    # FASE DE IMPRESSÃO — ordem lógica de leitura:
-    #
-    #  1. STATUS GERAL   → severidade + métricas-chave da fila
-    #  2. DIAGNÓSTICO    → problema identificado + ações recomendadas
-    #  3. IDADE          → contexto temporal da fila
-    #  ── dados de suporte (scroll para investigar) ──────────────────
-    #  4. REMETENTES     → quem está enviando
-    #  5. DESTINATÁRIOS  → para onde está indo
-    #  6. SMTP AUTH      → quais contas autenticaram
-    #  7. IPs EXTERNOS   → origens externas
-    #  8. ERROS          → rejeições, defers, bounces
-    #  9. DETALHE DEFER  → erros específicos dos deferimentos (se alto)
-    # ══════════════════════════════════════════════════════════════════
     print_status
     print_diagnosis
     print_age
@@ -2124,7 +2187,7 @@ main() {
     print_senders
     print_recipients
     print_auth
-    print_ips    print_errors
+    print_ips
     [ "$DEFER_COUNT" -gt 200 ] && [ "${DEFER_DETAIL_AVAILABLE:-0}" -eq 1 ] && print_defers
 
     auto_clean
@@ -2132,4 +2195,3 @@ main() {
 }
 
 main
-                                  
