@@ -1,9 +1,14 @@
 /**
  * ServerSelector — dropdown no header para trocar o servidor ativo.
  * Aparece apenas quando o usuário tem mais de um servidor.
+ *
+ * O painel usa position:fixed (calculado via getBoundingClientRect) em vez
+ * de position:absolute — o header tem overflow:hidden num ancestral (para
+ * truncar nomes longos), o que cortava/escondia um dropdown absoluto.
+ * position:fixed escapa desse clipping por renderizar relativo à viewport.
  */
 import { ChevronDown, Server } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useServer } from '../contexts/ServerContext'
 
 const STATUS_DOT = {
@@ -16,20 +21,46 @@ const STATUS_DOT = {
 export default function ServerSelector() {
   const { servers, activeServer, setActiveServer } = useServer()
   const [open, setOpen] = useState(false)
-  const ref = useRef(null)
+  const [coords, setCoords] = useState({ top: 0, left: 0 })
+  const btnRef = useRef(null)
+  const panelRef = useRef(null)
 
-  // Fecha ao clicar fora
+  // Fecha ao clicar fora (botão OU painel — painel agora não é mais filho do botão no DOM)
   useEffect(() => {
-    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    const handler = (e) => {
+      if (
+        btnRef.current && !btnRef.current.contains(e.target) &&
+        panelRef.current && !panelRef.current.contains(e.target)
+      ) {
+        setOpen(false)
+      }
+    }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
+  // Recalcula a posição toda vez que o dropdown abre (e ao redimensionar/rolar)
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) return
+    const update = () => {
+      const r = btnRef.current.getBoundingClientRect()
+      setCoords({ top: r.bottom + 6, left: r.left })
+    }
+    update()
+    window.addEventListener('resize', update)
+    window.addEventListener('scroll', update, true)
+    return () => {
+      window.removeEventListener('resize', update)
+      window.removeEventListener('scroll', update, true)
+    }
+  }, [open])
+
   if (!activeServer) return null
 
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
+    <div style={{ position: 'relative' }}>
       <button
+        ref={btnRef}
         onClick={() => setOpen(v => !v)}
         style={{
           display: 'flex', alignItems: 'center', gap: 6,
@@ -57,13 +88,16 @@ export default function ServerSelector() {
       </button>
 
       {open && (
-        <div style={{
-          position: 'absolute', top: '100%', left: 0, marginTop: 6,
-          background: '#fff', border: '1px solid #E2E8F0', borderRadius: 10,
-          boxShadow: '0 4px 16px rgba(0,0,0,0.10)',
-          minWidth: 220, zIndex: 100,
-          overflow: 'hidden',
-        }}>
+        <div
+          ref={panelRef}
+          style={{
+            position: 'fixed', top: coords.top, left: coords.left,
+            background: '#fff', border: '1px solid #E2E8F0', borderRadius: 10,
+            boxShadow: '0 4px 16px rgba(0,0,0,0.10)',
+            minWidth: 220, zIndex: 1000,
+            overflow: 'hidden',
+          }}
+        >
           <div style={{ padding: '6px 0' }}>
             {servers.map(s => (
               <button

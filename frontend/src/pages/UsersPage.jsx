@@ -4,7 +4,8 @@
  */
 import { ArrowLeft, Clock, Copy, Link, Mail, RefreshCw, RotateCcw, Shield, Trash2, UserPlus, Users, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { deleteUser, fetchUsers, getInviteLink, inviteUser, resendInvite } from '../api/client'
+import { deleteUser, fetchUsers, getInviteLink, inviteUser, resendInvite, updateUserRole } from '../api/client'
+import { useAuth } from '../contexts/AuthContext'
 
 const ROLE_LABEL = { admin: 'Admin', viewer: 'Viewer' }
 const ROLE_COLOR = { admin: '#0369A1', viewer: '#64748B' }
@@ -18,6 +19,7 @@ const inputStyle = {
 }
 
 export default function UsersPage({ onBack }) {
+  const { userId: currentUserId } = useAuth()
   const [users, setUsers]         = useState([])
   const [loading, setLoading]     = useState(true)
   const [error, setError]         = useState(null)
@@ -27,6 +29,7 @@ export default function UsersPage({ onBack }) {
   const [sending, setSending]     = useState(false)
   const [inviteMsg, setInviteMsg] = useState(null)
   const [resending, setResending] = useState({})   // { [userId]: true }
+  const [changingRole, setChangingRole] = useState({}) // { [userId]: true }
   const [linkModal, setLinkModal] = useState(null) // { email, url, expires_in_hours }
   const [copied, setCopied]       = useState(false)
 
@@ -95,6 +98,20 @@ export default function UsersPage({ onBack }) {
       load()
     } catch (e) {
       setError(e?.response?.data?.detail ?? e.message)
+    }
+  }
+
+  const handleRoleChange = async (id, username, newRole) => {
+    if (!confirm(`Alterar "${username}" para ${ROLE_LABEL[newRole]}? O acesso atual dele será encerrado e ele precisará logar novamente.`)) return
+    setChangingRole(r => ({ ...r, [id]: true }))
+    try {
+      const res = await updateUserRole(id, newRole)
+      setInviteMsg({ ok: res.ok, text: res.message })
+      load()
+    } catch (e) {
+      setError(e?.response?.data?.detail ?? e.message)
+    } finally {
+      setChangingRole(r => ({ ...r, [id]: false }))
     }
   }
 
@@ -279,15 +296,35 @@ export default function UsersPage({ onBack }) {
                     </span>
 
                     {/* Role */}
-                    <span style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 3,
-                      fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 999,
-                      background: ROLE_BG[u.role], color: ROLE_COLOR[u.role],
-                      border: `1px solid ${ROLE_COLOR[u.role]}25`,
-                    }}>
-                      <Shield size={9} />
-                      {ROLE_LABEL[u.role] ?? u.role}
-                    </span>
+                    {(!u.invite_pending && u.id !== 0 && u.id !== currentUserId) ? (
+                      <select
+                        value={u.role}
+                        disabled={changingRole[u.id]}
+                        onChange={e => handleRoleChange(u.id, u.username, e.target.value)}
+                        title="Alterar papel"
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 3,
+                          fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 999,
+                          background: ROLE_BG[u.role], color: ROLE_COLOR[u.role],
+                          border: `1px solid ${ROLE_COLOR[u.role]}25`,
+                          cursor: changingRole[u.id] ? 'wait' : 'pointer',
+                          opacity: changingRole[u.id] ? 0.6 : 1,
+                        }}
+                      >
+                        <option value="admin">Admin</option>
+                        <option value="viewer">Viewer</option>
+                      </select>
+                    ) : (
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 3,
+                        fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 999,
+                        background: ROLE_BG[u.role], color: ROLE_COLOR[u.role],
+                        border: `1px solid ${ROLE_COLOR[u.role]}25`,
+                      }}>
+                        <Shield size={9} />
+                        {ROLE_LABEL[u.role] ?? u.role}
+                      </span>
+                    )}
 
                     {/* Status */}
                     {u.invite_pending ? (

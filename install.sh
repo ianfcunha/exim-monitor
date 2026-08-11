@@ -184,6 +184,7 @@ if [[ -z "$PG_PASS" ]]; then
 fi
 
 JWT_SECRET=$(openssl rand -hex 32)
+SSH_ENCRYPTION_KEY=$(openssl rand -base64 32 | tr '+/' '-_')
 
 # ── Resumo e confirmacao ───────────────────────────────────────────────────
 echo ""
@@ -296,6 +297,7 @@ ADMIN_USERNAME=$ADMIN_USER
 ADMIN_PASSWORD=$ADMIN_PASS
 
 JWT_SECRET=$JWT_SECRET
+SSH_ENCRYPTION_KEY=$SSH_ENCRYPTION_KEY
 JWT_EXPIRE_MINUTES=480
 
 DATABASE_URL=postgresql://exim:${PG_PASS}@postgres:5432/exim_monitor

@@ -44,6 +44,9 @@ class User(Base):
     role               = Column(String(20),  default="admin", nullable=False)  # admin | viewer
     is_active          = Column(Boolean,     default=True,    nullable=False)
     email_verified     = Column(Boolean,     default=False,   nullable=False)
+    # Incrementado sempre que o role muda — invalida instantaneamente
+    # qualquer JWT ja emitido para este usuario (forca novo login).
+    token_version      = Column(Integer,     default=0,       nullable=False)
 
     # Convite
     invite_token       = Column(String(200), nullable=True, unique=True)

@@ -99,6 +99,7 @@ export const fetchServerSshStatus = (id) => api.get(`/servers/${id}/ssh-status`)
 // ── Usuários ──────────────────────────────────────────────────────────────
 export const fetchUsers     = () => api.get('/users').then(r => r.data)
 export const inviteUser     = (payload) => api.post('/users/invite', payload).then(r => r.data)
+export const updateUserRole = (id, role) => api.patch(`/users/${id}/role`, { role }).then(r => r.data)
 export const deleteUser     = (id) => api.delete(`/users/${id}`).then(r => r.data)
 export const checkInvite    = (token) => api.get(`/users/accept/${token}`).then(r => r.data)
 export const acceptInvite   = (token, payload) => api.post(`/users/accept/${token}`, payload).then(r => r.data)

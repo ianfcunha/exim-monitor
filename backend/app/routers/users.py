@@ -40,6 +40,10 @@ class AcceptInviteRequest(BaseModel):
     password: str = Field(..., min_length=8)
 
 
+class UpdateRoleRequest(BaseModel):
+    role: str = Field(..., pattern="^(admin|viewer)$")
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 def _send_invite_email(to_email: str, inviter_username: str, token: str) -> None:
@@ -248,6 +252,38 @@ def get_invite_link(
         "invite_url": f"{settings.app_url}/?invite={user.invite_token}",
         "expires_at": user.invite_expires_at.isoformat() if user.invite_expires_at else None,
         "expires_in_hours": expires_in_h,
+    }
+
+
+@router.patch("/{user_id}/role", summary="Alterar papel do usuário (admin only)")
+def update_role(
+    user_id: int,
+    payload: UpdateRoleRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    if user_id == current_user.id:
+        raise HTTPException(400, "Você não pode alterar o seu próprio papel.")
+
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(404, "Usuário não encontrado.")
+
+    if user.role == payload.role:
+        return {"ok": True, "message": "Nenhuma alteração necessária.", "role": user.role}
+
+    user.role = payload.role
+    # Invalida qualquer token ja emitido para este usuario — a proxima
+    # requisicao dele recebe 401 e o frontend forca um novo login,
+    # que ja vem com o role correto.
+    user.token_version = (user.token_version or 0) + 1
+    db.commit()
+
+    return {
+        "ok": True,
+        "message": f"Papel de {user.username or user.email} alterado para {payload.role}. "
+                   f"O acesso atual dele será encerrado e ele precisará logar novamente.",
+        "role": user.role,
     }
 
 

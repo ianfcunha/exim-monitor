@@ -44,6 +44,7 @@ def create_access_token(user: User, expires_delta: Optional[timedelta] = None) -
         "user_id":  user.id,
         "role":     user.role,
         "owner_id": owner_id,
+        "tv":       getattr(user, "token_version", None) or 0,
     }
     expire = datetime.utcnow() + (
         expires_delta or timedelta(minutes=settings.jwt_expire_minutes)
@@ -106,9 +107,16 @@ def get_current_user(
     except JWTError:
         raise exc
 
+    token_version: int = payload.get("tv", 0) or 0
+
     user = get_user_by_username(db, username)
     if user:
         if not user.is_active:
+            raise exc
+        # Se o role mudou desde que este token foi emitido, o backend
+        # incrementa token_version — qualquer token antigo vira invalido
+        # na hora, forcando novo login com as permissoes corretas.
+        if (getattr(user, "token_version", None) or 0) != token_version:
             raise exc
         return user
 
