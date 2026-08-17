@@ -153,8 +153,15 @@ def _run(args: str, server_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, An
     client = _get_client(cfg)
     try:
         _stdin, stdout, stderr = client.exec_command(cmd, timeout=90)
-        output = stdout.read().decode("utf-8", errors="replace").strip()
-        error  = stderr.read().decode("utf-8", errors="replace").strip()
+        try:
+            output = stdout.read().decode("utf-8", errors="replace").strip()
+            error  = stderr.read().decode("utf-8", errors="replace").strip()
+        except TimeoutError as exc:
+            raise SSHError(
+                f"Comando '{args}' não respondeu em 90s no servidor remoto "
+                f"({cfg['host']}) — script pode estar desatualizado, travado "
+                f"ou esse argumento não é suportado pela versão instalada lá."
+            ) from exc
     finally:
         client.close()
 
@@ -179,7 +186,10 @@ def _run_raw(cmd: str, timeout: int = 20,
     client = _get_client(server_cfg)
     try:
         _stdin, stdout, _stderr = client.exec_command(cmd, timeout=timeout)
-        return stdout.read().decode("utf-8", errors="replace")
+        try:
+            return stdout.read().decode("utf-8", errors="replace")
+        except TimeoutError as exc:
+            raise SSHError(f"Comando não respondeu em {timeout}s no servidor remoto.") from exc
     finally:
         client.close()
 
@@ -218,6 +228,16 @@ def run_action(action: str, param: Optional[str] = None,
     """Executa uma ação isolada e retorna o JSON de resultado."""
     action_arg = f"{action}:{param}" if param else action
     return _run(f"--action={action_arg}", server_cfg)
+
+
+def run_check(server_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Autodiagnóstico do servidor remoto (pré-requisitos): binário exim,
+    exiqgrep, espaço em disco, mainlog acessível, cPanel/WHM, CSF.
+    Usado no cadastro/teste de servidor para validar que o script está
+    presente e funcional — não só que a porta SSH responde.
+    """
+    return _run("--check", server_cfg)
 
 
 # ── Mensagens: fila e log ──────────────────────────────────────────────────

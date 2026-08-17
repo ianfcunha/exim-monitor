@@ -14,6 +14,15 @@ const SSH_STATUS = {
   unknown: { color: '#94A3B8', bg: '#F8FAFC', label: 'Desconhecido',icon: Server      },
 }
 
+const CHECK_LABELS = {
+  exim_binary: 'Binário exim',
+  exiqgrep:    'exiqgrep',
+  disk_space:  'Espaço em disco',
+  mainlog:     'Log do Exim',
+  cpanel:      'Ambiente cPanel/WHM',
+  csf:         'Firewall CSF',
+}
+
 const inputStyle = {
   width: '100%', borderRadius: 8,
   background: '#F8FAFC', border: '1px solid #E2E8F0',
@@ -384,6 +393,30 @@ export default function ServersPage({ onBack }) {
                   ) : tr && (
                     <div style={{ fontSize: 11, marginTop: 4, color: tr.ok ? '#16A34A' : '#DC2626', fontWeight: 600 }}>
                       {tr.ok ? `✓ Conectado em ${tr.latency_ms}ms` : `✗ ${tr.error}`}
+                    </div>
+                  )}
+
+                  {/* Pré-requisitos do script (--check) — só quando a conexão SSH deu certo */}
+                  {tr?.ok && tr?.checks && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', marginTop: 6 }}>
+                      {tr.checks.map(c => {
+                        const informational = c.check === 'cpanel' || c.check === 'csf'
+                        const Icon = c.ok ? CheckCircle : (informational ? Server : XCircle)
+                        const color = c.ok ? '#16A34A' : (informational ? '#94A3B8' : '#DC2626')
+                        return (
+                          <span key={c.check} title={c.detail}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, color }}>
+                            <Icon size={11} />
+                            {CHECK_LABELS[c.check] ?? c.check}
+                          </span>
+                        )
+                      })}
+                    </div>
+                  )}
+                  {tr?.ok && tr?.check_error && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: '#D97706', marginTop: 6 }}>
+                      <AlertTriangle size={11} />
+                      SSH conectou, mas não foi possível validar o script: {tr.check_error}
                     </div>
                   )}
                 </div>

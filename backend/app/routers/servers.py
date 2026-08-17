@@ -186,7 +186,7 @@ def test_server(
     current_user: User = Depends(require_admin),
 ):
     from datetime import datetime
-    from ..ssh import HostKeyMismatchError, SSHError, test_connection
+    from ..ssh import HostKeyMismatchError, SSHError, run_check, test_connection
 
     server = get_server_owned_by(db, server_id, current_user)
     if not server:
@@ -206,6 +206,20 @@ def test_server(
         if first_seen and result["fingerprint"]:
             server.ssh_host_key_fingerprint = result["fingerprint"]
 
+        # Handshake SSH ok não garante que o script existe/funciona no
+        # servidor remoto — roda --check para validar os pré-requisitos
+        # reais (binário exim, exiqgrep, mainlog, cPanel/CSF). Falha aqui
+        # não derruba o teste de conexão: fica registrada separadamente,
+        # para a UI distinguir "SSH ok, script ausente/desatualizado" de
+        # um erro genérico de conexão.
+        checks = None
+        check_error = None
+        try:
+            check_data = run_check(cfg)
+            checks = check_data.get("checks")
+        except SSHError as exc:
+            check_error = str(exc)[:500]
+
         db.commit()
         return {
             "ok": True,
@@ -213,6 +227,8 @@ def test_server(
             "status": "ok",
             "host_key_fingerprint": server.ssh_host_key_fingerprint,
             "host_key_first_seen": first_seen,
+            "checks": checks,
+            "check_error": check_error,
         }
     except HostKeyMismatchError as exc:
         server.ssh_status    = "error"
