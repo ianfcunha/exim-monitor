@@ -5,14 +5,17 @@ Todas as funções públicas aceitam um parâmetro opcional `server_cfg` (dict).
 Quando omitido, usam as configurações do .env (retrocompatibilidade).
 
 server_cfg = {
-    "host":          str,
-    "port":          int,
-    "ssh_user":      str,
-    "ssh_auth_type": "password" | "key",
-    "ssh_secret":    str,   # senha ou conteúdo da chave privada (já decriptografado)
-    "script_path":   str,
+    "host":                str,
+    "port":                int,
+    "ssh_user":            str,
+    "ssh_auth_type":       "password" | "key",
+    "ssh_secret":          str,   # senha ou conteúdo da chave privada (já decriptografado)
+    "script_path":         str,
+    "host_key_fingerprint": str | None,  # fingerprint conhecido (pinning) — None = primeira conexão
 }
 """
+import base64
+import hashlib
 import io
 import json
 import os
@@ -29,24 +32,78 @@ class SSHError(Exception):
     """Erro de conexão SSH ou execução remota do script."""
 
 
+class HostKeyMismatchError(SSHError):
+    """
+    A chave do host mudou desde o fingerprint conhecido (pinned).
+    Pode indicar um ataque MITM ou que o servidor foi reinstalado —
+    exige confirmação manual antes de prosseguir.
+    """
+
+
+def _fingerprint(key: paramiko.PKey) -> str:
+    """Fingerprint SHA256 no mesmo formato do `ssh-keygen -lf` (OpenSSH)."""
+    digest = hashlib.sha256(key.asbytes()).digest()
+    return "SHA256:" + base64.b64encode(digest).decode().rstrip("=")
+
+
+class _PinnedHostKeyPolicy(paramiko.MissingHostKeyPolicy):
+    """
+    Substitui AutoAddPolicy (que aceita qualquer chave sem verificar — brecha
+    de MITM). Como o SSHClient aqui nunca carrega known_hosts, toda conexão
+    passa por missing_host_key(), o que a torna o ponto certo para pinning
+    contra o fingerprint salvo no cadastro do servidor.
+
+    expected_fingerprint=None: primeira conexão — aceita e expõe o
+    fingerprint observado em `self.observed_fingerprint` para o chamador
+    decidir se persiste (confirmação explícita no fluxo de cadastro/teste).
+
+    expected_fingerprint=<str>: só aceita se bater; caso contrário rejeita
+    levantando HostKeyMismatchError.
+    """
+
+    def __init__(self, expected_fingerprint: Optional[str] = None):
+        self.expected_fingerprint = expected_fingerprint
+        self.observed_fingerprint: Optional[str] = None
+
+    def missing_host_key(self, client, hostname, key):
+        self.observed_fingerprint = _fingerprint(key)
+        if self.expected_fingerprint and self.observed_fingerprint != self.expected_fingerprint:
+            raise HostKeyMismatchError(
+                f"A chave do host {hostname} não bate com o fingerprint "
+                f"conhecido (esperado {self.expected_fingerprint}, recebido "
+                f"{self.observed_fingerprint}). Pode ser um ataque MITM ou o "
+                f"servidor foi reinstalado — confirme manualmente antes de "
+                f"continuar."
+            )
+        # Primeira conexão (expected_fingerprint=None) ou fingerprint bate: aceita.
+
+
 def _default_cfg() -> Dict[str, Any]:
     """Configuração SSH a partir do .env (retrocompatibilidade)."""
     return {
-        "host":          settings.ssh_host,
-        "port":          settings.ssh_port,
-        "ssh_user":      settings.ssh_user,
-        "ssh_auth_type": "key" if not settings.ssh_password else "password",
-        "ssh_secret":    settings.ssh_password or "",
-        "script_path":   settings.script_path,
+        "host":                settings.ssh_host,
+        "port":                settings.ssh_port,
+        "ssh_user":            settings.ssh_user,
+        "ssh_auth_type":       "key" if not settings.ssh_password else "password",
+        "ssh_secret":          settings.ssh_password or "",
+        "script_path":         settings.script_path,
+        "host_key_fingerprint": None,
     }
 
 
 def _get_client(server_cfg: Optional[Dict[str, Any]] = None) -> paramiko.SSHClient:
-    """Abre e retorna uma conexão SSH autenticada."""
+    """Abre e retorna uma conexão SSH autenticada.
+
+    Verifica a chave do host contra `cfg["host_key_fingerprint"]` (pinning).
+    O fingerprint observado nesta conexão fica em
+    `client.observed_host_key_fingerprint` para quem chamou decidir se
+    persiste (ex.: primeira conexão de um servidor recém-cadastrado).
+    """
     cfg = server_cfg or _default_cfg()
 
     client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    policy = _PinnedHostKeyPolicy(cfg.get("host_key_fingerprint"))
+    client.set_missing_host_key_policy(policy)
 
     kwargs: Dict[str, Any] = {
         "hostname": cfg["host"],
@@ -78,11 +135,14 @@ def _get_client(server_cfg: Optional[Dict[str, Any]] = None) -> paramiko.SSHClie
 
     try:
         client.connect(**kwargs)
+    except HostKeyMismatchError:
+        raise
     except Exception as exc:
         raise SSHError(
             f"Não foi possível conectar a {cfg['host']}:{cfg['port']} — {exc}"
         ) from exc
 
+    client.observed_host_key_fingerprint = policy.observed_fingerprint
     return client
 
 
@@ -126,16 +186,19 @@ def _run_raw(cmd: str, timeout: int = 20,
 
 # ── Teste de conexão ───────────────────────────────────────────────────────
 
-def test_connection(server_cfg: Optional[Dict[str, Any]] = None) -> int:
+def test_connection(server_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Abre e fecha uma conexão SSH de teste.
-    Retorna a latência em milissegundos.
-    Lança SSHError em caso de falha.
+    Retorna {"latency_ms": int, "fingerprint": str} — fingerprint é o
+    observado nesta conexão (pode ou não já ser o conhecido/pinned).
+    Lança SSHError (ou HostKeyMismatchError) em caso de falha.
     """
     t0 = time.monotonic()
     client = _get_client(server_cfg)
+    fingerprint = getattr(client, "observed_host_key_fingerprint", None)
     client.close()
-    return int((time.monotonic() - t0) * 1000)
+    latency_ms = int((time.monotonic() - t0) * 1000)
+    return {"latency_ms": latency_ms, "fingerprint": fingerprint}
 
 
 # ── API pública ────────────────────────────────────────────────────────────

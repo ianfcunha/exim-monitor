@@ -31,7 +31,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Versão atual do schema — atualizar junto com cada nova migration
-_SCHEMA_VERSION = "004"
+_SCHEMA_VERSION = "005"
 
 _DDL_ALEMBIC_VERSION = """
     CREATE TABLE IF NOT EXISTS alembic_version (
@@ -259,6 +259,20 @@ def run_migrations() -> None:
                 {"v": "004"},
             )
             logger.info("Migration 004 aplicada com sucesso")
+            current = {"004"}
+
+        if "004" in current and "005" not in current:
+            logger.info("Aplicando migration 004 → 005 (servers.ssh_host_key_fingerprint)...")
+            conn.execute(text("""
+                ALTER TABLE servers
+                    ADD COLUMN IF NOT EXISTS ssh_host_key_fingerprint VARCHAR(200)
+            """))
+            conn.execute(text("DELETE FROM alembic_version"))
+            conn.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
+                {"v": "005"},
+            )
+            logger.info("Migration 005 aplicada com sucesso")
 
         logger.info("Banco de dados pronto (schema %s)", _SCHEMA_VERSION)
 

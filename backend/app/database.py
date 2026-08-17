@@ -85,6 +85,9 @@ class Server(Base):
     # Fernet-encrypted: senha SSH ou conteúdo da chave privada
     ssh_secret      = Column(String(4000), default="", nullable=False)
     script_path     = Column(String(500),  default="/root/diag-exim.sh", nullable=False)
+    # Fingerprint (SHA256, formato ssh-keygen) da chave do host, capturado na
+    # primeira conexão bem-sucedida via /test. Null = ainda não confirmado.
+    ssh_host_key_fingerprint = Column(String(200), nullable=True)
     is_enabled      = Column(Boolean,      default=True,  nullable=False)
     last_connected_at = Column(DateTime,   nullable=True)
     ssh_status      = Column(String(20),   default="unknown", nullable=False)  # ok | error | timeout | unknown

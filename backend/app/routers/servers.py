@@ -46,6 +46,9 @@ class ServerUpdate(BaseModel):
     ssh_secret:    Optional[str] = Field(None, description="Novo segredo — deixe vazio para manter o atual")
     script_path:   Optional[str] = Field(None, max_length=500)
     is_enabled:    Optional[bool] = None
+    reset_host_key: Optional[bool] = Field(
+        None, description="true = esquece o fingerprint pinado; próxima conexão fixa um novo"
+    )
 
 
 def _to_response(s: Server, include_secret: bool = False) -> dict:
@@ -58,6 +61,7 @@ def _to_response(s: Server, include_secret: bool = False) -> dict:
         "ssh_auth_type":    s.ssh_auth_type,
         "ssh_secret":       MASK if s.ssh_secret else "",  # nunca expõe o segredo real
         "script_path":      s.script_path,
+        "ssh_host_key_fingerprint": s.ssh_host_key_fingerprint,
         "is_enabled":       s.is_enabled,
         "ssh_status":       s.ssh_status,
         "ssh_error_msg":    s.ssh_error_msg,
@@ -69,12 +73,13 @@ def _to_response(s: Server, include_secret: bool = False) -> dict:
 def _build_server_cfg(s: Server) -> dict:
     """Monta dict de configuração SSH para passar ao ssh.py."""
     return {
-        "host":          s.host,
-        "port":          s.port,
-        "ssh_user":      s.ssh_user,
-        "ssh_auth_type": s.ssh_auth_type,
-        "ssh_secret":    decrypt_secret(s.ssh_secret),
-        "script_path":   s.script_path,
+        "host":                 s.host,
+        "port":                 s.port,
+        "ssh_user":             s.ssh_user,
+        "ssh_auth_type":        s.ssh_auth_type,
+        "ssh_secret":           decrypt_secret(s.ssh_secret),
+        "script_path":          s.script_path,
+        "host_key_fingerprint": s.ssh_host_key_fingerprint,
     }
 
 
@@ -144,6 +149,8 @@ def update_server(
     if payload.ssh_auth_type is not None: server.ssh_auth_type = payload.ssh_auth_type
     if payload.script_path   is not None: server.script_path   = payload.script_path
     if payload.is_enabled    is not None: server.is_enabled    = payload.is_enabled
+    if payload.reset_host_key:
+        server.ssh_host_key_fingerprint = None
 
     # Só atualiza o segredo se vier preenchido e diferente da máscara
     if payload.ssh_secret and payload.ssh_secret != MASK:
@@ -179,7 +186,7 @@ def test_server(
     current_user: User = Depends(require_admin),
 ):
     from datetime import datetime
-    from ..ssh import SSHError, test_connection
+    from ..ssh import HostKeyMismatchError, SSHError, test_connection
 
     server = get_server_owned_by(db, server_id, current_user)
     if not server:
@@ -187,12 +194,31 @@ def test_server(
 
     cfg = _build_server_cfg(server)
     try:
-        latency_ms = test_connection(cfg)
+        result = test_connection(cfg)
         server.ssh_status       = "ok"
         server.ssh_error_msg    = None
         server.last_connected_at = datetime.utcnow()
+
+        # Primeira conexão bem-sucedida: fixa o fingerprint observado.
+        # Conexões seguintes já chegam aqui validadas (ssh.py rejeita
+        # antes se o fingerprint mudou), então isto só "grava" uma vez.
+        first_seen = server.ssh_host_key_fingerprint is None
+        if first_seen and result["fingerprint"]:
+            server.ssh_host_key_fingerprint = result["fingerprint"]
+
         db.commit()
-        return {"ok": True, "latency_ms": latency_ms, "status": "ok"}
+        return {
+            "ok": True,
+            "latency_ms": result["latency_ms"],
+            "status": "ok",
+            "host_key_fingerprint": server.ssh_host_key_fingerprint,
+            "host_key_first_seen": first_seen,
+        }
+    except HostKeyMismatchError as exc:
+        server.ssh_status    = "error"
+        server.ssh_error_msg = str(exc)[:500]
+        db.commit()
+        return {"ok": False, "status": "host_key_mismatch", "error": str(exc)}
     except SSHError as exc:
         server.ssh_status    = "error"
         server.ssh_error_msg = str(exc)[:500]

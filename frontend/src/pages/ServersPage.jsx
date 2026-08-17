@@ -2,7 +2,7 @@
  * ServersPage — CRUD de servidores EXIM.
  * Apenas admins acessam esta página.
  */
-import { ArrowLeft, CheckCircle, Edit2, Plus, RefreshCw, Server, Trash2, WifiOff, XCircle, Zap } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, CheckCircle, Edit2, KeyRound, Plus, RefreshCw, Server, Trash2, WifiOff, XCircle, Zap } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { createServer, deleteServer, fetchServers, testServerConn, updateServer } from '../api/client'
 import { useServer } from '../contexts/ServerContext'
@@ -223,6 +223,21 @@ export default function ServersPage({ onBack }) {
     }
   }
 
+  const handleForgetHostKey = async (id) => {
+    if (!confirm(
+      'Isso esquece a chave do host conhecida. Só faça isso se você reinstalou ' +
+      'esse servidor de propósito — caso contrário, a mudança de chave pode ' +
+      'indicar um ataque. Continuar?'
+    )) return
+    try {
+      await updateServer(id, { reset_host_key: true })
+      setTestResult(r => ({ ...r, [id]: null }))
+      await load()
+    } catch (e) {
+      setError(e?.response?.data?.detail ?? e.message)
+    }
+  }
+
   return (
     <div style={{ minHeight: '100vh', background: '#F1F5F9' }}>
       {/* Header */}
@@ -325,6 +340,11 @@ export default function ServersPage({ onBack }) {
                   <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#64748B' }}>
                     {s.ssh_user}@{s.host}:{s.port} · {s.script_path}
                   </div>
+                  {s.ssh_host_key_fingerprint && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'monospace', fontSize: 10, color: '#94A3B8', marginTop: 3 }}>
+                      <KeyRound size={10} /> {s.ssh_host_key_fingerprint}
+                    </div>
+                  )}
                   {s.last_connected_at && (
                     <div style={{ fontSize: 10, color: '#94A3B8', marginTop: 2 }}>
                       Último contato: {new Date(s.last_connected_at).toLocaleString('pt-BR')}
@@ -333,7 +353,35 @@ export default function ServersPage({ onBack }) {
                   {s.ssh_error_msg && (
                     <div style={{ fontSize: 11, color: '#DC2626', marginTop: 4 }}>{s.ssh_error_msg}</div>
                   )}
-                  {tr && (
+
+                  {tr?.status === 'host_key_mismatch' ? (
+                    <div style={{ marginTop: 6, padding: '8px 10px', borderRadius: 8, background: '#FEF2F2', border: '1px solid #FECACA' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: '#991B1B' }}>
+                        <AlertTriangle size={12} /> A chave do host mudou desde o cadastro
+                      </div>
+                      <p style={{ fontSize: 11, color: '#991B1B', margin: '4px 0 6px' }}>{tr.error}</p>
+                      <button
+                        onClick={() => handleForgetHostKey(s.id)}
+                        style={{
+                          fontSize: 11, fontWeight: 600, padding: '5px 10px', borderRadius: 6,
+                          border: '1px solid #FCA5A5', background: '#fff', color: '#991B1B', cursor: 'pointer',
+                        }}>
+                        Servidor foi reinstalado — esquecer chave antiga
+                      </button>
+                    </div>
+                  ) : tr?.ok && tr?.host_key_first_seen ? (
+                    <div style={{ marginTop: 6, padding: '8px 10px', borderRadius: 8, background: '#F0FDF4', border: '1px solid #BBF7D0' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: '#166534' }}>
+                        <KeyRound size={12} /> Primeira conexão — chave do host fixada
+                      </div>
+                      <p style={{ fontFamily: 'monospace', fontSize: 10, color: '#166534', margin: '4px 0 0' }}>
+                        {tr.host_key_fingerprint}
+                      </p>
+                      <p style={{ fontSize: 10, color: '#166534', margin: '4px 0 0' }}>
+                        Confirme que este é o fingerprint esperado do seu servidor. Conexões futuras com uma chave diferente serão bloqueadas.
+                      </p>
+                    </div>
+                  ) : tr && (
                     <div style={{ fontSize: 11, marginTop: 4, color: tr.ok ? '#16A34A' : '#DC2626', fontWeight: 600 }}>
                       {tr.ok ? `✓ Conectado em ${tr.latency_ms}ms` : `✗ ${tr.error}`}
                     </div>

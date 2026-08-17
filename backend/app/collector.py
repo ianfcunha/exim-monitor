@@ -52,13 +52,14 @@ def _get_active_servers() -> List[Dict[str, Any]]:
         result = []
         for s in servers:
             result.append({
-                "server_id":   s.id,
-                "host":        s.host,
-                "port":        s.port,
-                "ssh_user":    s.ssh_user,
-                "ssh_auth_type": s.ssh_auth_type,
-                "ssh_secret":  decrypt_secret(s.ssh_secret),
-                "script_path": s.script_path,
+                "server_id":            s.id,
+                "host":                 s.host,
+                "port":                 s.port,
+                "ssh_user":             s.ssh_user,
+                "ssh_auth_type":        s.ssh_auth_type,
+                "ssh_secret":           decrypt_secret(s.ssh_secret),
+                "script_path":          s.script_path,
+                "host_key_fingerprint": s.ssh_host_key_fingerprint,
             })
         return result
     finally:

@@ -86,12 +86,13 @@ def execute_action(
         if not server:
             raise HTTPException(404, f"Servidor {server_id} não encontrado.")
         server_cfg = {
-            "host":          server.host,
-            "port":          server.port,
-            "ssh_user":      server.ssh_user,
-            "ssh_auth_type": server.ssh_auth_type,
-            "ssh_secret":    decrypt_secret(server.ssh_secret),
-            "script_path":   server.script_path,
+            "host":                 server.host,
+            "port":                 server.port,
+            "ssh_user":             server.ssh_user,
+            "ssh_auth_type":        server.ssh_auth_type,
+            "ssh_secret":           decrypt_secret(server.ssh_secret),
+            "script_path":          server.script_path,
+            "host_key_fingerprint": server.ssh_host_key_fingerprint,
         }
 
     try:
