@@ -3,11 +3,14 @@ Banco de dados PostgreSQL via SQLAlchemy 2.
 
 Modelos:
   - Snapshot      : serie temporal de diagnosticos coletados
-  - AlertSettings : configuracao de alertas (singleton — sempre id=1)
+  - AlertSettings : configuracao de alertas — um registro "padrao" legado
+                    (server_id nulo, id=1) e um registro por servidor
+                    (server_id preenchido)
 """
 from datetime import datetime
+from typing import Optional
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, create_engine
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, create_engine, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, relationship, sessionmaker
 from sqlalchemy.pool import QueuePool
@@ -120,7 +123,18 @@ class Snapshot(Base):
 
 class AlertSettings(Base):
     """
-    Configuracao de alertas — singleton (sempre id=1).
+    Configuracao de alertas.
+
+    server_id nulo (id=1)  : registro "padrao"/legado — usado quando nenhum
+                              server_id e informado (retrocompatibilidade
+                              com quem so tem um servidor).
+    server_id preenchido    : configuracao especifica daquele servidor.
+
+    A coluna `id` NAO tem geracao automatica no banco (ver migration 001 —
+    Integer primary_key sem server_default), entao novos registros com
+    server_id precisam de um id explicito. Use `get_alert_settings()`, que
+    cuida disso, em vez de instanciar AlertSettings diretamente.
+
     Editavel via UI sem reiniciar o servidor.
     """
     __tablename__ = "alert_settings"
@@ -199,11 +213,31 @@ def get_server_owned_by(db, server_id: int, user: User):
     return db.query(Server).filter(Server.id == server_id, Server.owner_id == owner_id).first()
 
 
-def get_alert_settings(db) -> AlertSettings:
-    """Retorna o registro singleton, criando com defaults se nao existir."""
-    cfg = db.get(AlertSettings, 1)
+def get_alert_settings(db, server_id: Optional[int] = None) -> AlertSettings:
+    """
+    Retorna a configuracao de alertas, criando com defaults se nao existir.
+
+    server_id=None (default): registro "padrao"/legado (id=1, server_id nulo)
+    — mantem o comportamento de antes para quem so tem um servidor.
+
+    server_id=<int>: registro daquele servidor especifico. Cada servidor tem
+    seus proprios canais/thresholds — nao compartilha config com os demais.
+    """
+    if server_id is None:
+        cfg = db.get(AlertSettings, 1)
+        if cfg is None:
+            cfg = AlertSettings(id=1)
+            db.add(cfg)
+            db.commit()
+            db.refresh(cfg)
+        return cfg
+
+    cfg = db.query(AlertSettings).filter(AlertSettings.server_id == server_id).first()
     if cfg is None:
-        cfg = AlertSettings(id=1)
+        # `id` nao tem geracao automatica no banco (ver docstring da classe) —
+        # calcula o proximo id manualmente, como o antigo id=1 fixo ja fazia.
+        next_id = (db.query(func.coalesce(func.max(AlertSettings.id), 0)).scalar() or 0) + 1
+        cfg = AlertSettings(id=next_id, server_id=server_id)
         db.add(cfg)
         db.commit()
         db.refresh(cfg)

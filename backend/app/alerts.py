@@ -22,7 +22,7 @@ import urllib.request
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Optional
+from typing import Dict, Optional
 
 from .database import AlertHistory, AlertSettings, SessionLocal, get_alert_settings
 
@@ -31,12 +31,22 @@ logger = logging.getLogger(__name__)
 # ── Ranking de severidade ──────────────────────────────────────────────────
 _SEV_RANK = {"OK": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
 
-# ── Estado de debounce em memoria ──────────────────────────────────────────
-_state: dict = {
-    "last_severity": "OK",
-    "email_sent_at": None,      # datetime da ultima notificacao por email
-    "telegram_sent_at": None,   # datetime da ultima notificacao por telegram
-}
+# ── Estado de debounce em memoria, por servidor ─────────────────────────────
+# Indexado por server_id (None = servidor legado/config padrao). Cada servidor
+# tem seu proprio "ultima severidade"/cooldown — severidade de um servidor
+# nao deve afetar o debounce de outro.
+_state: Dict[Optional[int], dict] = {}
+
+
+def _server_state(server_id: Optional[int]) -> dict:
+    """Retorna (criando se necessario) o dict de estado do servidor."""
+    if server_id not in _state:
+        _state[server_id] = {
+            "last_severity": "OK",
+            "email_sent_at": None,
+            "telegram_sent_at": None,
+        }
+    return _state[server_id]
 
 
 # ── Helpers de envio (bloqueantes — rodam em thread) ──────────────────────
@@ -187,18 +197,24 @@ def _record_history(channel: str, severity: str, problem: str,
 
 # ── API publica ────────────────────────────────────────────────────────────
 
-async def check_and_alert(severity: str, problem: str, queue_total: int) -> None:
+async def check_and_alert(severity: str, problem: str, queue_total: int,
+                          server_id: Optional[int] = None) -> None:
     """
-    Chamado apos cada coleta completa (full).
+    Chamado apos cada coleta completa (full) de um servidor.
     Verifica se deve disparar alertas e os envia de forma assincrona.
+
+    server_id identifica de qual servidor veio o evento — config e cooldown
+    sao isolados por servidor, para a severidade de um nao afetar o debounce
+    de outro (server_id=None usa a config/estado "padrao"/legado).
     """
     db = SessionLocal()
     try:
-        cfg = get_alert_settings(db)
+        cfg = get_alert_settings(db, server_id=server_id)
+        state = _server_state(server_id)
         now = datetime.utcnow()
         cooldown = timedelta(minutes=cfg.cooldown_minutes)
 
-        prev_rank = _SEV_RANK.get(_state["last_severity"], 0)
+        prev_rank = _SEV_RANK.get(state["last_severity"], 0)
         curr_rank = _SEV_RANK.get(severity, 0)
         thr_rank  = _SEV_RANK.get(cfg.severity_threshold, 3)
 
@@ -212,20 +228,20 @@ async def check_and_alert(severity: str, problem: str, queue_total: int) -> None
             and (prev_rank < thr_rank)   # nao duplicar com severity_trigger
         )
 
-        _state["last_severity"] = severity
+        state["last_severity"] = severity
 
         if not (severity_trigger or queue_trigger):
             return
 
         # ── E-mail ────────────────────────────────────────────────────
         if cfg.email_enabled and cfg.email_to and cfg.smtp_password:
-            last = _state["email_sent_at"]
+            last = state["email_sent_at"]
             if last is None or (now - last) >= cooldown:
                 try:
                     await asyncio.to_thread(
                         _send_email_sync, cfg, severity, problem, queue_total
                     )
-                    _state["email_sent_at"] = now
+                    state["email_sent_at"] = now
                     _record_history("email", severity, problem, queue_total, True)
                 except Exception as exc:
                     logger.error("Falha ao enviar e-mail: %s", exc)
@@ -233,13 +249,13 @@ async def check_and_alert(severity: str, problem: str, queue_total: int) -> None
 
         # ── Telegram ──────────────────────────────────────────────────
         if cfg.telegram_enabled and cfg.telegram_bot_token and cfg.telegram_chat_id:
-            last = _state["telegram_sent_at"]
+            last = state["telegram_sent_at"]
             if last is None or (now - last) >= cooldown:
                 try:
                     await asyncio.to_thread(
                         _send_telegram_sync, cfg, severity, problem, queue_total
                     )
-                    _state["telegram_sent_at"] = now
+                    state["telegram_sent_at"] = now
                     _record_history("telegram", severity, problem, queue_total, True)
                 except Exception as exc:
                     logger.error("Falha ao enviar Telegram: %s", exc)

@@ -74,19 +74,21 @@ def _to_response(cfg: AlertSettings) -> dict:
 
 @router.get("/alerts", summary="Retorna configuracao de alertas")
 def get_settings(
+    server_id: Optional[int] = Query(None, description="Servidor especifico; omitido = config padrao/legada"),
     db: Session = Depends(get_db),
     _: str = Depends(get_current_user),
 ):
-    return _to_response(get_alert_settings(db))
+    return _to_response(get_alert_settings(db, server_id=server_id))
 
 
 @router.put("/alerts", summary="Salva configuracao de alertas")
 def update_settings(
     payload: AlertSettingsSchema,
+    server_id: Optional[int] = Query(None, description="Servidor especifico; omitido = config padrao/legada"),
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    cfg = get_alert_settings(db)
+    cfg = get_alert_settings(db, server_id=server_id)
 
     cfg.email_enabled      = payload.email_enabled
     cfg.email_to           = payload.email_to
@@ -116,10 +118,11 @@ def update_settings(
 
 @router.post("/test/email", summary="Envia e-mail de teste")
 async def test_email(
+    server_id: Optional[int] = Query(None, description="Servidor especifico; omitido = config padrao/legada"),
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    cfg = get_alert_settings(db)
+    cfg = get_alert_settings(db, server_id=server_id)
     if not cfg.email_to or (not cfg.resend_api_key and not cfg.smtp_password):
         raise HTTPException(400, "Configure e-mail e Resend API key (ou senha SMTP) antes de testar.")
     try:
@@ -158,10 +161,11 @@ def get_alert_history(
 
 @router.post("/test/telegram", summary="Envia mensagem de teste no Telegram")
 async def test_telegram(
+    server_id: Optional[int] = Query(None, description="Servidor especifico; omitido = config padrao/legada"),
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    cfg = get_alert_settings(db)
+    cfg = get_alert_settings(db, server_id=server_id)
     if not cfg.telegram_bot_token or not cfg.telegram_chat_id:
         raise HTTPException(400, "Configure bot token e chat ID antes de testar.")
     try:

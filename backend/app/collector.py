@@ -152,6 +152,7 @@ async def _collect_server(server_cfg: Dict[str, Any], mode: str) -> None:
                 severity    = diag.get("severity", "OK"),
                 problem     = diag.get("problem", "NORMAL"),
                 queue_total = queue.get("total", 0),
+                server_id   = server_id,
             )
 
     except SSHError as exc:
