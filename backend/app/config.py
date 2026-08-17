@@ -6,6 +6,12 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    # ── Ambiente ────────────────────────────────────────────────────
+    # "development" (default) ou "production". Em producao, o startup
+    # recusa subir se segredos de fabrica (jwt_secret, admin_password,
+    # ssh_encryption_key) nao tiverem sido trocados — ver main.py.
+    environment: str = "development"
+
     # ── SSH ─────────────────────────────────────────────────────────
     # Host do servidor EXIM (IP ou FQDN)
     ssh_host: str = "localhost"

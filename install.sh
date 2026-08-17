@@ -286,6 +286,8 @@ fi
 mkdir -p backend
 cat > backend/.env << ENV
 # EXIM Monitor — Configuracoes geradas pelo install.sh em $(date)
+ENVIRONMENT=production
+
 SSH_HOST=$SSH_HOST
 SSH_PORT=$SSH_PORT
 SSH_USER=$SSH_USER

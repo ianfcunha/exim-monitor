@@ -307,6 +307,39 @@ async def lifespan(app: FastAPI):
     logger.info("Tasks de background encerradas")
 
 
+_FACTORY_DEFAULT_SECRETS = {
+    "jwt_secret":         "TROQUE-ME-EM-PRODUCAO",
+    "admin_password":     "admin",
+    "ssh_encryption_key": "TROQUE-ME-EM-PRODUCAO-FERNET-KEY-32BYTES=",
+}
+
+
+def _guard_production_secrets() -> None:
+    """
+    Recusa subir em producao com segredos padrao de fabrica intactos.
+    install.sh ja gera valores fortes automaticamente; esta checagem existe
+    para o caso de alguem subir a stack manualmente (ex.: um .env de
+    homologacao que acaba virando producao por engano).
+    """
+    if settings.environment == "development":
+        return
+    offending = [
+        field for field, default in _FACTORY_DEFAULT_SECRETS.items()
+        if getattr(settings, field) == default
+    ]
+    if offending:
+        raise RuntimeError(
+            f"ENVIRONMENT={settings.environment!r}, mas os seguintes segredos "
+            f"ainda estao com o valor padrao de fabrica: {', '.join(offending)}. "
+            "Defina valores fortes em backend/.env antes de subir em producao "
+            "(o install.sh faz isso automaticamente), ou defina "
+            "ENVIRONMENT=development se este for realmente um ambiente de "
+            "desenvolvimento/homologacao."
+        )
+
+
+_guard_production_secrets()
+
 app = FastAPI(
     title="EXIM Monitor API",
     version="1.2.0",
