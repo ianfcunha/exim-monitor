@@ -201,6 +201,7 @@ def _parse_queue(raw: str) -> List[Dict[str, Any]]:
 _LOG_CANDIDATES = (
     "/var/log/exim4/mainlog",
     "/var/log/exim/mainlog",
+    "/var/log/exim_mainlog",
     "/var/log/mail.log",
 )
 

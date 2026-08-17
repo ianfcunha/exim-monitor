@@ -274,6 +274,8 @@ detect_exim_version() {
 # ============================================================
 # LEITURA DO LOG COM SUPORTE A LOG ROTATION
 # Tenta ler mainlog.1.gz → mainlog.1 → mainlog (fallback).
+# Reconhece também o padrão de rotação do cPanel/WHM, que não usa
+# sufixo numérico e sim data: exim_mainlog-YYYYMMDD.gz.
 # Concatena rotacionado + atual e retorna as últimas N linhas.
 # Garante cobertura de janelas maiores sem depender só do log ativo.
 # ============================================================
@@ -281,10 +283,15 @@ _read_log_lines() {
     local log_path="$1" lines="$2"
     local rotated="${log_path}.1"
     local rotated_gz="${log_path}.1.gz"
+    # Padrão cPanel/WHM: exim_mainlog-YYYYMMDD.gz (sem sufixo numérico)
+    local rotated_dated_gz
+    rotated_dated_gz=$(ls -1 "${log_path}"-[0-9]*.gz 2>/dev/null | sort -r | head -1)
     if [ -f "$rotated_gz" ]; then
         { zcat "$rotated_gz" 2>/dev/null; cat "$log_path" 2>/dev/null; } | tail -"$lines"
     elif [ -f "$rotated" ]; then
         { cat "$rotated" 2>/dev/null; cat "$log_path" 2>/dev/null; } | tail -"$lines"
+    elif [ -n "$rotated_dated_gz" ]; then
+        { zcat "$rotated_dated_gz" 2>/dev/null; cat "$log_path" 2>/dev/null; } | tail -"$lines"
     else
         tail -"$lines" "$log_path" 2>/dev/null
     fi
@@ -340,7 +347,7 @@ collect() {
         ( sleep "$GLOBAL_TIMEOUT" && echo "1" > "$_WDOG_FILE" ) </dev/null >/dev/null 2>&1 &
         local _WDOG_PID=$!
         _FOUND_LOG=""
-        for candidate in "$LOG_PATH" /var/log/exim4/mainlog /var/log/exim/mainlog /var/log/mail.log; do
+        for candidate in "$LOG_PATH" /var/log/exim4/mainlog /var/log/exim/mainlog /var/log/exim_mainlog /var/log/mail.log; do
             [ -f "$candidate" ] && { _FOUND_LOG="$candidate"; LOG_PATH="$candidate"; break; }
         done
         # T2-5: tamanho do mainlog
@@ -913,7 +920,7 @@ run_check() {
 
     # ── Check 4: mainlog acessível ────────────────────────────────
     local _log_ok="true" _log_msg _log_found=""
-    for _lc in /var/log/exim4/mainlog /var/log/exim/mainlog /var/log/mail.log; do
+    for _lc in /var/log/exim4/mainlog /var/log/exim/mainlog /var/log/exim_mainlog /var/log/mail.log; do
         [ -r "$_lc" ] && { _log_found="$_lc"; break; }
     done
     if [ -z "$_log_found" ]; then
