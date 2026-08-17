@@ -929,7 +929,28 @@ run_check() {
     else
         _log_msg="OK — $( printf '%s' "$_log_found" | sed 's/\//\\\//g' )"
     fi
-    _checks="${_checks}{\"check\":\"mainlog\",\"ok\":${_log_ok},\"detail\":\"${_log_msg}\"}"
+    _checks="${_checks}{\"check\":\"mainlog\",\"ok\":${_log_ok},\"detail\":\"${_log_msg}\"},"
+
+    # ── Check 5: ambiente cPanel/WHM ─────────────────────────────
+    # Informativo — nao afeta _ok. Usado por acoes futuras (ex.: block-ip
+    # via CSF) para escolher o comando certo por ambiente.
+    local _cpanel_ok="false" _cpanel_msg="cPanel/WHM nao detectado"
+    if [ -d /usr/local/cpanel ]; then
+        _cpanel_ok="true"
+        _cpanel_msg="OK — /usr/local/cpanel presente"
+    fi
+    _checks="${_checks}{\"check\":\"cpanel\",\"ok\":${_cpanel_ok},\"detail\":\"${_cpanel_msg}\"},"
+
+    # ── Check 6: firewall CSF (ConfigServer Firewall) ────────────
+    # Informativo — nao afeta _ok. CSF e o firewall de fato mais comum
+    # em ambientes cPanel; sua ausencia so importa quando block-ip
+    # tentar usa-lo (fora do escopo deste item).
+    local _csf_ok="false" _csf_msg="CSF nao encontrado no PATH"
+    if command -v csf &>/dev/null; then
+        _csf_ok="true"
+        _csf_msg="OK — csf disponivel"
+    fi
+    _checks="${_checks}{\"check\":\"csf\",\"ok\":${_csf_ok},\"detail\":\"${_csf_msg}\"}"
 
     printf '{\n'
     printf '  "timestamp": "%s",\n' "$DATE"
