@@ -4,6 +4,8 @@
 import { useState } from 'react'
 import { login } from '../api/client'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Field } from '@/components/primitives/field'
 
 function LogoMark({ size = 28 }) {
   return (
@@ -13,15 +15,6 @@ function LogoMark({ size = 28 }) {
       <circle cx="30" cy="16" r="2.5" fill="#22D3EE"/>
     </svg>
   )
-}
-
-const inputStyle = {
-  width: '100%', borderRadius: 8,
-  background: '#F8FAFC',
-  border: '1px solid #E2E8F0',
-  padding: '10px 14px', fontSize: 13,
-  color: '#0F172A', outline: 'none',
-  transition: 'border-color 0.15s, box-shadow 0.15s',
 }
 
 export default function Login({ onLogin }) {
@@ -45,77 +38,54 @@ export default function Login({ onLogin }) {
   }
 
   return (
-    <div style={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: '0 16px', background: '#F1F5F9',
-      backgroundImage: `
-        radial-gradient(ellipse 700px 500px at 15% 15%, rgba(14,165,233,0.10) 0%, transparent 60%),
-        radial-gradient(ellipse 600px 400px at 85% 85%, rgba(34,211,238,0.07) 0%, transparent 55%)
-      `,
-      backgroundAttachment: 'fixed',
-    }}>
-      <div style={{ width: '100%', maxWidth: 380 }}>
+    <div
+      className="flex min-h-screen items-center justify-center bg-surface px-4"
+      style={{
+        backgroundImage: `
+          radial-gradient(ellipse 700px 500px at 15% 15%, rgba(14,165,233,0.10) 0%, transparent 60%),
+          radial-gradient(ellipse 600px 400px at 85% 85%, rgba(34,211,238,0.07) 0%, transparent 55%)
+        `,
+        backgroundAttachment: 'fixed',
+      }}
+    >
+      <div className="w-full max-w-[380px]">
 
         {/* Logo + título */}
-        <div style={{ textAlign: 'center', marginBottom: 28 }}>
-          <div style={{
-            width: 64, height: 64, borderRadius: 18, margin: '0 auto 14px',
-            background: '#fff', border: '1px solid #E2E8F0',
-            boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
+        <div className="mb-7 text-center">
+          <div className="mx-auto mb-3.5 flex h-16 w-16 items-center justify-center rounded-[18px] border border-border bg-card shadow-[0_4px_16px_rgba(0,0,0,0.08)]">
             <LogoMark size={34} />
           </div>
-          <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0, letterSpacing: '-0.01em' }}>
-            <span style={{ color: '#0F172A' }}>Mail </span>
-            <span style={{ color: '#0EA5E9' }}>IQ</span>
+          <h1 className="m-0 text-[22px] font-extrabold tracking-tight">
+            <span className="text-foreground">Mail </span>
+            <span className="text-primary">IQ</span>
           </h1>
-          <p style={{ fontSize: 10, letterSpacing: '0.24em', textTransform: 'uppercase', color: '#94A3B8', marginTop: 5, fontWeight: 600 }}>
-            by <span style={{ color: '#0EA5E9' }}>AVILI</span>
+          <p className="mt-1.5 text-[10px] font-semibold uppercase tracking-[0.24em] text-dim">
+            by <span className="text-primary">AVILI</span>
           </p>
         </div>
 
         {/* Card */}
-        <div style={{
-          background: '#fff', border: '1px solid #E2E8F0', borderRadius: 16,
-          padding: '28px 24px',
-          boxShadow: '0 4px 24px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04)',
-        }}>
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div className="rounded-2xl border border-border bg-card p-6 shadow-[0_4px_24px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <label htmlFor="username" style={{ fontSize: 11, fontWeight: 600, color: '#64748B', letterSpacing: '0.05em' }}>
-                Usuário
-              </label>
-              <input
+            <Field label="Usuário" htmlFor="username" className="mb-0">
+              <Input
                 id="username" type="text" autoComplete="username"
                 value={username} onChange={e => setUsername(e.target.value)}
                 required placeholder="admin"
-                style={inputStyle}
-                onFocus={e => { e.target.style.borderColor = '#0EA5E9'; e.target.style.boxShadow = '0 0 0 3px rgba(14,165,233,0.10)' }}
-                onBlur={e  => { e.target.style.borderColor = '#E2E8F0'; e.target.style.boxShadow = 'none' }}
               />
-            </div>
+            </Field>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <label htmlFor="password" style={{ fontSize: 11, fontWeight: 600, color: '#64748B', letterSpacing: '0.05em' }}>
-                Senha
-              </label>
-              <input
+            <Field label="Senha" htmlFor="password" className="mb-0">
+              <Input
                 id="password" type="password" autoComplete="current-password"
                 value={password} onChange={e => setPassword(e.target.value)}
                 required placeholder="••••••••"
-                style={inputStyle}
-                onFocus={e => { e.target.style.borderColor = '#0EA5E9'; e.target.style.boxShadow = '0 0 0 3px rgba(14,165,233,0.10)' }}
-                onBlur={e  => { e.target.style.borderColor = '#E2E8F0'; e.target.style.boxShadow = 'none' }}
               />
-            </div>
+            </Field>
 
             {error && (
-              <div style={{
-                borderRadius: 8, padding: '9px 12px', fontSize: 12,
-                background: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B',
-              }}>
+              <div className="rounded-lg border border-destructive-border bg-destructive-bg px-3 py-2.5 text-[12px] text-destructive">
                 {error}
               </div>
             )}
