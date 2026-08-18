@@ -27,7 +27,10 @@ from sqlalchemy.orm import Session
 
 from ..auth import require_admin
 from ..crypto import decrypt_secret
-from ..database import ActionHistory, User, get_db, get_server_owned_by, record_action_history
+from ..database import (
+    ActionHistory, User, get_db, get_server_owned_by, get_servers_for_user,
+    record_action_history,
+)
 from ..limiter import limiter
 from ..ssh import SSHError, run_action
 
@@ -135,17 +138,20 @@ def get_action_history(
     """
     Fonte central de auditoria — actor, ação, parâmetro, servidor, sucesso
     e timestamp de cada ação já executada, sem precisar SSH de volta no
-    servidor pra ler actions.log em texto. Ainda não consumido pelo
-    frontend (próximo passo).
+    servidor pra ler actions.log em texto.
     """
     if server_id is not None:
         server = get_server_owned_by(db, server_id, current_user)
         if not server:
             raise HTTPException(404, f"Servidor {server_id} não encontrado.")
+        visible_ids = [server_id]
+    else:
+        # Sem server_id: escopo por padrão aos servidores visíveis ao
+        # usuário (mesma regra de get_servers_for_user) — sem isso, um
+        # admin veria o histórico de ações de outros admins/clientes.
+        visible_ids = [s.id for s in get_servers_for_user(db, current_user)]
 
-    query = db.query(ActionHistory)
-    if server_id is not None:
-        query = query.filter(ActionHistory.server_id == server_id)
+    query = db.query(ActionHistory).filter(ActionHistory.server_id.in_(visible_ids))
 
     rows = query.order_by(ActionHistory.executed_at.desc()).limit(limit).all()
 
