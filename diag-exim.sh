@@ -28,6 +28,11 @@
 #           cPanel/WHM (exim_mainlog-YYYYMMDD.gz), além de mainlog.1(.gz)
 #   - Novo: checks "cpanel" e "csf" em --check — informativos, não afetam
 #           o "ok" geral; usados pelo backend para detectar o ambiente
+#   - Fix: modo completo de collect() (usado por --json) ainda não tinha
+#           /var/log/exim_mainlog na lista de fallback — só --quick e
+#           --check tinham sido corrigidos. Lista de candidatos extraída
+#           para o array único LOG_CANDIDATES (topo do script), consumido
+#           pelos três pontos — evita essa lacuna se repetir
 # Changelog v5.1:
 #   - Novo: GLOBAL_TIMEOUT=120 — controla todos os timeouts de coleta (T2-1);
 #          substitui os "timeout 120" hardcoded; watchdog em collect() define
@@ -117,6 +122,16 @@
 
 VERSION="5.4"
 LOG_PATH="/var/log/exim4/mainlog"
+# Lista única de candidatos a mainlog — consumida por collect() (quick e
+# completo) e run_check(). Debian/exim4, Debian/exim genérico, cPanel/WHM
+# (/var/log/exim_mainlog) e syslog genérico (mail.log), nesta ordem.
+# Adicione novos ambientes aqui — não duplique a lista em outros pontos.
+LOG_CANDIDATES=(
+    "/var/log/exim4/mainlog"
+    "/var/log/exim/mainlog"
+    "/var/log/exim_mainlog"
+    "/var/log/mail.log"
+)
 LOG_LINES=10000
 QUEUE_SAMPLE_THRESHOLD=10000  # acima disso usa amostra da fila
 QUEUE_LINES=5000
@@ -355,7 +370,7 @@ collect() {
         ( sleep "$GLOBAL_TIMEOUT" && echo "1" > "$_WDOG_FILE" ) </dev/null >/dev/null 2>&1 &
         local _WDOG_PID=$!
         _FOUND_LOG=""
-        for candidate in "$LOG_PATH" /var/log/exim4/mainlog /var/log/exim/mainlog /var/log/exim_mainlog /var/log/mail.log; do
+        for candidate in "${LOG_CANDIDATES[@]}"; do
             [ -f "$candidate" ] && { _FOUND_LOG="$candidate"; LOG_PATH="$candidate"; break; }
         done
         # T2-5: tamanho do mainlog
@@ -399,7 +414,7 @@ collect() {
 
     # Localiza o log antes de disparar coleta paralela
     _FOUND_LOG=""
-    for candidate in "$LOG_PATH" /var/log/exim4/mainlog /var/log/exim/mainlog /var/log/mail.log; do
+    for candidate in "${LOG_CANDIDATES[@]}"; do
         [ -f "$candidate" ] && { _FOUND_LOG="$candidate"; LOG_PATH="$candidate"; break; }
     done
 
@@ -928,7 +943,7 @@ run_check() {
 
     # ── Check 4: mainlog acessível ────────────────────────────────
     local _log_ok="true" _log_msg _log_found=""
-    for _lc in /var/log/exim4/mainlog /var/log/exim/mainlog /var/log/exim_mainlog /var/log/mail.log; do
+    for _lc in "${LOG_CANDIDATES[@]}"; do
         [ -r "$_lc" ] && { _log_found="$_lc"; break; }
     done
     if [ -z "$_log_found" ]; then
