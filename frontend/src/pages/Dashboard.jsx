@@ -17,7 +17,11 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { refreshStatus } from '../api/client'
 import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import ActionPanel from '../components/ActionPanel'
 import DeliveryRateCard from '../components/DeliveryRateCard'
 import DiagnosisPanel from '../components/DiagnosisPanel'
@@ -76,83 +80,55 @@ function HBtn({ onClick, disabled, title, children }) {
 
 // ── StatusPill clicável ──────────────────────────────────────────────────────
 function StatusPill({ color, label, children }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef(null)
-  useEffect(() => {
-    const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
-    document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
-  }, [])
   return (
-    <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
-      <button onClick={() => setOpen(v => !v)} style={{
-        display: 'flex', alignItems: 'center', gap: 5,
-        padding: '4px 10px', borderRadius: 999, fontSize: 11, fontWeight: 600,
-        border: `1px solid ${color}25`, background: `${color}0f`,
-        color, cursor: 'pointer',
-      }}>
-        <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
-        {label}
-      </button>
-      {open && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 200,
-          background: '#fff', border: '1px solid #E2E8F0', borderRadius: 10,
-          boxShadow: '0 4px 20px rgba(0,0,0,0.10)', padding: '12px 14px', minWidth: 210, fontSize: 12,
-        }}>
-          {children}
-        </div>
-      )}
-    </div>
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          className="flex flex-shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold outline-none focus-visible:ring-1 focus-visible:ring-primary"
+          style={{ border: `1px solid ${color}25`, background: `${color}0f`, color }}
+        >
+          <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full" style={{ background: color }} />
+          {label}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent>{children}</PopoverContent>
+    </Popover>
   )
 }
 
 // ── Dropdown de configurações ────────────────────────────────────────────────
 function SettingsMenu({ onSettings, onServers, onUsers, onLogout, isAdmin }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef(null)
-  useEffect(() => {
-    const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
-    document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
-  }, [])
-
-  const item = (icon, label, onClick, danger) => (
-    <Button
-      variant="ghost"
-      onClick={() => { onClick(); setOpen(false) }}
-      className={cn(
-        'h-auto w-full justify-start gap-2.5 px-2.5 py-2 text-[12px] font-medium',
-        danger
-          ? 'text-destructive hover:bg-destructive-bg hover:text-destructive'
-          : 'text-foreground hover:bg-surface hover:text-foreground'
-      )}
-    >
-      {icon}{label}
-    </Button>
-  )
-
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      <HBtn onClick={() => setOpen(v => !v)} title="Configurações">
-        <Settings size={12} />
-        <span className="hidden sm:inline">Configurações</span>
-        <ChevronDown size={11} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
-      </HBtn>
-      {open && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 200,
-          background: '#fff', border: '1px solid #E2E8F0', borderRadius: 10,
-          boxShadow: '0 4px 20px rgba(0,0,0,0.10)', padding: '6px', minWidth: 180,
-        }}>
-          {isAdmin && item(<Server size={13} />, 'Servidores', onServers)}
-          {isAdmin && item(<Settings size={13} />, 'Alertas', onSettings)}
-          {isAdmin && item(<Users size={13} />, 'Usuários', onUsers)}
-          {isAdmin && <div style={{ height: 1, background: '#F1F5F9', margin: '4px 0' }} />}
-          {item(<LogOut size={13} />, 'Sair', onLogout, true)}
-        </div>
-      )}
-    </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" title="Configurações" className="group">
+          <Settings size={12} />
+          <span className="hidden sm:inline">Configurações</span>
+          <ChevronDown size={11} className="transition-transform group-data-[state=open]:rotate-180" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent>
+        {isAdmin && (
+          <DropdownMenuItem onSelect={onServers}>
+            <Server size={13} /> Servidores
+          </DropdownMenuItem>
+        )}
+        {isAdmin && (
+          <DropdownMenuItem onSelect={onSettings}>
+            <Settings size={13} /> Alertas
+          </DropdownMenuItem>
+        )}
+        {isAdmin && (
+          <DropdownMenuItem onSelect={onUsers}>
+            <Users size={13} /> Usuários
+          </DropdownMenuItem>
+        )}
+        {isAdmin && <DropdownMenuSeparator />}
+        <DropdownMenuItem destructive onSelect={onLogout}>
+          <LogOut size={13} /> Sair
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
