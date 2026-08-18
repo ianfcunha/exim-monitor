@@ -223,11 +223,30 @@ def run_full(server_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     return _run("--json", server_cfg)
 
 
+_UNSAFE_ACTOR_CHARS = re.compile(r"[^A-Za-z0-9._@-]+")
+
+
+def _sanitize_actor(actor: str) -> str:
+    """
+    Reduz o actor a um conjunto seguro de caracteres antes de interpolar
+    no comando shell remoto. Username vem de campo livre (pode ser um
+    e-mail, por exemplo) — nunca confiamos nele para montar comando.
+    """
+    cleaned = _UNSAFE_ACTOR_CHARS.sub("", actor).strip("-")
+    return cleaned[:64]
+
+
 def run_action(action: str, param: Optional[str] = None,
-               server_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+               server_cfg: Optional[Dict[str, Any]] = None,
+               actor: Optional[str] = None) -> Dict[str, Any]:
     """Executa uma ação isolada e retorna o JSON de resultado."""
     action_arg = f"{action}:{param}" if param else action
-    return _run(f"--action={action_arg}", server_cfg)
+    args = f"--action={action_arg}"
+    if actor:
+        safe_actor = _sanitize_actor(actor)
+        if safe_actor:
+            args += f" --actor={safe_actor}"
+    return _run(args, server_cfg)
 
 
 def run_check(server_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

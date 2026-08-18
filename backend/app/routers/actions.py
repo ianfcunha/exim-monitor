@@ -96,7 +96,9 @@ def execute_action(
         }
 
     try:
-        result = run_action(action, body.param, server_cfg=server_cfg)
+        result = run_action(
+            action, body.param, server_cfg=server_cfg, actor=current_user.username
+        )
     except SSHError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
