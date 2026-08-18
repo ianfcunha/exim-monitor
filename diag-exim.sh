@@ -130,6 +130,12 @@
 #          (evita pegar local-parts com ponto, ex: case.file@domain → domain)
 # ============================================================
 
+# Sessões SSH não-interativas (exec_command via paramiko, por exemplo)
+# às vezes não carregam o PATH completo do shell de login — garante que
+# binários em /usr/sbin, /sbin e /usr/local/sbin (onde exim, iptables,
+# exiqgrep etc. costumam morar) sejam encontrados mesmo assim.
+export PATH="$PATH:/usr/sbin:/sbin:/usr/local/sbin"
+
 VERSION="5.4"
 LOG_PATH="/var/log/exim4/mainlog"
 # Lista única de candidatos a mainlog — consumida por collect() (quick e
@@ -355,6 +361,13 @@ _spinner() {
 }
 
 collect() {
+    # Limpeza de temporários órfãos com mais de 1h — proteção adicional
+    # ao trap de EXIT/INT/TERM (linha ~511): se a conexão SSH cair no
+    # meio de uma coleta anterior, o trap não roda e o arquivo fica pra
+    # trás. Não é limpeza da coleta atual (criada logo abaixo), só do
+    # lixo deixado por execuções anteriores que não terminaram limpo.
+    find /tmp -maxdepth 1 -name 'eximmon_*' -mmin +60 -delete 2>/dev/null
+
     # Contagem rápida primeiro (exim -bpc é instantâneo)
     COLLECT_ERROR=""
     COLLECT_TIMED_OUT=0
