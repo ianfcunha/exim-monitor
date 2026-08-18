@@ -7,6 +7,7 @@ Modelos:
                     (server_id nulo, id=1) e um registro por servidor
                     (server_id preenchido)
 """
+import logging
 from datetime import datetime
 from typing import Optional
 
@@ -26,6 +27,8 @@ engine = create_engine(
     pool_recycle=1800,
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+logger = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -191,6 +194,54 @@ class AlertHistory(Base):
     queue_total= Column(Integer,     nullable=False, default=0)
     success    = Column(Boolean,     nullable=False, default=True)
     error_msg  = Column(String(500), nullable=True)
+
+
+class ActionHistory(Base):
+    """
+    Histórico de ações executadas via API — append-only. Fonte central de
+    auditoria (actor, ação, parâmetro, servidor, sucesso) sem precisar SSH
+    de volta no servidor pra ler /var/log/exim-monitor/actions.log em texto.
+
+    server_id usa SET NULL (não CASCADE) — ao contrário de Snapshot, um
+    registro de auditoria deve sobreviver à remoção do servidor.
+    """
+    __tablename__ = "action_history"
+    __table_args__ = (
+        Index("ix_action_history_ts", "executed_at"),
+    )
+
+    id          = Column(Integer, primary_key=True)
+    executed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    server_id   = Column(Integer, ForeignKey("servers.id", ondelete="SET NULL"), nullable=True)
+    actor       = Column(String(100), nullable=False)
+    action      = Column(String(50),  nullable=False)
+    param       = Column(String(300), nullable=True)
+    success     = Column(Boolean,     nullable=False, default=True)
+    message     = Column(String(500), nullable=True)
+
+
+def record_action_history(
+    db,
+    *,
+    server_id: Optional[int],
+    actor: str,
+    action: str,
+    param: Optional[str],
+    success: bool,
+    message: Optional[str],
+) -> None:
+    """Persiste uma ação executada. Nunca levanta — falha de auditoria não
+    deve derrubar a resposta da ação em si (o resultado real já foi obtido
+    do servidor remoto antes desta chamada)."""
+    try:
+        db.add(ActionHistory(
+            server_id=server_id, actor=actor, action=action,
+            param=param, success=success, message=message,
+        ))
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Falha ao persistir action_history (actor=%s action=%s)", actor, action)
 
 
 def get_user_by_email(db, email: str):

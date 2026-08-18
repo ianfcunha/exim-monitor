@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import require_admin
 from ..crypto import decrypt_secret
-from ..database import User, get_db, get_server_owned_by
+from ..database import ActionHistory, User, get_db, get_server_owned_by, record_action_history
 from ..limiter import limiter
 from ..ssh import SSHError, run_action
 
@@ -100,7 +100,17 @@ def execute_action(
             action, body.param, server_cfg=server_cfg, actor=current_user.username
         )
     except SSHError as exc:
+        record_action_history(
+            db, server_id=server_id, actor=current_user.username, action=action,
+            param=body.param, success=False, message=str(exc),
+        )
         raise HTTPException(status_code=503, detail=str(exc))
+
+    record_action_history(
+        db, server_id=server_id, actor=current_user.username, action=action,
+        param=body.param, success=result.get("success", False),
+        message=result.get("message"),
+    )
 
     if not result.get("success", False):
         raise HTTPException(
@@ -109,3 +119,42 @@ def execute_action(
         )
 
     return result
+
+
+@router.get("/history", summary="Histórico de ações executadas (admin only)")
+def get_action_history(
+    server_id: Optional[int] = Query(None),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Fonte central de auditoria — actor, ação, parâmetro, servidor, sucesso
+    e timestamp de cada ação já executada, sem precisar SSH de volta no
+    servidor pra ler actions.log em texto. Ainda não consumido pelo
+    frontend (próximo passo).
+    """
+    if server_id is not None:
+        server = get_server_owned_by(db, server_id, current_user)
+        if not server:
+            raise HTTPException(404, f"Servidor {server_id} não encontrado.")
+
+    query = db.query(ActionHistory)
+    if server_id is not None:
+        query = query.filter(ActionHistory.server_id == server_id)
+
+    rows = query.order_by(ActionHistory.executed_at.desc()).limit(limit).all()
+
+    return [
+        {
+            "id":          r.id,
+            "executed_at": r.executed_at.isoformat() + "Z",
+            "server_id":   r.server_id,
+            "actor":       r.actor,
+            "action":      r.action,
+            "param":       r.param,
+            "success":     r.success,
+            "message":     r.message,
+        }
+        for r in rows
+    ]
