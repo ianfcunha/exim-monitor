@@ -5,6 +5,7 @@
  */
 import { AlertCircle, Check, Clock, Copy, Inbox, Mail, MailOpen, RefreshCw, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { fetchLogMessages, fetchQueueMessages } from '../api/client'
 
 // ── Configuração por tipo ────────────────────────────────────────────────────
@@ -166,12 +167,6 @@ export default function MessagesDrawer({ cardType, onClose }) {
     return () => { abortRef.current = false }
   }, [cardType, limit]) // eslint-disable-line
 
-  useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   const filtered = filter.trim()
     ? data.filter(row =>
         Object.values(row).some(v => String(v).toLowerCase().includes(filter.toLowerCase()))
@@ -181,18 +176,8 @@ export default function MessagesDrawer({ cardType, onClose }) {
   const IconComp = cfg.icon
 
   return (
-    <>
-      {/* Backdrop */}
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(15,23,42,0.35)', backdropFilter: 'blur(2px)', animation: 'fadeIn 0.18s ease' }} />
-
-      {/* Drawer */}
-      <div style={{
-        position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 50,
-        width: 'min(640px, 100vw)', background: '#fff',
-        borderLeft: '1px solid #E2E8F0', boxShadow: '-4px 0 32px rgba(0,0,0,0.12)',
-        display: 'flex', flexDirection: 'column',
-        animation: 'slideInRight 0.22s cubic-bezier(0.16,1,0.3,1)',
-      }}>
+    <Sheet open onOpenChange={(v) => { if (!v) onClose() }}>
+      <SheetContent aria-describedby={undefined} style={{ width: 'min(640px, 100vw)' }}>
 
         {/* Header */}
         <div style={{ padding: '16px 20px', borderBottom: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
@@ -200,7 +185,9 @@ export default function MessagesDrawer({ cardType, onClose }) {
             <IconComp size={16} color="#0EA5E9" />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>{cfg.title}</div>
+            <SheetTitle asChild>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>{cfg.title}</div>
+            </SheetTitle>
             {!loading && !error && (
               <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>
                 {filtered.length} {filter ? `de ${data.length}` : ''} {data.length === 1 ? 'mensagem' : 'mensagens'}
@@ -299,13 +286,7 @@ export default function MessagesDrawer({ cardType, onClose }) {
             Passe o mouse em uma linha para copiar · <kbd style={{ fontFamily: 'monospace', background: '#F1F5F9', padding: '1px 5px', borderRadius: 4, border: '1px solid #E2E8F0' }}>ESC</kbd> fechar
           </div>
         )}
-      </div>
-
-      <style>{`
-        @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
-        @keyframes slideInRight { from { transform: translateX(100%) } to { transform: translateX(0) } }
-        @keyframes spin { to { transform: rotate(360deg) } }
-      `}</style>
-    </>
+      </SheetContent>
+    </Sheet>
   )
 }

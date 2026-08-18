@@ -5,6 +5,7 @@
  */
 import { Check, Copy, RefreshCw, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { fetchLogTail } from '../api/client'
 
 const TYPE_CONFIG = {
@@ -148,12 +149,6 @@ export default function LogViewerDrawer({ onClose }) {
     return () => clearInterval(intervalRef.current)
   }, [autoRefresh, load])
 
-  useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   const visible = entries.filter(e => {
     if (filter !== 'all' && e.type !== filter) return false
     if (search && !e.raw?.toLowerCase().includes(search.toLowerCase())) return false
@@ -164,16 +159,8 @@ export default function LogViewerDrawer({ onClose }) {
   entries.forEach(e => { counts[e.type] = (counts[e.type] ?? 0) + 1 })
 
   return (
-    <>
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(15,23,42,0.35)', backdropFilter: 'blur(2px)', animation: 'fadeIn 0.18s ease' }} />
-
-      <div style={{
-        position: 'fixed', top: 0, right: 0, bottom: 0,
-        width: 'min(780px, 100vw)', zIndex: 50,
-        background: '#fff', boxShadow: '-4px 0 32px rgba(0,0,0,0.10)',
-        display: 'flex', flexDirection: 'column',
-        animation: 'slideInRight 0.22s cubic-bezier(0.16,1,0.3,1)',
-      }}>
+    <Sheet open onOpenChange={(v) => { if (!v) onClose() }}>
+      <SheetContent aria-describedby={undefined} style={{ width: 'min(780px, 100vw)' }}>
 
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderBottom: '1px solid #E2E8F0', gap: 12, flexShrink: 0 }}>
@@ -182,7 +169,9 @@ export default function LogViewerDrawer({ onClose }) {
               <span style={{ fontSize: 14 }}>📋</span>
             </div>
             <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>Log Viewer</div>
+              <SheetTitle asChild>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>Log Viewer</div>
+              </SheetTitle>
               <div style={{ fontSize: 10, color: '#94A3B8', fontFamily: 'monospace' }}>
                 mainlog · {visible.length}{(filter !== 'all' || search) ? ` de ${entries.length}` : ''} entradas
               </div>
@@ -278,13 +267,7 @@ export default function LogViewerDrawer({ onClose }) {
             ))}
           </div>
         </div>
-      </div>
-
-      <style>{`
-        @keyframes slideInRight { from { transform: translateX(100%); opacity: 0 } to { transform: translateX(0); opacity: 1 } }
-        @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
-        @keyframes spin { to { transform: rotate(360deg) } }
-      `}</style>
-    </>
+      </SheetContent>
+    </Sheet>
   )
 }
