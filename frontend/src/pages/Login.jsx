@@ -3,6 +3,7 @@
  */
 import { useState } from 'react'
 import { login } from '../api/client'
+import { Button } from '@/components/ui/button'
 
 function LogoMark({ size = 28 }) {
   return (
@@ -119,21 +120,9 @@ export default function Login({ onLogin }) {
               </div>
             )}
 
-            <button
-              type="submit" disabled={loading}
-              style={{
-                width: '100%', borderRadius: 8, border: 'none',
-                background: loading ? '#7DD3F0' : '#0EA5E9',
-                color: '#fff', fontSize: 13, fontWeight: 700,
-                padding: '11px', cursor: loading ? 'not-allowed' : 'pointer',
-                transition: 'background 0.15s',
-                boxShadow: loading ? 'none' : '0 1px 4px rgba(14,165,233,0.35)',
-              }}
-              onMouseEnter={e => { if (!loading) e.currentTarget.style.background = '#0284C7' }}
-              onMouseLeave={e => { if (!loading) e.currentTarget.style.background = '#0EA5E9' }}
-            >
+            <Button type="submit" disabled={loading} size="lg" className="w-full font-bold">
               {loading ? 'Entrando…' : 'Entrar'}
-            </button>
+            </Button>
           </form>
         </div>
 

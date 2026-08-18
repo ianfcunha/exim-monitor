@@ -16,6 +16,8 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { refreshStatus } from '../api/client'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import ActionPanel from '../components/ActionPanel'
 import DeliveryRateCard from '../components/DeliveryRateCard'
 import DiagnosisPanel from '../components/DiagnosisPanel'
@@ -65,20 +67,10 @@ function LogoMark({ size = 20 }) {
 
 // ── Botão do header ──────────────────────────────────────────────────────────
 function HBtn({ onClick, disabled, title, children }) {
-  const [hov, setHov] = useState(false)
   return (
-    <button
-      onClick={onClick} disabled={disabled} title={title}
-      onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 6,
-        borderRadius: 7, border: '1px solid #E2E8F0',
-        padding: '6px 12px', fontSize: 11, fontWeight: 500, cursor: 'pointer',
-        color: hov ? '#0369A1' : '#64748B',
-        background: hov ? '#F0F9FF' : '#fff',
-        transition: 'all 0.15s', opacity: disabled ? 0.4 : 1, whiteSpace: 'nowrap',
-      }}
-    >{children}</button>
+    <Button variant="outline" size="sm" onClick={onClick} disabled={disabled} title={title}>
+      {children}
+    </Button>
   )
 }
 
@@ -126,15 +118,18 @@ function SettingsMenu({ onSettings, onServers, onUsers, onLogout, isAdmin }) {
   }, [])
 
   const item = (icon, label, onClick, danger) => (
-    <button onClick={() => { onClick(); setOpen(false) }} style={{
-      width: '100%', display: 'flex', alignItems: 'center', gap: 9,
-      padding: '8px 10px', borderRadius: 7, fontSize: 12, fontWeight: 500,
-      border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left',
-      color: danger ? '#DC2626' : '#0F172A',
-    }}
-    onMouseEnter={e => e.currentTarget.style.background = danger ? '#FEF2F2' : '#F8FAFC'}
-    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-    >{icon}{label}</button>
+    <Button
+      variant="ghost"
+      onClick={() => { onClick(); setOpen(false) }}
+      className={cn(
+        'h-auto w-full justify-start gap-2.5 px-2.5 py-2 text-[12px] font-medium',
+        danger
+          ? 'text-destructive hover:bg-destructive-bg hover:text-destructive'
+          : 'text-foreground hover:bg-surface hover:text-foreground'
+      )}
+    >
+      {icon}{label}
+    </Button>
   )
 
   return (

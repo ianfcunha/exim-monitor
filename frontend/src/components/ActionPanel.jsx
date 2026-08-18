@@ -8,6 +8,7 @@
 import { AlertTriangle, Ban, CornerDownLeft, RotateCcw, Search, Shield, Snowflake, Trash2, X } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { runAction } from '../api/client'
+import { Button } from '@/components/ui/button'
 import { useToast } from '../contexts/ToastContext'
 
 const ACTIONS = [
@@ -179,32 +180,13 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              onClick={() => execute(confirmAction)}
-              style={{
-                borderRadius: 7, border: '1px solid #FECACA',
-                padding: '5px 14px', fontSize: 11, fontWeight: 600,
-                color: '#991B1B', background: '#FEE2E2', cursor: 'pointer',
-              }}
-              onMouseEnter={e => e.currentTarget.style.background = '#FECACA'}
-              onMouseLeave={e => e.currentTarget.style.background = '#FEE2E2'}
-            >
+          <div className="flex gap-2">
+            <Button variant="destructive" size="sm" onClick={() => execute(confirmAction)}>
               Confirmar
-            </button>
-            <button
-              onClick={cancel}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 5,
-                borderRadius: 7, border: '1px solid #E2E8F0',
-                padding: '5px 14px', fontSize: 11, fontWeight: 500,
-                color: 'var(--muted)', background: '#F8FAFC', cursor: 'pointer',
-              }}
-              onMouseEnter={e => e.currentTarget.style.background = '#F1F5F9'}
-              onMouseLeave={e => e.currentTarget.style.background = '#F8FAFC'}
-            >
+            </Button>
+            <Button variant="secondary" size="sm" onClick={cancel}>
               <X size={11} /> Cancelar
-            </button>
+            </Button>
           </div>
         </div>
       )}
