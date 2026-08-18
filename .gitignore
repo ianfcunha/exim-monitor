@@ -27,3 +27,7 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Artefato vazio que aparece em backend/ ao recriar o container backend
+# (bind mount de ./diag-exim.sh:/app/diag-exim.sh) — não rastrear.
+/backend/diag-exim.sh

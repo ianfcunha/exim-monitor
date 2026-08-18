@@ -172,6 +172,13 @@ TH_BOUNCE_STORM=${EXIM_TH_BOUNCE_STORM:-500}
 TH_ALTA_REJEICAO=${EXIM_TH_ALTA_REJEICAO:-500}
 TH_FILA_ALTA=${EXIM_TH_FILA_ALTA:-2000}
 DATE=$(date "+%Y-%m-%d %H:%M:%S")
+# Timestamp ISO 8601 em UTC com sufixo Z — usado só nos campos "timestamp"
+# do JSON. $DATE (hora local do servidor, sem timezone) segue sendo usado
+# em textos pra humano (audit log, comentário em firewall.d): sem o "Z",
+# o JS do dashboard interpreta a string como hora LOCAL DO NAVEGADOR, não
+# UTC — se o servidor e o navegador estiverem em fusos diferentes, o
+# painel mostra "há Xs" negativo (timestamp "no futuro").
+DATE_ISO=$(date -u "+%Y-%m-%dT%H:%M:%SZ")
 HOSTNAME=$(hostname -f 2>/dev/null || hostname)
 # ── Detectar binário exim (exim4 em Debian/Ubuntu, exim em outros) ──
 EXIM_BIN=""
@@ -1018,7 +1025,7 @@ run_check() {
     _checks="${_checks}{\"check\":\"csf\",\"ok\":${_csf_ok},\"detail\":\"${_csf_msg}\"}"
 
     printf '{\n'
-    printf '  "timestamp": "%s",\n' "$DATE"
+    printf '  "timestamp": "%s",\n' "$DATE_ISO"
     printf '  "hostname": "%s",\n' "$HOSTNAME"
     printf '  "script_version": "%s",\n' "$VERSION"
     printf '  "ok": %s,\n' "$_ok"
@@ -1060,7 +1067,7 @@ output_json() {
         [ "${COLLECT_TIMED_OUT:-0}" -eq 1 ] && _timed_out_str="true"
 
         printf '{\n'
-        printf '  "timestamp": "%s",\n' "$DATE"
+        printf '  "timestamp": "%s",\n' "$DATE_ISO"
         printf '  "hostname": "%s",\n' "$HOSTNAME"
         printf '  "script_version": "%s",\n' "$VERSION"
         printf '  "version": "%s",\n' "$VERSION"
@@ -1096,7 +1103,7 @@ output_json() {
     [ "${COLLECT_TIMED_OUT:-0}" -eq 1 ] && _timed_out_str="true"
 
     printf '{\n'
-    printf '  "timestamp": "%s",\n' "$DATE"
+    printf '  "timestamp": "%s",\n' "$DATE_ISO"
     printf '  "hostname": "%s",\n' "$HOSTNAME"
     printf '  "script_version": "%s",\n' "$VERSION"
     printf '  "version": "%s",\n' "$VERSION"
@@ -1144,7 +1151,7 @@ output_action_json() {
     _audit_log "$action" "$ACTION_PARAM" "$success" "$message"
     message=$(printf '%s' "$message" | sed 's/"/\\"/g')
     printf '{\n'
-    printf '  "timestamp": "%s",\n' "$DATE"
+    printf '  "timestamp": "%s",\n' "$DATE_ISO"
     printf '  "hostname": "%s",\n' "$HOSTNAME"
     printf '  "script_version": "%s",\n' "$VERSION"
     printf '  "version": "%s",\n' "$VERSION"

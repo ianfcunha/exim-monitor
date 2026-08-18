@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_current_user, hash_password, require_admin
 from ..config import settings
-from ..database import User, get_db, get_user_by_email
+from ..database import User, get_db, get_user_by_email, to_utc_iso
 from ..limiter import limiter
 
 router = APIRouter(prefix="/api/users", tags=["users"])
@@ -189,8 +189,8 @@ def list_users(
             "is_active":      u.is_active,
             "email_verified": u.email_verified,
             "invite_pending": bool(u.invite_token),
-            "created_at":     u.created_at.isoformat() if u.created_at else None,
-            "last_login_at":  u.last_login_at.isoformat() if u.last_login_at else None,
+            "created_at":     to_utc_iso(u.created_at),
+            "last_login_at":  to_utc_iso(u.last_login_at),
         }
         for u in users
     ]
@@ -250,7 +250,7 @@ def get_invite_link(
     return {
         "email":      user.email,
         "invite_url": f"{settings.app_url}/?invite={user.invite_token}",
-        "expires_at": user.invite_expires_at.isoformat() if user.invite_expires_at else None,
+        "expires_at": to_utc_iso(user.invite_expires_at),
         "expires_in_hours": expires_in_h,
     }
 

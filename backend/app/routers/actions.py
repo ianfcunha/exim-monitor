@@ -29,7 +29,7 @@ from ..auth import require_admin
 from ..crypto import decrypt_secret
 from ..database import (
     ActionHistory, User, get_db, get_server_owned_by, get_servers_for_user,
-    record_action_history,
+    record_action_history, to_utc_iso,
 )
 from ..limiter import limiter
 from ..ssh import SSHError, run_action
@@ -158,7 +158,7 @@ def get_action_history(
     return [
         {
             "id":          r.id,
-            "executed_at": r.executed_at.isoformat() + "Z",
+            "executed_at": to_utc_iso(r.executed_at),
             "server_id":   r.server_id,
             "actor":       r.actor,
             "action":      r.action,

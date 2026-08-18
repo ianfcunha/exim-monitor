@@ -196,6 +196,20 @@ class AlertHistory(Base):
     error_msg  = Column(String(500), nullable=True)
 
 
+def to_utc_iso(dt: Optional[datetime]) -> Optional[str]:
+    """
+    Serializa um datetime armazenado como UTC (todo Column(DateTime)
+    deste schema usa datetime.utcnow(), nunca datetime.now()) em ISO 8601
+    com sufixo Z.
+
+    Sem o Z, new Date(str) no frontend interpreta a string como hora
+    LOCAL DO NAVEGADOR em vez de UTC — pra qualquer usuário fora do fuso
+    UTC+0 (ex.: Brasil, UTC-3), isso faz o timestamp parecer "no futuro"
+    e o painel mostra um "há Xs" negativo.
+    """
+    return dt.isoformat() + "Z" if dt else None
+
+
 class ActionHistory(Base):
     """
     Histórico de ações executadas via API — append-only. Fonte central de

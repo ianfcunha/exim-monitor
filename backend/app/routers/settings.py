@@ -15,7 +15,7 @@ from fastapi import Query
 
 from ..alerts import send_test_email, send_test_telegram
 from ..auth import get_current_user, require_admin
-from ..database import AlertHistory, AlertSettings, User, get_alert_settings, get_db
+from ..database import AlertHistory, AlertSettings, User, get_alert_settings, get_db, to_utc_iso
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -147,7 +147,7 @@ def get_alert_history(
     return [
         {
             "id":          r.id,
-            "sent_at":     r.sent_at.isoformat(),
+            "sent_at":     to_utc_iso(r.sent_at),
             "channel":     r.channel,
             "severity":    r.severity,
             "problem":     r.problem,

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_current_user, require_admin
 from ..crypto import decrypt_secret, encrypt_secret
-from ..database import Server, User, get_db, get_server_owned_by, get_servers_for_user
+from ..database import Server, User, get_db, get_server_owned_by, get_servers_for_user, to_utc_iso
 from ..limiter import limiter
 
 router = APIRouter(prefix="/api/servers", tags=["servers"])
@@ -65,8 +65,8 @@ def _to_response(s: Server, include_secret: bool = False) -> dict:
         "is_enabled":       s.is_enabled,
         "ssh_status":       s.ssh_status,
         "ssh_error_msg":    s.ssh_error_msg,
-        "last_connected_at": s.last_connected_at.isoformat() if s.last_connected_at else None,
-        "created_at":       s.created_at.isoformat() if s.created_at else None,
+        "last_connected_at": to_utc_iso(s.last_connected_at),
+        "created_at":       to_utc_iso(s.created_at),
     }
 
 
@@ -273,5 +273,5 @@ def ssh_status(
         "server_id":        server.id,
         "ssh_status":       server.ssh_status,
         "ssh_error_msg":    server.ssh_error_msg,
-        "last_connected_at": server.last_connected_at.isoformat() if server.last_connected_at else None,
+        "last_connected_at": to_utc_iso(server.last_connected_at),
     }

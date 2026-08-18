@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_user
-from ..database import Snapshot, User, get_db, get_server_owned_by
+from ..database import Snapshot, User, get_db, get_server_owned_by, to_utc_iso
 
 router = APIRouter(prefix="/api/history", tags=["history"])
 
@@ -42,7 +42,7 @@ def get_history(
 
     return [
         {
-            "timestamp":    s.timestamp.isoformat() + "Z",
+            "timestamp":    to_utc_iso(s.timestamp),
             "queue_total":  s.queue_total,
             "severity":     s.severity,
             "problem":      s.problem,
