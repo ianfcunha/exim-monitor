@@ -1208,7 +1208,7 @@ execute_action() {
             timeout "$GLOBAL_TIMEOUT" "$EXIM_BIN" -bp 2>/dev/null \
                 | awk '{print $3}' \
                 | grep -E '^[A-Za-z0-9-]{6,}$' \
-                | xargs -r -P4 "$EXIM_BIN" -Mrm 2>/dev/null
+                | xargs -r -P4 "$EXIM_BIN" -Mrm >/dev/null 2>&1
             output_action_json "true" "$cmd" \
                 "Fila limpa — $count mensagens removidas"
             ;;
@@ -1217,7 +1217,7 @@ execute_action() {
             local ids; ids=$(exiqgrep -z -i 2>/dev/null \
                 | grep -E '^[A-Za-z0-9-]{6,}$')
             local count; count=$(echo "$ids" | grep -c . 2>/dev/null); count=${count:-0}
-            echo "$ids" | xargs -r -P4 "$EXIM_BIN" -Mrm 2>/dev/null
+            echo "$ids" | xargs -r -P4 "$EXIM_BIN" -Mrm >/dev/null 2>&1
             output_action_json "true" "$cmd" \
                 "$count mensagens frozen removidas"
             ;;
@@ -1226,7 +1226,7 @@ execute_action() {
             local ids; ids=$($SUDO exiqgrep -f '<>' -i 2>/dev/null \
                 | grep -E '^[A-Za-z0-9-]{6,}$')
             local count; count=$(echo "$ids" | grep -c . 2>/dev/null); count=${count:-0}
-            echo "$ids" | xargs -r -P4 "$EXIM_BIN" -Mrm 2>/dev/null
+            echo "$ids" | xargs -r -P4 "$EXIM_BIN" -Mrm >/dev/null 2>&1
             output_action_json "true" "$cmd" \
                 "$count bounces (<>) removidos"
             ;;
@@ -1245,7 +1245,7 @@ execute_action() {
             local ids; ids=$($SUDO exiqgrep -f "$param" -i 2>/dev/null \
                 | grep -E '^[A-Za-z0-9-]{6,}$')
             local count; count=$(echo "$ids" | grep -c . 2>/dev/null); count=${count:-0}
-            echo "$ids" | xargs -r -P4 "$EXIM_BIN" -Mrm 2>/dev/null
+            echo "$ids" | xargs -r -P4 "$EXIM_BIN" -Mrm >/dev/null 2>&1
             output_action_json "true" "$cmd" \
                 "$count mensagens de '$param' removidas"
             ;;
@@ -1264,7 +1264,7 @@ execute_action() {
             local removed=0
             for mid in $(exiqgrep -f "" -i 2>/dev/null | head -500); do
                 "$EXIM_BIN" -Mvh "$mid" 2>/dev/null | grep -q "auth_id.*${param}" \
-                    && { "$EXIM_BIN" -Mrm "$mid" 2>/dev/null; removed=$((removed+1)); }
+                    && { "$EXIM_BIN" -Mrm "$mid" >/dev/null 2>&1; removed=$((removed+1)); }
             done
             output_action_json "true" "$cmd" \
                 "$removed mensagens do usuário '$param' removidas"
@@ -1842,32 +1842,32 @@ maybe_delete_script() {
 
 clean_full() {
     echo -e "${YELLOW}[AÇÃO] Limpando toda a fila...${RESET}"
-    exim -bp 2>/dev/null | awk '{print $3}' | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 exim -Mrm 2>/dev/null
+    exim -bp 2>/dev/null | awk '{print $3}' | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 exim -Mrm >/dev/null 2>&1
     echo -e "${GREEN}[OK] Fila limpa.${RESET}"
     QUEUE_CLEANED=1
 }
 clean_frozen() {
     echo -e "${YELLOW}[AÇÃO] Removendo frozen...${RESET}"
-    exiqgrep -z -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 exim -Mrm 2>/dev/null
+    exiqgrep -z -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 exim -Mrm >/dev/null 2>&1
     echo -e "${GREEN}[OK] Frozen removidos.${RESET}"
     QUEUE_CLEANED=1
 }
 clean_bounces() {
     echo -e "${YELLOW}[AÇÃO] Removendo bounces (<>)...${RESET}"
-    exiqgrep -f '<>' -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 exim -Mrm 2>/dev/null
+    exiqgrep -f '<>' -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 exim -Mrm >/dev/null 2>&1
     echo -e "${GREEN}[OK] Bounces removidos.${RESET}"
     QUEUE_CLEANED=1
 }
 clean_by_sender() {
     echo -e "${YELLOW}[AÇÃO] Removendo fila de $1...${RESET}"
-    exiqgrep -f "$1" -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 exim -Mrm 2>/dev/null
+    exiqgrep -f "$1" -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 exim -Mrm >/dev/null 2>&1
     echo -e "${GREEN}[OK]${RESET}"
     QUEUE_CLEANED=1
 }
 clean_by_auth_user() {
     echo -e "${YELLOW}[AÇÃO] Removendo fila do usuário $1...${RESET}"
     for mid in $(exiqgrep -f "" -i 2>/dev/null | head -200); do
-        exim -Mvh "$mid" 2>/dev/null | grep -q "auth_id.*$1" && exim -Mrm "$mid" 2>/dev/null
+        exim -Mvh "$mid" 2>/dev/null | grep -q "auth_id.*$1" && exim -Mrm "$mid" >/dev/null 2>&1
     done
     echo -e "${GREEN}[OK]${RESET}"
     QUEUE_CLEANED=1
