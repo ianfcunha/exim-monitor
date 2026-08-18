@@ -181,10 +181,15 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
           )}
 
           <div className="flex gap-2">
-            <Button variant="destructive" size="sm" onClick={() => execute(confirmAction)}>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => execute(confirmAction)}
+              className="border-transparent bg-red-600 text-white shadow-sm hover:bg-red-700 hover:text-white active:bg-red-800"
+            >
               Confirmar
             </Button>
-            <Button variant="secondary" size="sm" onClick={cancel}>
+            <Button variant="outline" size="sm" onClick={cancel}>
               <X size={11} /> Cancelar
             </Button>
           </div>
