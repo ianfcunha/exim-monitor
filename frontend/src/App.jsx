@@ -3,6 +3,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { AuthProvider } from './contexts/AuthContext'
 import { ServerProvider } from './contexts/ServerContext'
 import { ToastProvider } from './contexts/ToastContext'
+import ActionHistoryPage from './pages/ActionHistoryPage'
 import Dashboard from './pages/Dashboard'
 import InviteAccept from './pages/InviteAccept'
 import Login from './pages/Login'
@@ -55,12 +56,16 @@ export default function App() {
         {page === 'users' && (
           <UsersPage onBack={() => setPage('dashboard')} />
         )}
+        {page === 'action-history' && (
+          <ActionHistoryPage onBack={() => setPage('dashboard')} />
+        )}
         {page === 'dashboard' && (
           <Dashboard
             onLogout={logout}
             onSettings={() => setPage('settings')}
             onServers={() => setPage('servers')}
             onUsers={() => setPage('users')}
+            onActionHistory={() => setPage('action-history')}
           />
         )}
       </ServerProvider>

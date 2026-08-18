@@ -71,6 +71,10 @@ export const runAction = (action, param = null, serverId = null) =>
     { params: serverId ? { server_id: serverId } : {} }
   ).then(r => r.data)
 
+// ── Historico de acoes (auditoria) ──────────────────────────────────────────
+export const fetchActionHistory = (serverId = null, limit = 100) =>
+  api.get('/actions/history', { params: { limit, ...(serverId ? { server_id: serverId } : {}) } }).then(r => r.data)
+
 // ── Historico (com server_id) ──────────────────────────────────────────────
 export const fetchHistory = (hours = 24, mode = 'quick', serverId = null) =>
   api.get('/history', { params: { hours, mode, ...(serverId ? { server_id: serverId } : {}) } }).then(r => r.data)

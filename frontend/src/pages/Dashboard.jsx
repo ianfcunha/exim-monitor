@@ -11,7 +11,7 @@
  *   - Atalhos de teclado: R=Refresh, L=Logs
  */
 import {
-  CheckCircle, ChevronDown, Clock, FileText, Inbox,
+  CheckCircle, ChevronDown, Clock, FileText, History, Inbox,
   LogOut, MailOpen, RefreshCw, Server, Settings, Users, XCircle,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -24,6 +24,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import ActionPanel from '../components/ActionPanel'
+import DeliverabilityCard from '../components/DeliverabilityCard'
 import DeliveryRateCard from '../components/DeliveryRateCard'
 import DiagnosisPanel from '../components/DiagnosisPanel'
 import HistoryChart from '../components/HistoryChart'
@@ -103,7 +104,7 @@ function StatusPill({ color, label, children }) {
 }
 
 // ── Dropdown de configurações ────────────────────────────────────────────────
-function SettingsMenu({ onSettings, onServers, onUsers, onLogout, isAdmin }) {
+function SettingsMenu({ onSettings, onServers, onUsers, onActionHistory, onLogout, isAdmin }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -129,6 +130,11 @@ function SettingsMenu({ onSettings, onServers, onUsers, onLogout, isAdmin }) {
             <Users size={13} /> Usuários
           </DropdownMenuItem>
         )}
+        {isAdmin && (
+          <DropdownMenuItem onSelect={onActionHistory}>
+            <History size={13} /> Histórico de ações
+          </DropdownMenuItem>
+        )}
         {isAdmin && <DropdownMenuSeparator />}
         <DropdownMenuItem destructive onSelect={onLogout}>
           <LogOut size={13} /> Sair
@@ -148,7 +154,7 @@ const METRIC_TOOLTIPS = {
 }
 
 // ── Componente principal ─────────────────────────────────────────────────────
-export default function Dashboard({ onLogout, onSettings, onServers, onUsers }) {
+export default function Dashboard({ onLogout, onSettings, onServers, onUsers, onActionHistory }) {
   const { isAdmin, username } = useAuth()
   const { activeServer }      = useServer()
   const quick                 = useQuickStatus()
@@ -413,6 +419,7 @@ export default function Dashboard({ onLogout, onSettings, onServers, onUsers }) 
               onSettings={onSettings}
               onServers={onServers}
               onUsers={onUsers}
+              onActionHistory={onActionHistory}
               onLogout={onLogout}
               isAdmin={isAdmin}
             />
@@ -506,6 +513,13 @@ export default function Dashboard({ onLogout, onSettings, onServers, onUsers }) 
           <TopTable title="Top IPs / Auth"  rows={topIPs}    emptyMsg="Disponível no próximo ciclo completo" loading={quick.loading} />
           {isAdmin && <ActionPanel onActionComplete={handleActionComplete} recommendedActions={recommendedActions} />}
         </div>
+
+        {/* Deliverability — blocklist + SPF/DKIM/DMARC, sob demanda */}
+        {isAdmin && (
+          <div className="grid grid-cols-1 gap-4">
+            <DeliverabilityCard />
+          </div>
+        )}
 
         {/* Domínios com erros */}
         {(topRejected.length > 0 || topDeferred.length > 0) && (
