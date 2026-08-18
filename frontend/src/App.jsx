@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import { AuthProvider } from './contexts/AuthContext'
 import { ServerProvider } from './contexts/ServerContext'
 import { ToastProvider } from './contexts/ToastContext'
@@ -41,6 +42,7 @@ export default function App() {
   const logout = () => { setToken(null); setPage('dashboard') }
 
   return (
+    <TooltipProvider delayDuration={300}>
     <ToastProvider>
       <AuthProvider>
       <ServerProvider>
@@ -64,5 +66,6 @@ export default function App() {
       </ServerProvider>
       </AuthProvider>
     </ToastProvider>
+    </TooltipProvider>
   )
 }

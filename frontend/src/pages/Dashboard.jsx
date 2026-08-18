@@ -22,6 +22,7 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import ActionPanel from '../components/ActionPanel'
 import DeliveryRateCard from '../components/DeliveryRateCard'
 import DiagnosisPanel from '../components/DiagnosisPanel'
@@ -72,9 +73,14 @@ function LogoMark({ size = 20 }) {
 // ── Botão do header ──────────────────────────────────────────────────────────
 function HBtn({ onClick, disabled, title, children }) {
   return (
-    <Button variant="outline" size="sm" onClick={onClick} disabled={disabled} title={title}>
-      {children}
-    </Button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="outline" size="sm" onClick={onClick} disabled={disabled}>
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{title}</TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -358,32 +364,40 @@ export default function Dashboard({ onLogout, onSettings, onServers, onUsers }) 
 
             {/* Badge usuário + role */}
             {username && (
-              <div
-                className="hidden md:flex items-center gap-1.5"
-                style={{
-                  fontSize: 11, fontWeight: 600,
-                  padding: '3px 9px', borderRadius: 999,
-                  background: roleStyle.bg,
-                  border: `1px solid ${roleStyle.border}`,
-                  color: roleStyle.color,
-                  flexShrink: 0, whiteSpace: 'nowrap',
-                }}
-                title={`Logado como ${username}`}
-              >
-                <span style={{ opacity: 0.7, fontWeight: 400 }}>{username}</span>
-                <span style={{ opacity: 0.35 }}>·</span>
-                <span>{roleStyle.label}</span>
-              </div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div
+                    className="hidden md:flex items-center gap-1.5"
+                    style={{
+                      fontSize: 11, fontWeight: 600,
+                      padding: '3px 9px', borderRadius: 999,
+                      background: roleStyle.bg,
+                      border: `1px solid ${roleStyle.border}`,
+                      color: roleStyle.color,
+                      flexShrink: 0, whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <span style={{ opacity: 0.7, fontWeight: 400 }}>{username}</span>
+                    <span style={{ opacity: 0.35 }}>·</span>
+                    <span>{roleStyle.label}</span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>Logado como {username}</TooltipContent>
+              </Tooltip>
             )}
 
             {/* Hint de atalhos */}
-            <span
-              className="hidden lg:inline"
-              style={{ fontSize: 9, color: '#CBD5E1', userSelect: 'none', letterSpacing: '0.05em' }}
-              title="Atalhos de teclado disponíveis"
-            >
-              [R] refresh · [L] logs
-            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  className="hidden lg:inline"
+                  style={{ fontSize: 9, color: '#CBD5E1', userSelect: 'none', letterSpacing: '0.05em' }}
+                >
+                  [R] refresh · [L] logs
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>Atalhos de teclado disponíveis</TooltipContent>
+            </Tooltip>
 
             <HBtn onClick={handleRefresh} disabled={refreshing} title="Forçar atualização (R)">
               <RefreshCw size={12} style={{ animation: refreshing ? 'spin 1s linear infinite' : undefined }} />

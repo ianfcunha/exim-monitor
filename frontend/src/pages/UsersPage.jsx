@@ -6,6 +6,7 @@ import { ArrowLeft, Clock, Copy, Link, Mail, RefreshCw, RotateCcw, Shield, Trash
 import { useEffect, useState } from 'react'
 import { deleteUser, fetchUsers, getInviteLink, inviteUser, resendInvite, updateUserRole } from '../api/client'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useAuth } from '../contexts/AuthContext'
 
 const ROLE_LABEL = { admin: 'Admin', viewer: 'Viewer' }
@@ -146,10 +147,15 @@ export default function UsersPage({ onBack }) {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button onClick={load} title="Atualizar lista"
-              style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748B' }}>
-              <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button onClick={load}
+                  style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748B' }}>
+                  <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Atualizar lista</TooltipContent>
+            </Tooltip>
             <button
               onClick={() => { setShowForm(v => !v); setInviteMsg(null) }}
               style={{
@@ -401,18 +407,22 @@ export default function UsersPage({ onBack }) {
 
                 {/* Remover */}
                 {u.id !== 0 && (
-                  <button
-                    onClick={() => handleDelete(u.id, u.invite_pending ? u.email : u.username)}
-                    title="Revogar acesso"
-                    style={{
-                      width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-                      border: '1px solid #FECACA', background: '#FEF2F2',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      cursor: 'pointer', color: '#DC2626',
-                    }}
-                  >
-                    <Trash2 size={13} />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={() => handleDelete(u.id, u.invite_pending ? u.email : u.username)}
+                        style={{
+                          width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+                          border: '1px solid #FECACA', background: '#FEF2F2',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          cursor: 'pointer', color: '#DC2626',
+                        }}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>Revogar acesso</TooltipContent>
+                  </Tooltip>
                 )}
               </div>
             ))

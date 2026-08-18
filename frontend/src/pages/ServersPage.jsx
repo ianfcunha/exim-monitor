@@ -6,6 +6,7 @@ import { AlertTriangle, ArrowLeft, CheckCircle, Edit2, KeyRound, Plus, RefreshCw
 import { useEffect, useState } from 'react'
 import { createServer, deleteServer, fetchServers, testServerConn, updateServer } from '../api/client'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useServer } from '../contexts/ServerContext'
 
 const SSH_STATUS = {
@@ -273,10 +274,15 @@ export default function ServersPage({ onBack }) {
             </span>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={load} title="Atualizar lista"
-              style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748B' }}>
-              <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button onClick={load}
+                  style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748B' }}>
+                  <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Atualizar lista</TooltipContent>
+            </Tooltip>
             <button onClick={() => { setEditTarget(null); setShowForm(true) }}
               style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700, border: 'none', background: '#0EA5E9', color: '#fff', cursor: 'pointer' }}>
               <Plus size={13} /> Adicionar servidor
@@ -437,18 +443,26 @@ export default function ServersPage({ onBack }) {
                     <Zap size={11} style={{ animation: testing[s.id] ? 'spin 1s linear infinite' : undefined }} />
                     {testing[s.id] ? 'Testando…' : 'Testar'}
                   </button>
-                  <button
-                    onClick={() => { setEditTarget(s); setShowForm(true); setError(null) }}
-                    title="Editar servidor"
-                    style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748B' }}>
-                    <Edit2 size={13} />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(s.id)}
-                    title="Remover servidor"
-                    style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #FECACA', background: '#FEF2F2', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#DC2626' }}>
-                    <Trash2 size={13} />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={() => { setEditTarget(s); setShowForm(true); setError(null) }}
+                        style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748B' }}>
+                        <Edit2 size={13} />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>Editar servidor</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={() => handleDelete(s.id)}
+                        style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #FECACA', background: '#FEF2F2', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#DC2626' }}>
+                        <Trash2 size={13} />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>Remover servidor</TooltipContent>
+                  </Tooltip>
                 </div>
               </div>
             )

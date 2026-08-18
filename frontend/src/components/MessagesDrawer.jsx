@@ -7,6 +7,7 @@ import { AlertCircle, Check, Clock, Copy, Inbox, Mail, MailOpen, RefreshCw, X } 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { fetchLogMessages, fetchQueueMessages } from '../api/client'
 
 // ── Configuração por tipo ────────────────────────────────────────────────────
@@ -79,23 +80,27 @@ function CopyRowBtn({ row }) {
   }
 
   return (
-    <button
-      onClick={copy}
-      title="Copiar linha"
-      style={{
-        width: 24, height: 24, borderRadius: 5,
-        border: 'none',
-        background: copied ? 'rgba(22,163,74,0.12)' : 'rgba(0,0,0,0.04)',
-        cursor: 'pointer',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        transition: 'background 0.15s', flexShrink: 0,
-      }}
-    >
-      {copied
-        ? <Check size={12} color="#16A34A" strokeWidth={2.5} />
-        : <Copy size={12} color="#94A3B8" strokeWidth={2} />
-      }
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={copy}
+          style={{
+            width: 24, height: 24, borderRadius: 5,
+            border: 'none',
+            background: copied ? 'rgba(22,163,74,0.12)' : 'rgba(0,0,0,0.04)',
+            cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            transition: 'background 0.15s', flexShrink: 0,
+          }}
+        >
+          {copied
+            ? <Check size={12} color="#16A34A" strokeWidth={2.5} />
+            : <Copy size={12} color="#94A3B8" strokeWidth={2} />
+          }
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>Copiar linha</TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -207,14 +212,24 @@ export default function MessagesDrawer({ cardType, onClose }) {
               </SelectContent>
             </Select>
           )}
-          <button onClick={() => load(limit)} disabled={loading} title="Atualizar"
-            style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: loading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: loading ? 0.5 : 1, flexShrink: 0 }}>
-            <RefreshCw size={13} color="#64748B" style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} />
-          </button>
-          <button onClick={onClose} title="Fechar (Esc)"
-            style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <X size={14} color="#64748B" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button onClick={() => load(limit)} disabled={loading}
+                style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: loading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: loading ? 0.5 : 1, flexShrink: 0 }}>
+                <RefreshCw size={13} color="#64748B" style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Atualizar</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button onClick={onClose}
+                style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <X size={14} color="#64748B" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Fechar (Esc)</TooltipContent>
+          </Tooltip>
         </div>
 
         {/* Filtro */}

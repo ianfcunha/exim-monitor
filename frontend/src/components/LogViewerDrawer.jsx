@@ -7,6 +7,7 @@ import { Check, Copy, RefreshCw, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { fetchLogTail } from '../api/client'
 
 const TYPE_CONFIG = {
@@ -52,23 +53,27 @@ function CopyBtn({ text }) {
     })
   }
   return (
-    <button
-      onClick={copy}
-      title="Copiar linha"
-      style={{
-        flexShrink: 0, width: 20, height: 20,
-        borderRadius: 4, border: 'none',
-        background: copied ? 'rgba(22,163,74,0.12)' : 'rgba(0,0,0,0.05)',
-        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        transition: 'background 0.15s',
-        opacity: 0.7,
-      }}
-    >
-      {copied
-        ? <Check size={11} color="#16A34A" strokeWidth={2.5} />
-        : <Copy size={11} color="#64748B" strokeWidth={2} />
-      }
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={copy}
+          style={{
+            flexShrink: 0, width: 20, height: 20,
+            borderRadius: 4, border: 'none',
+            background: copied ? 'rgba(22,163,74,0.12)' : 'rgba(0,0,0,0.05)',
+            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            transition: 'background 0.15s',
+            opacity: 0.7,
+          }}
+        >
+          {copied
+            ? <Check size={11} color="#16A34A" strokeWidth={2.5} />
+            : <Copy size={11} color="#64748B" strokeWidth={2} />
+          }
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>Copiar linha</TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -193,10 +198,15 @@ export default function LogViewerDrawer({ onClose }) {
               <RefreshCw size={11} style={{ animation: refreshing ? 'spin 1s linear infinite' : undefined }} />
               {autoRefresh ? '30s' : 'Auto'}
             </button>
-            <button onClick={() => load(true)} disabled={refreshing} title="Atualizar agora"
-              style={{ width: 30, height: 30, borderRadius: 7, border: '1px solid #E2E8F0', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#64748B', opacity: refreshing ? 0.5 : 1 }}>
-              <RefreshCw size={13} style={{ animation: refreshing ? 'spin 1s linear infinite' : undefined }} />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button onClick={() => load(true)} disabled={refreshing}
+                  style={{ width: 30, height: 30, borderRadius: 7, border: '1px solid #E2E8F0', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#64748B', opacity: refreshing ? 0.5 : 1 }}>
+                  <RefreshCw size={13} style={{ animation: refreshing ? 'spin 1s linear infinite' : undefined }} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Atualizar agora</TooltipContent>
+            </Tooltip>
             <Select value={String(limit)} onValueChange={v => setLimit(Number(v))}>
               <SelectTrigger className="h-[26px] py-0 text-[11px]">
                 <SelectValue />
