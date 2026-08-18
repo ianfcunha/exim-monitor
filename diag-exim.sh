@@ -7,7 +7,7 @@
 #        --json          saída em JSON para integração externa
 #        --clean-spam    limpa fila automaticamente se SPAM detectado
 #        --check         verifica pré-requisitos do servidor:
-#                          JSON {ok, checks:[exim_binary,exiqgrep,disk_space,mainlog]}
+#                          JSON {ok, checks:[exim_binary,exiqgrep,disk_space,mainlog,cpanel,csf]}
 #        --quick         modo leve para dashboard (heartbeat ~30s):
 #                          skip de exim -bp e exiqgrep; lê log com
 #                          suporte a rotation (mainlog.1/.gz);
@@ -20,6 +20,14 @@
 #                          clean-sender:<addr> | clean-auth:<user>
 #                          block-ip:<ip> | retry-queue
 # ============================================================
+# Changelog v5.4:
+#   - Novo: /var/log/exim_mainlog (padrão cPanel/WHM) nos fallbacks de log
+#           usados por --quick, --json e --check, mantendo os caminhos
+#           Debian/exim4 já existentes
+#   - Novo: leitura de log rotacionado reconhece o padrão de data do
+#           cPanel/WHM (exim_mainlog-YYYYMMDD.gz), além de mainlog.1(.gz)
+#   - Novo: checks "cpanel" e "csf" em --check — informativos, não afetam
+#           o "ok" geral; usados pelo backend para detectar o ambiente
 # Changelog v5.1:
 #   - Novo: GLOBAL_TIMEOUT=120 — controla todos os timeouts de coleta (T2-1);
 #          substitui os "timeout 120" hardcoded; watchdog em collect() define
@@ -107,7 +115,7 @@
 #          (evita pegar local-parts com ponto, ex: case.file@domain → domain)
 # ============================================================
 
-VERSION="5.3"
+VERSION="5.4"
 LOG_PATH="/var/log/exim4/mainlog"
 LOG_LINES=10000
 QUEUE_SAMPLE_THRESHOLD=10000  # acima disso usa amostra da fila
