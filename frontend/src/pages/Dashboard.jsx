@@ -32,6 +32,7 @@ import HourlyBarChart from '../components/HourlyBarChart'
 import LogViewerDrawer from '../components/LogViewerDrawer'
 import MessagesDrawer from '../components/MessagesDrawer'
 import MetricCard from '../components/MetricCard'
+import PhpMailersCard from '../components/PhpMailersCard'
 import ServerSelector from '../components/ServerSelector'
 import TopTable from '../components/TopTable'
 import { useAuth } from '../contexts/AuthContext'
@@ -520,6 +521,11 @@ export default function Dashboard({ onLogout, onSettings, onServers, onUsers, on
             <DeliverabilityCard />
           </div>
         )}
+
+        {/* Scripts PHP maliciosos — dado do ciclo completo (5min) */}
+        <div className="grid grid-cols-1 gap-4">
+          <PhpMailersCard phpMailers={f.php_mailers} loading={full.loading} />
+        </div>
 
         {/* Domínios com erros */}
         {(topRejected.length > 0 || topDeferred.length > 0) && (
