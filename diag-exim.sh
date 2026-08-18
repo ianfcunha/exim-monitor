@@ -18,7 +18,9 @@
 #        --action=<cmd>  executa uma ação isolada e retorna JSON:
 #                          clean-full | clean-frozen | clean-bounces
 #                          clean-sender:<addr> | clean-auth:<user>
-#                          block-ip:<ip> | retry-queue
+#                          block-ip:<ip> | block-sender:<addr> | retry-queue
+#                          check-deliverability[:dominio] — blocklists via
+#                          DNSBL + SPF/DKIM/DMARC, sem alterar nada
 # ============================================================
 # Changelog v5.4:
 #   - Novo: /var/log/exim_mainlog (padrão cPanel/WHM) nos fallbacks de log
@@ -33,6 +35,14 @@
 #           --check tinham sido corrigidos. Lista de candidatos extraída
 #           para o array único LOG_CANDIDATES (topo do script), consumido
 #           pelos três pontos — evita essa lacuna se repetir
+#   - Fix: detecção de IP público em check_blacklists() tinha só um
+#           fallback (hostname -I), podendo silenciosamente testar um IP
+#           privado; _detect_public_ip() tenta dois serviços externos e
+#           valida que o resultado não é privado antes de aceitar
+#   - Novo: --action=check-deliverability[:dominio] — blocklists (DNSBL)
+#           e SPF/DKIM/DMARC como JSON estruturado, sem alterar nada no
+#           servidor; reaproveita a mesma detecção de IP/domínio da
+#           versão interativa (check_blacklists / check_dkim_spf)
 # Changelog v5.1:
 #   - Novo: GLOBAL_TIMEOUT=120 — controla todos os timeouts de coleta (T2-1);
 #          substitui os "timeout 120" hardcoded; watchdog em collect() define
@@ -1117,7 +1127,7 @@ output_json() {
 # Usado pelo modo --action= para respostas de API REST.
 # ============================================================
 output_action_json() {
-    local success="$1" action="$2" message="$3"
+    local success="$1" action="$2" message="$3" extra_json="$4"
     _audit_log "$action" "$ACTION_PARAM" "$success" "$message"
     message=$(printf '%s' "$message" | sed 's/"/\\"/g')
     printf '{\n'
@@ -1128,7 +1138,8 @@ output_action_json() {
     printf '  "success": %s,\n' "$success"
     printf '  "action": "%s",\n' "$action"
     printf '  "actor": "%s",\n' "${ACTOR_NAME:-system}"
-    printf '  "message": "%s"\n' "$message"
+    printf '  "message": "%s"%s\n' "$message" "${extra_json:+,}"
+    [ -n "$extra_json" ] && printf '  %s\n' "$extra_json"
     printf '}\n'
 }
 
@@ -1334,9 +1345,27 @@ execute_action() {
                 "Reprocessamento forçado da fila ($EXIM_BIN -qff) concluído"
             ;;
 
+        check-deliverability)
+            # Domínio opcional via param (--action=check-deliverability:dominio.com);
+            # sem param, cai no fallback de _detect_domain (remetente
+            # ativo/relay/auth top, depois domínio do host).
+            local _domain="$param"
+            if [ -n "$_domain" ] && ! _validate_action_param "$_domain"; then
+                output_action_json "false" "$cmd" \
+                    "Parâmetro inválido: '$_domain' contém caracteres não permitidos"
+                exit 1
+            fi
+            local _bl_json _deliv_json
+            _bl_json=$(check_blacklists_json)
+            _deliv_json=$(check_deliverability_json "$_domain")
+            output_action_json "true" "$cmd" \
+                "Checagem de deliverability concluída" \
+                "${_bl_json}, ${_deliv_json}"
+            ;;
+
         *)
             output_action_json "false" "$cmd" \
-                "Ação desconhecida: '$cmd'. Opções: clean-full, clean-frozen, clean-bounces, clean-sender:<addr>, clean-auth:<user>, block-ip:<ip>, block-sender:<email>, retry-queue"
+                "Ação desconhecida: '$cmd'. Opções: clean-full, clean-frozen, clean-bounces, clean-sender:<addr>, clean-auth:<user>, block-ip:<ip>, block-sender:<email>, retry-queue, check-deliverability[:dominio]"
             exit 1
             ;;
     esac
@@ -1912,8 +1941,67 @@ retry_queue() {
     exim -qff 2>/dev/null
     echo -e "${GREEN}[OK]${RESET}"
 }
+# ============================================================
+# DETECÇÃO DE IP PÚBLICO
+# hostname -I sozinho pode devolver o IP de uma interface interna
+# (rede docker, VPN, etc.) em vez do IP público real — nesse caso a
+# checagem de blocklist testaria o endereço errado, silenciosamente.
+# Tenta dois serviços externos independentes antes de aceitar
+# hostname -I como último recurso, e sempre valida que o resultado
+# não é um IP privado/loopback. Retorna 1 (sem imprimir nada) se
+# nenhum método confiável funcionar — chamador deve tratar esse caso
+# explicitamente em vez de seguir com um valor possivelmente errado.
+# ============================================================
+_is_private_ip() {
+    local ip="$1"
+    case "$ip" in
+        10.*|127.*|192.168.*) return 0 ;;
+        172.1[6-9].*|172.2[0-9].*|172.3[01].*) return 0 ;;
+    esac
+    return 1
+}
+
+_detect_public_ip() {
+    local ip svc
+    for svc in "curl -s4 --max-time 5 ifconfig.me" "curl -s4 --max-time 5 api.ipify.org"; do
+        ip=$($svc 2>/dev/null | tr -d '[:space:]')
+        if printf '%s' "$ip" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$' && ! _is_private_ip "$ip"; then
+            printf '%s' "$ip"; return 0
+        fi
+    done
+    # Último recurso: IP local — só aceito se não for privado (raro, mas
+    # possível em servidor com IP público direto na interface)
+    ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    if printf '%s' "$ip" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$' && ! _is_private_ip "$ip"; then
+        printf '%s' "$ip"; return 0
+    fi
+    return 1
+}
+
+# ============================================================
+# DETECÇÃO DE DOMÍNIO PARA CHECAGENS DE DELIVERABILITY
+# Extrai do remetente mais ativo / suspeito de relay / usuário
+# autenticado top; cai pro domínio do próprio host como último
+# recurso. Compartilhado entre a versão interativa e a --json-aware
+# (check_dkim_spf, check_deliverability_json) — não duplicar.
+# ============================================================
+_detect_domain() {
+    local domain="" _src
+    for _src in "$TOP_SENDER" "$RELAY_SUSPECT" "$TOP_AUTH_USER"; do
+        [ -z "$_src" ] && continue
+        domain=$(echo "$_src" | grep -oP '@\K[^@\s]+' | head -1)
+        [ -n "$domain" ] && break
+    done
+    [ -z "$domain" ] && domain=$(hostname -d 2>/dev/null || hostname -f | cut -d. -f2-)
+    printf '%s' "$domain"
+}
+
 check_blacklists() {
-    local ip; ip=$(curl -s4 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+    local ip
+    if ! ip=$(_detect_public_ip); then
+        echo -e "  ${RED}✖ Não foi possível determinar o IP público do servidor — checagem de blocklist pulada.${RESET}"
+        return 1
+    fi
     echo -e "${CYAN}IP do servidor: ${BOLD}$ip${RESET}"
     for bl in zen.spamhaus.org bl.spamcop.net dnsbl.sorbs.net b.barracudacentral.org; do
         rev_ip=$(echo "$ip" | awk -F. '{print $4"."$3"."$2"."$1}')
@@ -1922,20 +2010,58 @@ check_blacklists() {
     done
 }
 check_dkim_spf() {
-    # Extrai domínio do remetente top, com fallbacks
-    local domain=""
-    for _src in "$TOP_SENDER" "$RELAY_SUSPECT" "$TOP_AUTH_USER"; do
-        [ -z "$_src" ] && continue
-        domain=$(echo "$_src" | grep -oP '@\K[^@\s]+' | head -1)
-        [ -n "$domain" ] && break
-    done
-    [ -z "$domain" ] && domain=$(hostname -d 2>/dev/null || hostname -f | cut -d. -f2-)
+    local domain; domain=$(_detect_domain)
     echo -e "${CYAN}Verificando SPF/DKIM para: ${BOLD}$domain${RESET}"
     command -v host &>/dev/null || { echo -e "  ${DIM}'host' não disponível.${RESET}"; return; }
     SPF=$(host -t TXT "$domain" 2>/dev/null | grep "v=spf")
     DKIM=$(host -t TXT "default._domainkey.$domain" 2>/dev/null | grep "v=DKIM")
     [ -n "$SPF" ]  && echo -e "  ${GREEN}✔ SPF: $SPF${RESET}"  || echo -e "  ${RED}✖ SPF não encontrado${RESET}"
     [ -n "$DKIM" ] && echo -e "  ${GREEN}✔ DKIM encontrado${RESET}" || echo -e "  ${YELLOW}⚠ DKIM não encontrado${RESET}"
+}
+
+# ============================================================
+# VERSÕES ESTRUTURADAS (JSON) — usadas por --action=check-deliverability
+# Não têm saída colorida; retornam fragmentos JSON prontos para compor
+# a resposta de output_action_json(). Reaproveitam _detect_public_ip e
+# _detect_domain acima — mesma lógica de detecção da versão interativa.
+# ============================================================
+check_blacklists_json() {
+    local ip
+    if ! ip=$(_detect_public_ip); then
+        printf '"ip": null, "ip_error": "nao foi possivel determinar o IP publico do servidor"'
+        return 1
+    fi
+    local rev_ip; rev_ip=$(echo "$ip" | awk -F. '{print $4"."$3"."$2"."$1}')
+    local entries="" first=1 bl hit listed
+    for bl in zen.spamhaus.org bl.spamcop.net dnsbl.sorbs.net b.barracudacentral.org; do
+        hit=$(host -t A "${rev_ip}.${bl}" 2>/dev/null | grep -c "127\.")
+        listed="false"; [ "$hit" -gt 0 ] && listed="true"
+        [ "$first" -eq 1 ] || entries="${entries},"
+        entries="${entries}{\"list\":\"${bl}\",\"listed\":${listed}}"
+        first=0
+    done
+    printf '"ip": "%s", "blocklists": [%s]' "$ip" "$entries"
+}
+
+check_deliverability_json() {
+    local domain="${1:-$(_detect_domain)}"
+    local spf_found="false" dkim_found="false" dmarc_found="false"
+    local spf_rec="" dkim_sel="default" dmarc_rec=""
+    if command -v host &>/dev/null; then
+        # `host -t TXT` imprime "<nome> descriptive text \"<conteudo>\"" —
+        # extrai só o conteúdo entre aspas.
+        spf_rec=$(host -t TXT "$domain" 2>/dev/null | grep "v=spf" | head -1 \
+            | sed -E 's/^[^"]*"//; s/"$//')
+        [ -n "$spf_rec" ] && spf_found="true"
+        host -t TXT "default._domainkey.$domain" 2>/dev/null | grep -q "v=DKIM" && dkim_found="true"
+        dmarc_rec=$(host -t TXT "_dmarc.$domain" 2>/dev/null | grep "v=DMARC" | head -1 \
+            | sed -E 's/^[^"]*"//; s/"$//')
+        [ -n "$dmarc_rec" ] && dmarc_found="true"
+    fi
+    spf_rec=$(printf '%s' "$spf_rec" | sed 's/"/\\"/g')
+    dmarc_rec=$(printf '%s' "$dmarc_rec" | sed 's/"/\\"/g')
+    printf '"domain": "%s", "spf": {"found": %s, "record": "%s"}, "dkim": {"found": %s, "selector": "%s"}, "dmarc": {"found": %s, "record": "%s"}' \
+        "$domain" "$spf_found" "$spf_rec" "$dkim_found" "$dkim_sel" "$dmarc_found" "$dmarc_rec"
 }
 find_php_mailers() {
     section "BUSCA DE SCRIPTS PHP MALICIOSOS"
