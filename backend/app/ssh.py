@@ -21,6 +21,7 @@ import json
 import os
 import re
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import paramiko
@@ -192,6 +193,58 @@ def _run_raw(cmd: str, timeout: int = 20,
             raise SSHError(f"Comando não respondeu em {timeout}s no servidor remoto.") from exc
     finally:
         client.close()
+
+
+# ── Deploy do script ──────────────────────────────────────────────────────
+
+# Montado em /app/diag-exim.sh (ver volumes do serviço backend em
+# docker-compose.yml / docker-compose.prod.yml) — fonte única: o mesmo
+# arquivo do repositório, sem cópia separada dentro do backend. Editar
+# diag-exim.sh não exige rebuild da imagem, só reiniciar o container.
+_LOCAL_SCRIPT_PATH = Path(__file__).resolve().parent.parent / "diag-exim.sh"
+
+
+def deploy_script(server_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Envia a versão atual de diag-exim.sh para o servidor remoto via SFTP,
+    no caminho de server_cfg["script_path"], e marca como executável.
+
+    Usado ao cadastrar um servidor — evita o problema de a cópia
+    "implantada" no cliente ficar desatualizada em relação ao repositório
+    (a mesma classe de gap que exigiu sincronizar /root/diag-exim.sh
+    manualmente durante o desenvolvimento desta feature).
+
+    Lança SSHError em caso de falha (conexão, permissão, diretório
+    remoto inexistente). Não faz parte do fluxo crítico de cadastro —
+    o chamador decide se uma falha aqui bloqueia ou não a operação.
+    """
+    if not _LOCAL_SCRIPT_PATH.is_file():
+        raise SSHError(
+            f"diag-exim.sh não encontrado em {_LOCAL_SCRIPT_PATH} dentro do "
+            f"container — confira o volume montado em docker-compose.yml."
+        )
+
+    cfg = server_cfg or _default_cfg()
+    client = _get_client(cfg)
+    try:
+        sftp = client.open_sftp()
+        try:
+            remote_path = cfg["script_path"]
+            try:
+                sftp.put(str(_LOCAL_SCRIPT_PATH), remote_path)
+            except (IOError, OSError) as exc:
+                raise SSHError(
+                    f"Falha ao enviar diag-exim.sh para {remote_path} em "
+                    f"{cfg['host']} — confira se o diretório existe e se o "
+                    f"usuário SSH tem permissão de escrita ali: {exc}"
+                ) from exc
+            sftp.chmod(remote_path, 0o755)
+        finally:
+            sftp.close()
+    finally:
+        client.close()
+
+    return {"deployed": True, "path": cfg["script_path"]}
 
 
 # ── Teste de conexão ───────────────────────────────────────────────────────

@@ -2,7 +2,7 @@
  * ServersPage — CRUD de servidores EXIM.
  * Apenas admins acessam esta página.
  */
-import { AlertTriangle, ArrowLeft, CheckCircle, Edit2, KeyRound, Plus, RefreshCw, Server, Trash2, WifiOff, XCircle, Zap } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, CheckCircle, Edit2, KeyRound, Plus, RefreshCw, Server, Trash2, WifiOff, X, XCircle, Zap } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { createServer, deleteServer, fetchServers, testServerConn, updateServer } from '../api/client'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -176,6 +176,7 @@ export default function ServersPage({ onBack }) {
   const [testing, setTesting]     = useState({})
   const [testResult, setTestResult] = useState({})
   const [error, setError]         = useState(null)
+  const [deployNotice, setDeployNotice] = useState(null)
 
   const load = async () => {
     setLoading(true)
@@ -193,11 +194,17 @@ export default function ServersPage({ onBack }) {
   const handleSave = async (form) => {
     setSaving(true)
     setError(null)
+    setDeployNotice(null)
     try {
       if (editTarget) {
         await updateServer(editTarget.id, form)
       } else {
-        await createServer(form)
+        const created = await createServer(form)
+        setDeployNotice(
+          created.script_deployed
+            ? { ok: true, msg: `diag-exim.sh enviado com sucesso para ${created.script_path}.` }
+            : { ok: false, msg: `Servidor cadastrado, mas não consegui enviar o script automaticamente: ${created.script_deploy_error || 'erro desconhecido'}. Envie manualmente ou tente novamente depois.` }
+        )
       }
       setShowForm(false)
       setEditTarget(null)
@@ -296,6 +303,22 @@ export default function ServersPage({ onBack }) {
         {error && (
           <div style={{ padding: '10px 14px', borderRadius: 10, background: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B', fontSize: 12 }}>
             {error}
+          </div>
+        )}
+
+        {deployNotice && (
+          <div style={{
+            display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10,
+            padding: '10px 14px', borderRadius: 10, fontSize: 12,
+            background: deployNotice.ok ? '#F0FDF4' : '#FFFBEB',
+            border: `1px solid ${deployNotice.ok ? '#BBF7D0' : '#FDE68A'}`,
+            color: deployNotice.ok ? '#166534' : '#92400E',
+          }}>
+            <span>{deployNotice.msg}</span>
+            <button onClick={() => setDeployNotice(null)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', opacity: 0.6, flexShrink: 0, padding: 0 }}>
+              <X size={13} />
+            </button>
           </div>
         )}
 

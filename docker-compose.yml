@@ -45,6 +45,7 @@ services:
     volumes:
       - ./backend:/app               # permite editar uwsgi.ini sem rebuild
       - ~/.ssh:/root/.ssh:ro         # chave SSH do host para acesso ao EXIM
+      - ./diag-exim.sh:/app/diag-exim.sh:ro   # fonte única — enviado por SFTP ao cadastrar servidor
     env_file:
       - ./backend/.env
     environment:

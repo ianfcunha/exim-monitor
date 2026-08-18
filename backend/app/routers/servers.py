@@ -100,6 +100,8 @@ def create_server(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
+    from ..ssh import SSHError, deploy_script
+
     encrypted = encrypt_secret(payload.ssh_secret) if payload.ssh_secret else ""
     server = Server(
         owner_id      = current_user.id,
@@ -116,7 +118,23 @@ def create_server(
     db.add(server)
     db.commit()
     db.refresh(server)
-    return _to_response(server)
+
+    # Envia diag-exim.sh pro servidor recém-cadastrado via SFTP — evita
+    # depender de instalação manual. Não bloqueia o cadastro: o servidor
+    # já foi salvo acima, isto é só um "melhor esforço" cujo resultado
+    # a UI mostra pro admin decidir se precisa agir manualmente.
+    script_deployed = False
+    script_deploy_error = None
+    try:
+        deploy_script(_build_server_cfg(server))
+        script_deployed = True
+    except SSHError as exc:
+        script_deploy_error = str(exc)[:500]
+
+    response = _to_response(server)
+    response["script_deployed"] = script_deployed
+    response["script_deploy_error"] = script_deploy_error
+    return response
 
 
 @router.get("/{server_id}", summary="Detalhe do servidor")
