@@ -5,6 +5,7 @@ import { ArrowLeft, RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { fetchAlertHistory, fetchAlertSettings, saveAlertSettings, testEmail, testTelegram } from '../api/client'
 import { Select as SelectPrimitive, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 
 const SEVERITY_OPTIONS = ['HIGH', 'CRITICAL']
 const MASK = '••••••••'
@@ -69,22 +70,7 @@ function Select({ value, onChange, children }) {
 function Toggle({ checked, onChange, label }) {
   return (
     <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', userSelect: 'none' }}>
-      <div
-        onClick={() => onChange(!checked)}
-        style={{
-          position: 'relative', width: 40, height: 22, borderRadius: 11, flexShrink: 0,
-          background: checked ? '#0EA5E9' : '#E2E8F0',
-          border: `1px solid ${checked ? '#0284C7' : '#CBD5E1'}`,
-          transition: 'background 0.2s, border-color 0.2s',
-        }}
-      >
-        <span style={{
-          position: 'absolute', top: 2, left: checked ? 19 : 2,
-          width: 16, height: 16, borderRadius: '50%',
-          background: 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
-          transition: 'left 0.2s',
-        }} />
-      </div>
+      <Switch checked={!!checked} onCheckedChange={onChange} />
       <span style={{ fontSize: 13, color: '#64748B' }}>{label}</span>
     </label>
   )
