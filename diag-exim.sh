@@ -1286,39 +1286,27 @@ execute_action() {
                 exit 1
             fi
             local _result_msgs=""
-            # T3-1: Bloquear via iptables diretamente
-            if $SUDO iptables -C INPUT -s "$param" -j DROP 2>/dev/null; then
+            # T3-1: Bloquear via iptables imediatamente — só a ação via
+            # API faz isso; o menu interativo confia no restart do
+            # firewall.service dentro de _block_ip_persist pra aplicar.
+            # >/dev/null (não só 2>/dev/null): algumas builds de iptables
+            # imprimem a regra encontrada em stdout mesmo em -C (check),
+            # o que contaminaria o JSON de saída com uma linha extra
+            if $SUDO iptables -C INPUT -s "$param" -j DROP >/dev/null 2>&1; then
                 _result_msgs="iptables: já bloqueado"
             else
-                if $SUDO iptables -I INPUT -s "$param" -j DROP 2>/dev/null; then
+                if $SUDO iptables -I INPUT -s "$param" -j DROP >/dev/null 2>&1; then
                     _result_msgs="iptables: bloqueado"
                 else
                     _result_msgs="iptables: sem permissão"
                 fi
             fi
-            # T3-1: Persistir em /etc/firewall.d/03_custom (cria arquivo se não existir)
-            local fw_file="/etc/firewall.d/03_custom"
-            local fw_dir="/etc/firewall.d"
-            if $SUDO mkdir -p "$fw_dir" 2>/dev/null || [ -d "$fw_dir" ]; then
-                if grep -qF "$param" "$fw_file" 2>/dev/null; then
-                    _result_msgs="$_result_msgs; firewall.d: já presente"
-                else
-                    if [ ! -f "$fw_file" ]; then
-                        printf '#!/bin/sh\n# Regras customizadas — gerado por diag-exim.sh\n' \
-                            | $SUDO tee "$fw_file" >/dev/null 2>&1
-                        $SUDO chmod 640 "$fw_file" 2>/dev/null
-                    fi
-                    printf '\n# Bloqueado via API em %s\n$IPTABLES -I INPUT -s %s -j DROP\n' \
-                        "$DATE" "$param" | $SUDO tee -a "$fw_file" >/dev/null 2>&1
-                    $SUDO systemctl restart firewall.service 2>/dev/null \
-                        && _result_msgs="$_result_msgs; firewall.d: adicionado e reiniciado" \
-                        || _result_msgs="$_result_msgs; firewall.d: adicionado (reinicie firewall.service)"
-                fi
-            else
-                _result_msgs="$_result_msgs; firewall.d: falha ao criar $fw_dir"
-            fi
+            # Persistir em /etc/firewall.d/03_custom — lógica
+            # compartilhada com o menu interativo (block_ip_firewall_d)
+            local _persist_msg
+            _persist_msg=$(_block_ip_persist "$param" "# Bloqueado via API em $DATE")
             output_action_json "true" "$cmd" \
-                "IP $param processado — $_result_msgs"
+                "IP $param processado — ${_result_msgs}; ${_persist_msg}"
             ;;
 
         block-sender)
@@ -1893,23 +1881,63 @@ block_ip_iptables() {
     fi
 }
 
-# Persiste regra de bloqueio em /etc/firewall.d/03_custom e reinicia
-# o firewall.service para aplicar. Solicita número do ticket para
-# comentário da regra. Cria o arquivo se não existir.
-block_ip_firewall_d() {
-    local ip="$1"
+# ============================================================
+# BLOQUEIO DE IP — PERSISTÊNCIA COMPARTILHADA
+# Escreve a regra em /etc/firewall.d/03_custom, checa duplicata e
+# reinicia firewall.service — usada tanto pela ação via API
+# (execute_action → block-ip, sem prompt, bloqueia via iptables
+# imediatamente ANTES de chamar esta função) quanto pelo menu
+# interativo (block_ip_firewall_d, pede ticket, confia só no restart
+# do serviço pra aplicar). Uma correção futura aqui (ex.: adaptação
+# pra CSF) vale pros dois chamadores de uma vez.
+#
+# $1 = ip, $2 = linha de comentário pra regra (ticket ou timestamp).
+# Imprime uma mensagem de status em stdout. Retorno: 0 = regra
+# adicionada (com ou sem restart bem-sucedido), 1 = duplicata
+# (nenhuma alteração), 2 = falha ao preparar o diretório/arquivo.
+# ============================================================
+_block_ip_persist() {
+    local ip="$1" comment_line="$2"
     local fw_file="/etc/firewall.d/03_custom"
-    local fw_dir
-    fw_dir="$(dirname "$fw_file")"
+    local fw_dir="/etc/firewall.d"
 
-    # ── Verificação do diretório base ────────────────────────────────
-    if [ ! -d "$fw_dir" ]; then
-        echo -e "  ${RED}✖ Diretório ${fw_dir} não encontrado.${RESET}"
-        echo -e "  ${DIM}Este servidor pode não usar firewall.d — verifique a configuração.${RESET}"
+    if [ ! -d "$fw_dir" ] && ! $SUDO mkdir -p "$fw_dir" 2>/dev/null; then
+        printf 'firewall.d: %s não encontrado e não foi possível criar' "$fw_dir"
+        return 2
+    fi
+
+    if [ -f "$fw_file" ] && grep -qF "$ip" "$fw_file" 2>/dev/null; then
+        printf 'firewall.d: %s já está presente em %s' "$ip" "$fw_file"
         return 1
     fi
 
-    # ── Checagem de duplicata (antes de pedir ticket) ────────────────
+    if [ ! -f "$fw_file" ]; then
+        printf '#!/bin/sh\n# Regras customizadas — gerado por diag-exim.sh\n' \
+            | $SUDO tee "$fw_file" >/dev/null 2>&1
+        $SUDO chmod 640 "$fw_file" 2>/dev/null
+    fi
+
+    printf '\n%s\n$IPTABLES -I INPUT -s %s -j DROP\n' "$comment_line" "$ip" \
+        | $SUDO tee -a "$fw_file" >/dev/null 2>&1
+
+    if $SUDO systemctl restart firewall.service 2>/dev/null; then
+        printf 'firewall.d: regra adicionada em %s e firewall.service reiniciado' "$fw_file"
+    else
+        printf 'firewall.d: regra adicionada em %s (falha ao reiniciar firewall.service)' "$fw_file"
+    fi
+    return 0
+}
+
+# Menu interativo — pede número do ticket antes de gravar (diferença de
+# UX proposital vs a ação via API, que não tem operador humano do outro
+# lado). Mantém a checagem de duplicata "prévia" aqui (com preview das
+# linhas já existentes) só pra decidir se vale incomodar o operador com
+# o prompt de ticket — a checagem "de verdade" é a de dentro de
+# _block_ip_persist, que roda de qualquer forma.
+block_ip_firewall_d() {
+    local ip="$1"
+    local fw_file="/etc/firewall.d/03_custom"
+
     if [ -f "$fw_file" ] && grep -qF "$ip" "$fw_file" 2>/dev/null; then
         echo -e "  ${YELLOW}⚠ ${ip} já está presente em ${fw_file}:${RESET}"
         grep -n "$ip" "$fw_file" | while read -r line; do
@@ -1919,34 +1947,18 @@ block_ip_firewall_d() {
         return 0
     fi
 
-    # ── Solicita número do ticket ────────────────────────────────────
     echo
     echo -e "  ${BOLD}${WHITE}Qual o número do ticket para esta regra de bloqueio?${RESET}"
     read -rp "  Ticket: " ticket_num
     [ -z "$ticket_num" ] && ticket_num="s/n"
 
-    # ── Cria o arquivo se não existir ────────────────────────────────
-    if [ ! -f "$fw_file" ]; then
-        touch "$fw_file" && chmod 640 "$fw_file"
-        echo -e "  ${DIM}ℹ  Arquivo ${fw_file} criado.${RESET}"
-    fi
-
-    # ── Escreve a regra com comentário de ticket ─────────────────────
-    printf '\n#Ticket %s\n$IPTABLES -I INPUT -s %s -j DROP\n' \
-        "$ticket_num" "$ip" >> "$fw_file"
-
-    echo -e "  ${GREEN}✔ Regra adicionada em ${fw_file}:${RESET}"
-    echo -e "  ${DIM}  #Ticket ${ticket_num}${RESET}"
-    echo -e "  ${DIM}  \$IPTABLES -I INPUT -s ${ip} -j DROP${RESET}"
-
-    # ── Reinicia o firewall.service para aplicar ─────────────────────
-    echo
-    echo -e "  ${YELLOW}▸ Reiniciando firewall.service...${RESET}"
-    if systemctl restart firewall.service 2>/dev/null; then
-        echo -e "  ${GREEN}✔ firewall.service reiniciado — regra ativa.${RESET}"
+    local _msg _status
+    _msg=$(_block_ip_persist "$ip" "#Ticket $ticket_num"); _status=$?
+    if [ "$_status" -eq 0 ]; then
+        echo -e "  ${GREEN}✔ ${_msg}${RESET}"
     else
-        echo -e "  ${RED}✖ Falha ao reiniciar firewall.service.${RESET}"
-        echo -e "  ${DIM}Execute manualmente: systemctl restart firewall.service${RESET}"
+        echo -e "  ${RED}✖ ${_msg}${RESET}"
+        echo -e "  ${DIM}Este servidor pode não usar firewall.d — verifique a configuração.${RESET}"
     fi
 }
 retry_queue() {
