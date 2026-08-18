@@ -5,6 +5,7 @@
 import { AlertTriangle, ArrowLeft, CheckCircle, Edit2, KeyRound, Plus, RefreshCw, Server, Trash2, WifiOff, XCircle, Zap } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { createServer, deleteServer, fetchServers, testServerConn, updateServer } from '../api/client'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useServer } from '../contexts/ServerContext'
 
 const SSH_STATUS = {
@@ -99,14 +100,15 @@ function ServerForm({ initial, onSave, onCancel, saving }) {
       </div>
 
       <Field label="Tipo de autenticação">
-        <select
-          value={form.ssh_auth_type}
-          onChange={e => set('ssh_auth_type')(e.target.value)}
-          style={{ ...inputStyle, cursor: 'pointer' }}
-        >
-          <option value="password">Senha SSH</option>
-          <option value="key">Chave privada (conteúdo)</option>
-        </select>
+        <Select value={form.ssh_auth_type} onValueChange={set('ssh_auth_type')}>
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="password">Senha SSH</SelectItem>
+            <SelectItem value="key">Chave privada (conteúdo)</SelectItem>
+          </SelectContent>
+        </Select>
       </Field>
 
       <Field

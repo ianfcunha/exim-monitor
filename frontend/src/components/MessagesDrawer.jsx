@@ -5,6 +5,7 @@
  */
 import { AlertCircle, Check, Clock, Copy, Inbox, Mail, MailOpen, RefreshCw, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { fetchLogMessages, fetchQueueMessages } from '../api/client'
 
@@ -195,10 +196,16 @@ export default function MessagesDrawer({ cardType, onClose }) {
             )}
           </div>
           {cfg.endpoint === 'log' && (
-            <select value={limit} onChange={e => setLimit(Number(e.target.value))}
-              style={{ fontSize: 11, borderRadius: 7, border: '1px solid #E2E8F0', padding: '5px 8px', color: '#64748B', background: '#F8FAFC', cursor: 'pointer', outline: 'none' }}>
-              {LIMIT_OPTIONS.map(n => <option key={n} value={n}>Últimas {n}</option>)}
-            </select>
+            <Select value={String(limit)} onValueChange={v => setLimit(Number(v))}>
+              <SelectTrigger className="h-[30px] py-0 text-[11px] text-muted">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {LIMIT_OPTIONS.map(n => (
+                  <SelectItem key={n} value={String(n)}>Últimas {n}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           )}
           <button onClick={() => load(limit)} disabled={loading} title="Atualizar"
             style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: loading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: loading ? 0.5 : 1, flexShrink: 0 }}>

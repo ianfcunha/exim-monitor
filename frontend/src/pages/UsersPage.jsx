@@ -5,6 +5,7 @@
 import { ArrowLeft, Clock, Copy, Link, Mail, RefreshCw, RotateCcw, Shield, Trash2, UserPlus, Users, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { deleteUser, fetchUsers, getInviteLink, inviteUser, resendInvite, updateUserRole } from '../api/client'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useAuth } from '../contexts/AuthContext'
 
 const ROLE_LABEL = { admin: 'Admin', viewer: 'Viewer' }
@@ -195,11 +196,15 @@ export default function UsersPage({ onBack }) {
                   <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#64748B', marginBottom: 5 }}>
                     Perfil
                   </label>
-                  <select value={role} onChange={e => setRole(e.target.value)}
-                    style={{ ...inputStyle, cursor: 'pointer' }}>
-                    <option value="viewer">Viewer</option>
-                    <option value="admin">Admin</option>
-                  </select>
+                  <Select value={role} onValueChange={setRole}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="viewer">Viewer</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <button type="submit" disabled={sending} style={{
                   padding: '9px 18px', borderRadius: 8, fontSize: 12, fontWeight: 700,
@@ -297,23 +302,29 @@ export default function UsersPage({ onBack }) {
 
                     {/* Role */}
                     {(!u.invite_pending && u.id !== 0 && u.id !== currentUserId) ? (
-                      <select
+                      <Select
                         value={u.role}
                         disabled={changingRole[u.id]}
-                        onChange={e => handleRoleChange(u.id, u.username, e.target.value)}
-                        title="Alterar papel"
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 3,
-                          fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 999,
-                          background: ROLE_BG[u.role], color: ROLE_COLOR[u.role],
-                          border: `1px solid ${ROLE_COLOR[u.role]}25`,
-                          cursor: changingRole[u.id] ? 'wait' : 'pointer',
-                          opacity: changingRole[u.id] ? 0.6 : 1,
-                        }}
+                        onValueChange={v => handleRoleChange(u.id, u.username, v)}
                       >
-                        <option value="admin">Admin</option>
-                        <option value="viewer">Viewer</option>
-                      </select>
+                        <SelectTrigger
+                          title="Alterar papel"
+                          className="h-auto gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-bold [&_svg]:size-2.5"
+                          style={{
+                            background: ROLE_BG[u.role], color: ROLE_COLOR[u.role],
+                            borderColor: `${ROLE_COLOR[u.role]}25`,
+                            cursor: changingRole[u.id] ? 'wait' : 'pointer',
+                            opacity: changingRole[u.id] ? 0.6 : 1,
+                          }}
+                        >
+                          <Shield size={9} />
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent align="end">
+                          <SelectItem value="admin">Admin</SelectItem>
+                          <SelectItem value="viewer">Viewer</SelectItem>
+                        </SelectContent>
+                      </Select>
                     ) : (
                       <span style={{
                         display: 'inline-flex', alignItems: 'center', gap: 3,

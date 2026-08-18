@@ -4,6 +4,7 @@
 import { ArrowLeft, RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { fetchAlertHistory, fetchAlertSettings, saveAlertSettings, testEmail, testTelegram } from '../api/client'
+import { Select as SelectPrimitive, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 const SEVERITY_OPTIONS = ['HIGH', 'CRITICAL']
 const MASK = '••••••••'
@@ -56,9 +57,12 @@ function Input({ value, onChange, type = 'text', placeholder = '' }) {
 
 function Select({ value, onChange, children }) {
   return (
-    <select value={value ?? ''} onChange={e => onChange(e.target.value)} style={{ ...inputStyle, cursor: 'pointer', background: '#F8FAFC' }}>
-      {children}
-    </select>
+    <SelectPrimitive value={value ?? ''} onValueChange={onChange}>
+      <SelectTrigger className="w-full">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>{children}</SelectContent>
+    </SelectPrimitive>
   )
 }
 
@@ -394,7 +398,7 @@ export default function Settings({ onBack }) {
         <Section title="Condições de disparo">
           <Field label="Severidade mínima para alerta" hint="HIGH = alto risco e crítico. CRITICAL = apenas crítico.">
             <Select value={cfg.severity_threshold} onChange={set('severity_threshold')}>
-              {SEVERITY_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+              {SEVERITY_OPTIONS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
             </Select>
           </Field>
           <Field label="Alerta se fila ultrapassar (0 = desabilitado)" hint="Dispara mesmo que a severidade ainda não tenha mudado.">

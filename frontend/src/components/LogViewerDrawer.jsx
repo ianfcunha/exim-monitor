@@ -5,6 +5,7 @@
  */
 import { Check, Copy, RefreshCw, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { fetchLogTail } from '../api/client'
 
@@ -196,10 +197,16 @@ export default function LogViewerDrawer({ onClose }) {
               style={{ width: 30, height: 30, borderRadius: 7, border: '1px solid #E2E8F0', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#64748B', opacity: refreshing ? 0.5 : 1 }}>
               <RefreshCw size={13} style={{ animation: refreshing ? 'spin 1s linear infinite' : undefined }} />
             </button>
-            <select value={limit} onChange={e => setLimit(Number(e.target.value))}
-              style={{ padding: '4px 8px', borderRadius: 7, fontSize: 11, border: '1px solid #E2E8F0', background: '#fff', color: '#0F172A', cursor: 'pointer' }}>
-              {LIMIT_OPTIONS.map(l => <option key={l} value={l}>{l} linhas</option>)}
-            </select>
+            <Select value={String(limit)} onValueChange={v => setLimit(Number(v))}>
+              <SelectTrigger className="h-[26px] py-0 text-[11px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {LIMIT_OPTIONS.map(l => (
+                  <SelectItem key={l} value={String(l)}>{l} linhas</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: 7, border: '1px solid #E2E8F0', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#64748B' }}>
               <X size={14} />
             </button>
