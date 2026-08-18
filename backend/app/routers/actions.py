@@ -12,6 +12,9 @@ Ações disponíveis:
   block-ip       →  bloqueia IP no firewall      (param: IP)
   block-sender   →  bloqueia sender no EXIM      (param: endereço)
   retry-queue    →  força reprocessamento (exim -qff)
+  check-deliverability → blocklists (DNSBL) + SPF/DKIM/DMARC, somente
+                    leitura (param: domínio, opcional — sem ele o
+                    script tenta detectar a partir do remetente ativo)
 
 Body JSON: { "param": "valor" }  (opcional conforme a ação)
 Viewer não pode executar ações.
@@ -39,6 +42,7 @@ ALLOWED_ACTIONS = frozenset({
     "block-ip",
     "block-sender",
     "retry-queue",
+    "check-deliverability",
 })
 
 ACTIONS_REQUIRING_PARAM = frozenset({
