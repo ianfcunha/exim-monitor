@@ -2,7 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ─── Design tokens AVILI — tema light profissional ─────────────────────── */
+/* ─── Design tokens AVILI ─────────────────────────────────────────────────
+   :root  = tema claro (padrão)
+   .dark  = tema escuro (opt-in — toggle chega na Fase F; os tokens já
+            existem desde já para os primitivos migrados responderem
+            automaticamente quando a classe .dark for aplicada)
+   Consumidos via tailwind.config.js (não usar hex solto em componente novo).
+──────────────────────────────────────────────────────────────────────────── */
 :root {
   --sky:      #0EA5E9;
   --sky-dark: #0284C7;
@@ -14,6 +20,32 @@
   --border:   #E2E8F0;
   --surface:  #F8FAFC;
   --card:     #FFFFFF;
+
+  --radius:        0.6rem;
+  --accent-bg:     #F0F9FF;
+  --accent-fg:     #0369A1;
+  --danger:        #DC2626;
+  --danger-bg:     #FEF2F2;
+  --danger-border: #FECACA;
+}
+
+.dark {
+  --sky:      #38BDF8;
+  --sky-dark: #0EA5E9;
+  --cyan:     #67E8F9;
+  --night:    #E7ECF3;
+  --text:     #E7ECF3;
+  --muted:    #94A3B8;
+  --dim:      #64748B;
+  --border:   #1E293B;
+  --surface:  #0B1220;
+  --card:     #101A2C;
+
+  --accent-bg:     #0C2536;
+  --accent-fg:     #7DD3FC;
+  --danger:        #F87171;
+  --danger-bg:     #2A1315;
+  --danger-border: #7F1D1D;
 }
 
 @layer base {
