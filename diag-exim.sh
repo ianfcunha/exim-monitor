@@ -767,6 +767,25 @@ analyze_php_mailers_json() {
     fi
     [ -d /var/www ] && roots+=("/var/www")
 
+    # cPanel/WHM: cada conta vive em /home/<usuario>/, com o site em
+    # public_html (às vezes "www" é symlink pra public_html). Usa o nome
+    # da conta como identificador — não tenta mapear pra domínio, já que
+    # uma conta cPanel pode ter vários domínios addon. Máx 20 contas.
+    if [ -d /home ]; then
+        while IFS= read -r acct; do
+            local pub="${acct}/public_html" www="${acct}/www"
+            [ -d "$pub" ] && roots+=("$pub")
+            if [ -e "$www" ]; then
+                # só adiciona "www" se não apontar pro mesmo lugar que
+                # public_html (symlink comum) — evita escanear tudo em dobro
+                if [ ! -d "$pub" ] || \
+                   [ "$(readlink -f "$www" 2>/dev/null)" != "$(readlink -f "$pub" 2>/dev/null)" ]; then
+                    roots+=("$www")
+                fi
+            fi
+        done < <(find /home -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | head -20)
+    fi
+
     for root in "${roots[@]}"; do
         [ -d "$root" ] || continue
 
@@ -1942,21 +1961,31 @@ find_php_mailers() {
         done < <(find "$SRV_BASE" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
     fi
 
-    # Fallbacks legados
-    for legacy in /var/www /home; do
-        [ -d "$legacy" ] && DOMAINS+=("$legacy")
-    done
+    # Fallback legado
+    [ -d /var/www ] && DOMAINS+=("/var/www")
+
+    # cPanel/WHM: cada conta em /home/<usuario>/ vira uma entrada, usando
+    # o nome da conta (basename) como identificador — nada de varrer
+    # /home inteiro (pegaria caixas de e-mail e backups junto).
+    if [ -d /home ]; then
+        while IFS= read -r acct; do
+            DOMAINS+=("$acct")
+        done < <(find /home -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+    fi
 
     if [ ${#DOMAINS[@]} -eq 0 ]; then
-        echo -e "  ${YELLOW}Nenhum diretório encontrado em $SRV_BASE.${RESET}"
+        echo -e "  ${YELLOW}Nenhum diretório encontrado em $SRV_BASE, /var/www ou /home.${RESET}"
         return
     fi
 
     TOTAL_MAIL=0; TOTAL_SUSPECT=0
 
     for domain_dir in "${DOMAINS[@]}"; do
-        # Dentro de cada domínio, o webroot é preferencialmente www/
-        if [ -d "${domain_dir}/www" ]; then
+        # Dentro de cada domínio/conta, o webroot é preferencialmente
+        # public_html (padrão cPanel/WHM) e, senão, www/ (padrão /srv)
+        if [ -d "${domain_dir}/public_html" ]; then
+            webroot="${domain_dir}/public_html"
+        elif [ -d "${domain_dir}/www" ]; then
             webroot="${domain_dir}/www"
         else
             webroot="$domain_dir"
