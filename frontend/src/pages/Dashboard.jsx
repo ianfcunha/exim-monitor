@@ -15,6 +15,7 @@ import {
   LogOut, MailOpen, RefreshCw, Server, Settings, Users, XCircle,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { refreshStatus } from '../api/client'
 import { Button } from '@/components/ui/button'
 import {
@@ -105,7 +106,8 @@ function StatusPill({ color, label, children }) {
 }
 
 // ── Dropdown de configurações ────────────────────────────────────────────────
-function SettingsMenu({ onSettings, onServers, onUsers, onActionHistory, onLogout, isAdmin }) {
+function SettingsMenu({ onLogout, isAdmin }) {
+  const navigate = useNavigate()
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -117,22 +119,22 @@ function SettingsMenu({ onSettings, onServers, onUsers, onActionHistory, onLogou
       </DropdownMenuTrigger>
       <DropdownMenuContent>
         {isAdmin && (
-          <DropdownMenuItem onSelect={onServers}>
+          <DropdownMenuItem onSelect={() => navigate('/servers')}>
             <Server size={13} /> Servidores
           </DropdownMenuItem>
         )}
         {isAdmin && (
-          <DropdownMenuItem onSelect={onSettings}>
+          <DropdownMenuItem onSelect={() => navigate('/settings')}>
             <Settings size={13} /> Alertas
           </DropdownMenuItem>
         )}
         {isAdmin && (
-          <DropdownMenuItem onSelect={onUsers}>
+          <DropdownMenuItem onSelect={() => navigate('/users')}>
             <Users size={13} /> Usuários
           </DropdownMenuItem>
         )}
         {isAdmin && (
-          <DropdownMenuItem onSelect={onActionHistory}>
+          <DropdownMenuItem onSelect={() => navigate('/history')}>
             <History size={13} /> Histórico de ações
           </DropdownMenuItem>
         )}
@@ -155,7 +157,7 @@ const METRIC_TOOLTIPS = {
 }
 
 // ── Componente principal ─────────────────────────────────────────────────────
-export default function Dashboard({ onLogout, onSettings, onServers, onUsers, onActionHistory }) {
+export default function Dashboard({ onLogout }) {
   const { isAdmin, username } = useAuth()
   const { activeServer }      = useServer()
   const quick                 = useQuickStatus()
@@ -416,14 +418,7 @@ export default function Dashboard({ onLogout, onSettings, onServers, onUsers, on
               <span className="hidden sm:inline">Logs</span>
             </HBtn>
 
-            <SettingsMenu
-              onSettings={onSettings}
-              onServers={onServers}
-              onUsers={onUsers}
-              onActionHistory={onActionHistory}
-              onLogout={onLogout}
-              isAdmin={isAdmin}
-            />
+            <SettingsMenu onLogout={onLogout} isAdmin={isAdmin} />
           </div>
         </div>
       </header>

@@ -6,6 +6,7 @@
  */
 import { ArrowLeft, CheckCircle, ChevronDown, ChevronRight, History, XCircle } from 'lucide-react'
 import { Fragment, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { fetchActionHistory } from '../api/client'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -30,7 +31,9 @@ function splitMessage(message) {
   return { text: message.slice(0, idx), snapshot: message.slice(idx + SNAPSHOT_MARKER.length) }
 }
 
-export default function ActionHistoryPage({ onBack }) {
+export default function ActionHistoryPage() {
+  const navigate = useNavigate()
+  const onBack = () => navigate('/dashboard')
   const { servers } = useServer()
   const [rows, setRows]         = useState([])
   const [loading, setLoading]   = useState(true)

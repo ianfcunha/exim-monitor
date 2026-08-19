@@ -4,6 +4,7 @@
  */
 import { ArrowLeft, Clock, Copy, Link, Mail, RefreshCw, RotateCcw, Shield, Trash2, UserPlus, Users, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { deleteUser, fetchUsers, getInviteLink, inviteUser, resendInvite, updateUserRole } from '../api/client'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -20,7 +21,9 @@ const inputStyle = {
   transition: 'border-color 0.15s',
 }
 
-export default function UsersPage({ onBack }) {
+export default function UsersPage() {
+  const navigate = useNavigate()
+  const onBack = () => navigate('/dashboard')
   const { userId: currentUserId } = useAuth()
   const [users, setUsers]         = useState([])
   const [loading, setLoading]     = useState(true)

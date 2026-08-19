@@ -4,6 +4,7 @@
  */
 import { AlertTriangle, ArrowLeft, CheckCircle, Edit2, KeyRound, Plus, RefreshCw, Server, Trash2, WifiOff, X, XCircle, Zap } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { createServer, deleteServer, fetchServers, testServerConn, updateServer } from '../api/client'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -166,7 +167,9 @@ function ServerForm({ initial, onSave, onCancel, saving }) {
 }
 
 /* ── Principal ── */
-export default function ServersPage({ onBack }) {
+export default function ServersPage() {
+  const navigate = useNavigate()
+  const onBack = () => navigate('/dashboard')
   const { refresh: refreshCtx } = useServer()
   const [servers, setServers]     = useState([])
   const [loading, setLoading]     = useState(true)

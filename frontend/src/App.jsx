@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { AuthProvider } from './contexts/AuthContext'
 import { ServerProvider } from './contexts/ServerContext'
@@ -17,15 +18,7 @@ function getInviteToken() {
 }
 
 export default function App() {
-  const [token, setToken]   = useState(() => localStorage.getItem('exim_token'))
-  const [page, setPage]     = useState('dashboard')
-
-  // Navegação via evento customizado (ServerSelector usa isso)
-  useEffect(() => {
-    const handler = (e) => setPage(e.detail)
-    window.addEventListener('navigate', handler)
-    return () => window.removeEventListener('navigate', handler)
-  }, [])
+  const [token, setToken] = useState(() => localStorage.getItem('exim_token'))
 
   useEffect(() => {
     if (token) localStorage.setItem('exim_token', token)
@@ -38,36 +31,25 @@ export default function App() {
     return <InviteAccept token={inviteToken} onDone={() => { window.location.href = '/' }} />
   }
 
-  if (!token) return <Login onLogin={(t) => { setToken(t); setPage('dashboard') }} />
+  if (!token) return <Login onLogin={setToken} />
 
-  const logout = () => { setToken(null); setPage('dashboard') }
+  const logout = () => setToken(null)
 
   return (
     <TooltipProvider delayDuration={300}>
     <ToastProvider>
       <AuthProvider>
       <ServerProvider>
-        {page === 'settings' && (
-          <Settings onBack={() => setPage('dashboard')} />
-        )}
-        {page === 'servers' && (
-          <ServersPage onBack={() => setPage('dashboard')} />
-        )}
-        {page === 'users' && (
-          <UsersPage onBack={() => setPage('dashboard')} />
-        )}
-        {page === 'action-history' && (
-          <ActionHistoryPage onBack={() => setPage('dashboard')} />
-        )}
-        {page === 'dashboard' && (
-          <Dashboard
-            onLogout={logout}
-            onSettings={() => setPage('settings')}
-            onServers={() => setPage('servers')}
-            onUsers={() => setPage('users')}
-            onActionHistory={() => setPage('action-history')}
-          />
-        )}
+        <BrowserRouter>
+          <Routes>
+            <Route path="/dashboard" element={<Dashboard onLogout={logout} />} />
+            <Route path="/servers"   element={<ServersPage />} />
+            <Route path="/users"     element={<UsersPage />} />
+            <Route path="/settings"  element={<Settings />} />
+            <Route path="/history"   element={<ActionHistoryPage />} />
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          </Routes>
+        </BrowserRouter>
       </ServerProvider>
       </AuthProvider>
     </ToastProvider>

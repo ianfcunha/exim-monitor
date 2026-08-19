@@ -3,6 +3,7 @@
  * Aparece apenas quando o usuário tem mais de um servidor.
  */
 import { ChevronDown, Server } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
@@ -17,6 +18,7 @@ const STATUS_DOT = {
 }
 
 export default function ServerSelector() {
+  const navigate = useNavigate()
   const { servers, activeServer, setActiveServer } = useServer()
 
   if (!activeServer) return null
@@ -57,9 +59,7 @@ export default function ServerSelector() {
         ))}
 
         <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onSelect={() => window.dispatchEvent(new CustomEvent('navigate', { detail: 'servers' }))}
-        >
+        <DropdownMenuItem onSelect={() => navigate('/servers')}>
           + Gerenciar servidores
         </DropdownMenuItem>
       </DropdownMenuContent>

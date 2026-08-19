@@ -3,6 +3,7 @@
  */
 import { ArrowLeft, RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { fetchAlertHistory, fetchAlertSettings, saveAlertSettings, testEmail, testTelegram, testWeeklyReport, testWebhook } from '../api/client'
 import { Select as SelectPrimitive, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
@@ -227,7 +228,9 @@ function AlertHistorySection() {
 }
 
 /* ── Principal ── */
-export default function Settings({ onBack }) {
+export default function Settings() {
+  const navigate = useNavigate()
+  const onBack = () => navigate('/dashboard')
   const { activeServer } = useServer()
   const serverId = activeServer?.id ?? null
 
