@@ -151,7 +151,10 @@ export default function DeliverabilityCard() {
             flex: 1, minWidth: 0, boxSizing: 'border-box', borderRadius: 7,
             border: '1px solid #E2E8F0', padding: '6px 10px', fontSize: 12,
             color: '#0F172A', outline: 'none', background: '#F8FAFC',
+            transition: 'border-color 0.15s, box-shadow 0.15s',
           }}
+          onFocus={e => { e.target.style.borderColor = '#0EA5E9'; e.target.style.boxShadow = '0 0 0 3px rgba(14,165,233,0.15)' }}
+          onBlur={e => { e.target.style.borderColor = '#E2E8F0'; e.target.style.boxShadow = 'none' }}
         />
         <Button variant="outline" size="sm" onClick={check} disabled={loading}>
           <RefreshCw size={12} style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} />

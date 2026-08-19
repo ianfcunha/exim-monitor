@@ -4,10 +4,24 @@
 
 /* ─── Design tokens AVILI ─────────────────────────────────────────────────
    :root  = tema claro (padrão)
-   .dark  = tema escuro (opt-in — toggle chega na Fase F; os tokens já
-            existem desde já para os primitivos migrados responderem
-            automaticamente quando a classe .dark for aplicada)
+   .dark  = tema escuro (toggle: useDarkMode(), Fase F)
    Consumidos via tailwind.config.js (não usar hex solto em componente novo).
+
+   --dim contra --surface/--card, WCAG AA (auditoria Fase C):
+     claro:  #94A3B8 original dava 2.45:1 (falha até AA-large, que pede
+             3:1) — trocado por #75839A, 3.67-3.84:1 (passa AA-large,
+             ~18px+/14px+bold; texto pequeno/corpo com --dim continua
+             abaixo do 4.5:1 de AA-normal — nesses casos use --muted).
+             --muted já está no piso do AA-normal (4.55-4.76:1); não dá
+             pra manter --dim visualmente mais sutil E cumprir AA-normal
+             pros dois ao mesmo tempo sem colapsar a hierarquia dos dois
+             tons — por isso o alvo realista pro --dim é AA-large.
+     escuro: #64748B original dava 3.93/3.66:1 (passa AA-large, falha
+             AA-normal por pouco) — trocado por #7787A0, 5.13/4.77:1,
+             que fecha AA-normal nos dois fundos mantendo a hierarquia
+             abaixo de --muted (7.30/6.79:1).
+   --muted contra --surface/--card: já passava AA-normal nos dois temas,
+   não precisou de ajuste.
 ──────────────────────────────────────────────────────────────────────────── */
 :root {
   --sky:      #0EA5E9;
@@ -16,7 +30,7 @@
   --night:    #0F172A;
   --text:     #0F172A;
   --muted:    #64748B;
-  --dim:      #94A3B8;
+  --dim:      #75839A;
   --border:   #E2E8F0;
   --surface:  #F8FAFC;
   --card:     #FFFFFF;
@@ -36,7 +50,7 @@
   --night:    #E7ECF3;
   --text:     #E7ECF3;
   --muted:    #94A3B8;
-  --dim:      #64748B;
+  --dim:      #7787A0;
   --border:   #1E293B;
   --surface:  #0B1220;
   --card:     #101A2C;

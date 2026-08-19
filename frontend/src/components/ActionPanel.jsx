@@ -6,7 +6,7 @@
  *   botão → input inline → confirmação → executa
  */
 import { AlertTriangle, Ban, CornerDownLeft, RotateCcw, Search, Shield, Snowflake, Trash2, X } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { runAction } from '../api/client'
 import { Button } from '@/components/ui/button'
 import { useToast } from '../contexts/ToastContext'
@@ -47,6 +47,7 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
   const [paramError, setParamError] = useState('')
   const [snapshot, setSnapshot]     = useState(true)
   const inputRef                    = useRef(null)
+  const cancelBtnRef                = useRef(null)
 
   const hasRecommended = recommendedActions.length > 0
 
@@ -55,8 +56,26 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
     setParamError('')
     setSnapshot(true)
     setConfirmId(action.id)
-    if (action.param) setTimeout(() => inputRef.current?.focus(), 50)
+    // Move o foco pro dentro do painel de confirmação assim que ele
+    // aparece — sem isso, numa ação sem parâmetro o foco fica parado no
+    // botão que acabou de ser clicado (que fica ACIMA do painel na
+    // ordem do DOM), então Tab pularia o Confirmar/Cancelar e iria pro
+    // próximo botão de ação. Foco vai pro Cancelar por padrão (não pro
+    // Confirmar) — é uma ação destrutiva, não queremos que um Enter
+    // repetido dispare a execução sem o usuário decidir conscientemente.
+    setTimeout(() => (action.param ? inputRef : cancelBtnRef).current?.focus(), 50)
   }
+
+  // Esc cancela a confirmação de onde quer que o foco esteja dentro dela
+  // (não só quando o foco está estritamente no painel) — o painel é uma
+  // div inline, não um <dialog>/Radix Dialog com Esc nativo.
+  useEffect(() => {
+    if (!confirmId) return
+    const onKeyDown = (e) => { if (e.key === 'Escape') cancel() }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [confirmId])
 
   const validateParam = (action, value) => {
     if (!action.param) return true
@@ -181,6 +200,17 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
                   padding: '6px 10px', fontSize: 12, color: '#1E293B',
                   background: '#FFF', outline: 'none',
                   boxShadow: paramError ? '0 0 0 2px rgba(248,113,113,0.25)' : 'none',
+                  transition: 'border-color 0.15s, box-shadow 0.15s',
+                }}
+                onFocus={e => {
+                  e.target.style.borderColor = paramError ? '#F87171' : '#0EA5E9'
+                  e.target.style.boxShadow = paramError
+                    ? '0 0 0 3px rgba(248,113,113,0.30)'
+                    : '0 0 0 3px rgba(14,165,233,0.20)'
+                }}
+                onBlur={e => {
+                  e.target.style.borderColor = paramError ? '#F87171' : '#FECACA'
+                  e.target.style.boxShadow = paramError ? '0 0 0 2px rgba(248,113,113,0.25)' : 'none'
                 }}
               />
               {paramError && (
@@ -212,7 +242,7 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
             >
               Confirmar
             </Button>
-            <Button variant="outline" size="sm" onClick={cancel}>
+            <Button ref={cancelBtnRef} variant="outline" size="sm" onClick={cancel}>
               <X size={11} /> Cancelar
             </Button>
           </div>

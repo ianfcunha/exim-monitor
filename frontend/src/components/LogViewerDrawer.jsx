@@ -321,7 +321,9 @@ export default function LogViewerDrawer({ onClose }) {
           <input
             type="text" placeholder="Filtrar por texto…" value={search}
             onChange={e => setSearch(e.target.value)}
-            style={{ width: '100%', padding: '6px 10px', borderRadius: 7, fontSize: 12, border: '1px solid #E2E8F0', outline: 'none', color: '#0F172A', background: '#F8FAFC', boxSizing: 'border-box' }}
+            style={{ width: '100%', padding: '6px 10px', borderRadius: 7, fontSize: 12, border: '1px solid #E2E8F0', outline: 'none', color: '#0F172A', background: '#F8FAFC', boxSizing: 'border-box', transition: 'border-color 0.15s, box-shadow 0.15s' }}
+            onFocus={e => { e.target.style.borderColor = '#0EA5E9'; e.target.style.boxShadow = '0 0 0 3px rgba(14,165,233,0.15)' }}
+            onBlur={e => { e.target.style.borderColor = '#E2E8F0'; e.target.style.boxShadow = 'none' }}
           />
 
           {showExport && (
