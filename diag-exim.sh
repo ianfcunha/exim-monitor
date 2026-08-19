@@ -7,7 +7,9 @@
 #        --json          saída em JSON para integração externa
 #        --clean-spam    limpa fila automaticamente se SPAM detectado
 #        --check         verifica pré-requisitos do servidor:
-#                          JSON {ok, checks:[exim_binary,exiqgrep,disk_space,mainlog,cpanel,csf]}
+#                          JSON {ok, checks:[exim_binary,exiqgrep,disk_space,
+#                          mainlog,cpanel,csf,imunify360,open_relay,starttls,
+#                          exim_version_cve]}
 #        --quick         modo leve para dashboard (heartbeat ~30s):
 #                          skip de exim -bp e exiqgrep; lê log com
 #                          suporte a rotation (mainlog.1/.gz);
@@ -27,6 +29,26 @@
 #                          unblock-ip --ip=<ip> --tool=csf|imunify360
 #        --snapshot=0    desativa o before_snapshot das ações destrutivas
 #                          acima (ligado por padrão — ver Changelog v5.7)
+# ============================================================
+# Changelog v5.9:
+#   - Novo em --check: 3 checks informativos de configuração insegura
+#           comum (mesmo padrão de cpanel/csf/imunify360, não afetam o
+#           "ok" geral):
+#             open_relay        — lê "exim -bP config" (funciona em
+#                                  Debian split-config e no exim.conf
+#                                  monolítico do cPanel) e sinaliza só
+#                                  padrão inequívoco de host coringa em
+#                                  relay_from_hosts (*, 0.0.0.0/0, ::/0)
+#             starttls          — confirma que STARTTLS está sendo
+#                                  oferecido na porta 25; não exige
+#                                  obrigatoriedade (forçar quebraria
+#                                  entrega de remetentes legados)
+#             exim_version_cve  — compara a versão contra uma lista
+#                                  PEQUENA e mantida à mão de CVEs
+#                                  críticos conhecidos (CVE-2019-10149,
+#                                  pacote 21Nails) — não é uma feed ao
+#                                  vivo, precisa de revisão manual
+#                                  periódica pra continuar útil
 # ============================================================
 # Changelog v5.8:
 #   - Novo: "queue.size_distribution" no JSON completo (--json/--action) —
@@ -219,7 +241,7 @@
 # exiqgrep etc. costumam morar) sejam encontrados mesmo assim.
 export PATH="$PATH:/usr/sbin:/sbin:/usr/local/sbin"
 
-VERSION="5.8"
+VERSION="5.9"
 LOG_PATH="/var/log/exim4/mainlog"
 # Lista única de candidatos a mainlog — consumida por collect() (quick e
 # completo) e run_check(). Debian/exim4, Debian/exim genérico, cPanel/WHM
@@ -1272,7 +1294,82 @@ run_check() {
         _imun_ok="true"
         _imun_msg="OK — $EXIM_IMUNIFY_BIN disponivel"
     fi
-    _checks="${_checks}{\"check\":\"imunify360\",\"ok\":${_imun_ok},\"detail\":\"${_imun_msg}\"}"
+    _checks="${_checks}{\"check\":\"imunify360\",\"ok\":${_imun_ok},\"detail\":\"${_imun_msg}\"},"
+
+    # ── Check 8: relay aberto ───────────────────────────────────────
+    # Informativo — nao afeta _ok (mesmo padrao de cpanel/csf/imunify360).
+    # "exim -bP config" imprime a configuracao ja expandida (funciona tanto
+    # no layout Debian/split-config quanto no exim.conf monolitico do
+    # cPanel) — evita depender de um nome de opcao especifico que pode nao
+    # existir em todo layout (ex.: "-bP relay_from_hosts" direto falha no
+    # Debian, que define isso via "hostlist"). So sinaliza problema quando
+    # acha um padrao INEQUIVOCO de host coringa (*, 0.0.0.0/0, ::/0) — sem
+    # esse padrao, fica "OK" com a nota de revisar manualmente, pra nao dar
+    # falso positivo tentando interpretar ACL customizada de cada cliente.
+    local _relay_ok="true" _relay_msg _relay_cfg _relay_val
+    _relay_cfg=$(timeout 10 $SUDO "$EXIM_BIN" -bP config 2>/dev/null)
+    if [ -z "$_relay_cfg" ]; then
+        _relay_msg="Nao foi possivel ler a configuracao (exim -bP config sem permissao ou vazio) — revisar manualmente"
+    else
+        _relay_val=$(printf '%s\n' "$_relay_cfg" \
+            | grep -m1 -iE '^[[:space:]]*(hostlist[[:space:]]+)?relay_from_hosts[[:space:]]*=' \
+            | sed -E 's/^[^=]*=[[:space:]]*//')
+        if printf '%s' "$_relay_val" | grep -qE '(^|[^0-9.:])(\*|0\.0\.0\.0/0|::/0)([^0-9.]|$)'; then
+            _relay_ok="false"
+            _relay_msg="relay_from_hosts permite qualquer host (\\\"${_relay_val}\\\") — possivel relay aberto, revisar ACL de relay"
+        elif [ -z "$_relay_val" ]; then
+            _relay_msg="relay_from_hosts nao encontrado/vazio na config expandida — revisar manualmente se a ACL controla relay por outro mecanismo"
+        else
+            _relay_msg="OK — relay_from_hosts restrito (${_relay_val})"
+        fi
+    fi
+    _checks="${_checks}{\"check\":\"open_relay\",\"ok\":${_relay_ok},\"detail\":\"${_relay_msg}\"},"
+
+    # ── Check 9: STARTTLS na porta 25 ────────────────────────────────
+    # Informativo — nao afeta _ok. So falha (ok:false) se STARTTLS nem
+    # estiver sendo OFERECIDO — nao forcar STARTTLS obrigatorio em SMTP
+    # publico na porta 25 e esperado/normal (senders legados sem TLS
+    # perderiam a entrega), entao "nao obrigatorio" em si e reportado como
+    # nota informativa, nao como falha.
+    local _tls_ok="true" _tls_msg _tls_adv
+    _tls_adv=$(timeout 10 "$EXIM_BIN" -bP tls_advertise_hosts 2>/dev/null | sed -E 's/^[^=]*=[[:space:]]*//')
+    if [ -z "$_tls_adv" ]; then
+        _tls_ok="false"
+        _tls_msg="tls_advertise_hosts vazio — STARTTLS nao esta sendo oferecido na porta 25"
+    else
+        _tls_msg="STARTTLS oferecido (tls_advertise_hosts=${_tls_adv}) — nao obrigatorio por padrao, o que e esperado num MX publico (forcar quebraria entrega de remetentes sem TLS)"
+    fi
+    _checks="${_checks}{\"check\":\"starttls\",\"ok\":${_tls_ok},\"detail\":\"${_tls_msg}\"},"
+
+    # ── Check 10: versao do Exim vs. CVEs criticos conhecidos ────────
+    # Informativo — nao afeta _ok. ATENCAO: lista pequena, mantida À MÃO
+    # abaixo — NAO e uma feed ao vivo (tipo OSV/NVD), so cobre um punhado
+    # de CVEs criticos (RCE) bem conhecidos como referencia rapida. Precisa
+    # de revisao manual periodica pra continuar util; versao aprovada aqui
+    # NAO significa ausencia de CVEs mais recentes nao listados.
+    #   - CVE-2019-10149 ("Return of the WIZard", RCE) — Exim 4.87-4.91,
+    #     corrigido na 4.92.
+    #   - "21Nails" (CVE-2020-28007 a CVE-2020-28026 + CVE-2021-27216,
+    #     RCE/escalada de privilegio local) — Exim < 4.94.2.
+    detect_exim_version
+    # Comparacao estrita A<B via sort -V (nao -VC direto contra o threshold,
+    # que e <=  — isso classificaria a propria versao corrigida, ex. 4.94.2
+    # exata, como "vulneravel" por um off-by-one).
+    _ver_lt() { [ "$1" != "$2" ] && printf '%s\n%s\n' "$1" "$2" | sort -VC 2>/dev/null; }
+
+    local _cve_ok="true" _cve_msg
+    if [ "$EXIM_VER_STR" = "unknown" ]; then
+        _cve_msg="Nao foi possivel determinar a versao do Exim"
+    elif _ver_lt "$EXIM_VER_STR" "4.92"; then
+        _cve_ok="false"
+        _cve_msg="Exim ${EXIM_VER_STR} — anterior a 4.92: vulneravel a CVE-2019-10149 (RCE) e ao pacote 21Nails — atualizar com urgencia"
+    elif _ver_lt "$EXIM_VER_STR" "4.94.2"; then
+        _cve_ok="false"
+        _cve_msg="Exim ${EXIM_VER_STR} — anterior a 4.94.2: vulneravel ao pacote 21Nails (CVE-2020-28007 a CVE-2021-27216) — atualizar"
+    else
+        _cve_msg="OK — Exim ${EXIM_VER_STR} sem CVE critico conhecido nesta lista curta (revisar periodicamente contra fontes atualizadas)"
+    fi
+    _checks="${_checks}{\"check\":\"exim_version_cve\",\"ok\":${_cve_ok},\"detail\":\"${_cve_msg}\"}"
 
     printf '{\n'
     printf '  "timestamp": "%s",\n' "$DATE_ISO"
