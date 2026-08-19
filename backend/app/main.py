@@ -21,6 +21,7 @@ from .collector import background_collector
 from .config import settings
 from .database import run_retention
 from .limiter import limiter
+from .reports import weekly_report_loop
 from .routers import actions, auth, history, messages, security, servers, status, users
 from .routers import settings as settings_router
 
@@ -31,7 +32,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Versão atual do schema — atualizar junto com cada nova migration
-_SCHEMA_VERSION = "006"
+_SCHEMA_VERSION = "007"
 
 _DDL_ALEMBIC_VERSION = """
     CREATE TABLE IF NOT EXISTS alembic_version (
@@ -299,6 +300,29 @@ def run_migrations() -> None:
                 {"v": "006"},
             )
             logger.info("Migration 006 aplicada com sucesso")
+            current = {"006"}
+
+        if "006" in current and "007" not in current:
+            logger.info("Aplicando migration 006 → 007 (relatório semanal)...")
+            conn.execute(text("""
+                ALTER TABLE alert_settings
+                    ADD COLUMN IF NOT EXISTS weekly_report_enabled BOOLEAN NOT NULL DEFAULT FALSE
+            """))
+            conn.execute(text("""
+                ALTER TABLE alert_settings
+                    ADD COLUMN IF NOT EXISTS weekly_report_last_sent_at TIMESTAMP
+            """))
+            conn.execute(text("""
+                ALTER TABLE alert_history
+                    ADD COLUMN IF NOT EXISTS server_id INTEGER
+                    REFERENCES servers(id) ON DELETE SET NULL
+            """))
+            conn.execute(text("DELETE FROM alembic_version"))
+            conn.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
+                {"v": "007"},
+            )
+            logger.info("Migration 007 aplicada com sucesso")
 
         logger.info("Banco de dados pronto (schema %s)", _SCHEMA_VERSION)
 
@@ -329,6 +353,7 @@ async def lifespan(app: FastAPI):
 
     collector_task = asyncio.create_task(background_collector())
     retention_task = asyncio.create_task(retention_loop())
+    weekly_report_task = asyncio.create_task(weekly_report_loop())
     logger.info(
         "Coletor em background iniciado - quick=%ds, full=%ds",
         settings.quick_interval,
@@ -339,7 +364,8 @@ async def lifespan(app: FastAPI):
 
     collector_task.cancel()
     retention_task.cancel()
-    for task in (collector_task, retention_task):
+    weekly_report_task.cancel()
+    for task in (collector_task, retention_task, weekly_report_task):
         try:
             await task
         except asyncio.CancelledError:

@@ -3,7 +3,7 @@
  */
 import { ArrowLeft, RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { fetchAlertHistory, fetchAlertSettings, saveAlertSettings, testEmail, testTelegram } from '../api/client'
+import { fetchAlertHistory, fetchAlertSettings, saveAlertSettings, testEmail, testTelegram, testWeeklyReport } from '../api/client'
 import { Select as SelectPrimitive, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { useServer } from '../contexts/ServerContext'
@@ -257,10 +257,12 @@ export default function Settings({ onBack }) {
     }
   }
 
+  const TEST_FN = { email: testEmail, telegram: testTelegram, weeklyReport: testWeeklyReport }
+
   const runTest = async (type) => {
     setTestMsg(prev => ({ ...prev, [type]: { text: 'Enviando…', err: false } }))
     try {
-      const res = await (type === 'email' ? testEmail(serverId) : testTelegram(serverId))
+      const res = await TEST_FN[type](serverId)
       setTestMsg(prev => ({ ...prev, [type]: { text: res.message, err: false } }))
     } catch (e) {
       setTestMsg(prev => ({ ...prev, [type]: { text: e?.response?.data?.detail || 'Falha no teste.', err: true } }))
@@ -413,6 +415,31 @@ export default function Settings({ onBack }) {
           <Field label="Cooldown entre alertas (minutos)" hint="Evita flood de notificações para o mesmo evento.">
             <Input value={cfg.cooldown_minutes} onChange={val => set('cooldown_minutes')(Number(val))} type="number" placeholder="30" />
           </Field>
+        </Section>
+
+        {/* Relatório semanal */}
+        <Section title="Relatório Semanal">
+          <Toggle
+            checked={!!cfg.weekly_report_enabled}
+            onChange={set('weekly_report_enabled')}
+            label="Enviar resumo semanal por e-mail (saúde, entrega, ações e alertas do período)"
+          />
+          {cfg.weekly_report_enabled && (
+            <div style={{ marginTop: 14 }}>
+              {!cfg.email_to && (
+                <p style={{ fontSize: 11, color: '#94A3B8', marginBottom: 8 }}>
+                  Configure o destinatário na seção de E-mail acima para o relatório poder ser enviado.
+                </p>
+              )}
+              {cfg.weekly_report_last_sent_at && (
+                <p style={{ fontSize: 11, color: '#94A3B8', marginBottom: 8 }}>
+                  Último envio: {new Date(cfg.weekly_report_last_sent_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                </p>
+              )}
+              <GhostBtn onClick={() => runTest('weeklyReport')}>Enviar relatório de teste agora</GhostBtn>
+              <Feedback msg={testMsg.weeklyReport?.text} isError={testMsg.weeklyReport?.err} />
+            </div>
+          )}
         </Section>
 
         {/* Salvar */}

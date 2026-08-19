@@ -95,56 +95,48 @@ def _email_body_html(severity: str, problem: str, queue_total: int, hostname: st
 </body></html>"""
 
 
-def _send_email_resend(cfg: AlertSettings, severity: str, problem: str,
-                       queue_total: int) -> None:
-    """Envia e-mail via Resend API (preferencial quando resend_api_key esta configurado)."""
-    import resend
-    resend.api_key = cfg.resend_api_key
+def _send_raw_email(cfg: AlertSettings, subject: str, html_body: str) -> None:
+    """
+    Transporte de e-mail (Resend, com fallback SMTP) — nao sabe nada sobre
+    alerta/severidade, so envia subject+html. Reaproveitado por qualquer
+    feature que precise mandar e-mail com a config ja salva (alertas de
+    diagnostico, relatorio semanal, etc.) sem duplicar a logica de
+    Resend-vs-SMTP em cada lugar.
+    """
+    if cfg.resend_api_key:
+        import resend
+        resend.api_key = cfg.resend_api_key
+        resend.Emails.send({
+            "from":    cfg.smtp_from or "EXIM Monitor <alertas@resend.dev>",
+            "to":      [cfg.email_to],
+            "subject": subject,
+            "html":    html_body,
+        })
+        logger.info("E-mail (Resend) enviado para %s: %s", cfg.email_to, subject)
+    else:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"]    = cfg.smtp_from
+        msg["To"]      = cfg.email_to
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
 
-    hostname = "servidor EXIM"
-    subject  = f"[EXIM Monitor] Alerta {severity}: {problem}"
-    body     = _email_body_html(severity, problem, queue_total, hostname)
-
-    resend.Emails.send({
-        "from":    cfg.smtp_from or "EXIM Monitor <alertas@resend.dev>",
-        "to":      [cfg.email_to],
-        "subject": subject,
-        "html":    body,
-    })
-    logger.info("Alerta por e-mail (Resend) enviado para %s", cfg.email_to)
-
-
-def _send_email_smtp(cfg: AlertSettings, severity: str, problem: str,
-                     queue_total: int) -> None:
-    """Envia e-mail via SMTP (fallback quando resend_api_key nao esta configurado)."""
-    hostname = "servidor EXIM"
-    subject  = f"[EXIM Monitor] Alerta {severity}: {problem}"
-    body     = _email_body_html(severity, problem, queue_total, hostname)
-
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"]    = cfg.smtp_from
-    msg["To"]      = cfg.email_to
-    msg.attach(MIMEText(body, "html", "utf-8"))
-
-    with smtplib.SMTP(cfg.smtp_host, cfg.smtp_port, timeout=15) as server:
-        server.ehlo()
-        if cfg.smtp_tls:
-            server.starttls()
+        with smtplib.SMTP(cfg.smtp_host, cfg.smtp_port, timeout=15) as server:
             server.ehlo()
-        if cfg.smtp_user and cfg.smtp_password:
-            server.login(cfg.smtp_user, cfg.smtp_password)
-        server.sendmail(cfg.smtp_from, cfg.email_to, msg.as_string())
-    logger.info("Alerta por e-mail (SMTP) enviado para %s", cfg.email_to)
+            if cfg.smtp_tls:
+                server.starttls()
+                server.ehlo()
+            if cfg.smtp_user and cfg.smtp_password:
+                server.login(cfg.smtp_user, cfg.smtp_password)
+            server.sendmail(cfg.smtp_from, cfg.email_to, msg.as_string())
+        logger.info("E-mail (SMTP) enviado para %s: %s", cfg.email_to, subject)
 
 
 def _send_email_sync(cfg: AlertSettings, severity: str, problem: str,
                      queue_total: int) -> None:
-    """Roteador: usa Resend se disponivel, senao SMTP."""
-    if cfg.resend_api_key:
-        _send_email_resend(cfg, severity, problem, queue_total)
-    else:
-        _send_email_smtp(cfg, severity, problem, queue_total)
+    hostname = "servidor EXIM"
+    subject  = f"[EXIM Monitor] Alerta {severity}: {problem}"
+    body     = _email_body_html(severity, problem, queue_total, hostname)
+    _send_raw_email(cfg, subject, body)
 
 
 def _send_telegram_sync(cfg: AlertSettings, severity: str, problem: str,
@@ -174,12 +166,14 @@ def _send_telegram_sync(cfg: AlertSettings, severity: str, problem: str,
 # ── Histórico de alertas ───────────────────────────────────────────────────
 
 def _record_history(channel: str, severity: str, problem: str,
-                    queue_total: int, success: bool, error_msg: Optional[str] = None) -> None:
+                    queue_total: int, success: bool, error_msg: Optional[str] = None,
+                    server_id: Optional[int] = None) -> None:
     """Persiste um registro no histórico de alertas (fire-and-forget seguro)."""
     try:
         db = SessionLocal()
         try:
             entry = AlertHistory(
+                server_id=server_id,
                 channel=channel,
                 severity=severity,
                 problem=problem,
@@ -242,10 +236,10 @@ async def check_and_alert(severity: str, problem: str, queue_total: int,
                         _send_email_sync, cfg, severity, problem, queue_total
                     )
                     state["email_sent_at"] = now
-                    _record_history("email", severity, problem, queue_total, True)
+                    _record_history("email", severity, problem, queue_total, True, server_id=server_id)
                 except Exception as exc:
                     logger.error("Falha ao enviar e-mail: %s", exc)
-                    _record_history("email", severity, problem, queue_total, False, str(exc)[:500])
+                    _record_history("email", severity, problem, queue_total, False, str(exc)[:500], server_id=server_id)
 
         # ── Telegram ──────────────────────────────────────────────────
         if cfg.telegram_enabled and cfg.telegram_bot_token and cfg.telegram_chat_id:
@@ -256,10 +250,10 @@ async def check_and_alert(severity: str, problem: str, queue_total: int,
                         _send_telegram_sync, cfg, severity, problem, queue_total
                     )
                     state["telegram_sent_at"] = now
-                    _record_history("telegram", severity, problem, queue_total, True)
+                    _record_history("telegram", severity, problem, queue_total, True, server_id=server_id)
                 except Exception as exc:
                     logger.error("Falha ao enviar Telegram: %s", exc)
-                    _record_history("telegram", severity, problem, queue_total, False, str(exc)[:500])
+                    _record_history("telegram", severity, problem, queue_total, False, str(exc)[:500], server_id=server_id)
 
     finally:
         db.close()

@@ -175,11 +175,23 @@ class AlertSettings(Base):
     # Cooldown em minutos — evita flood de alertas (mesmo evento)
     cooldown_minutes    = Column(Integer,    default=30,      nullable=False)
 
+    # ── Relatório semanal por e-mail ─────────────────────────────────────
+    weekly_report_enabled     = Column(Boolean,  default=False, nullable=False)
+    # Persistido (em vez de estado em memória) para o job de envio sobreviver
+    # a um restart do backend sem perder o controle de quando foi o último
+    # envio e reenviar o relatório fora de hora.
+    weekly_report_last_sent_at = Column(DateTime, nullable=True)
+
 
 class AlertHistory(Base):
     """
     Histórico de alertas disparados — append-only.
     Retenção: 90 dias.
+
+    server_id (nullable, SET NULL) foi adicionado junto da migration 007 —
+    sem ele, o relatório semanal por servidor não tinha como saber quais
+    alertas eram daquele servidor especificamente (mesma classe de bug do
+    AlertSettings antes de ficar por servidor).
     """
     __tablename__ = "alert_history"
     __table_args__ = (
@@ -187,6 +199,7 @@ class AlertHistory(Base):
     )
 
     id         = Column(Integer, primary_key=True)
+    server_id  = Column(Integer, ForeignKey("servers.id", ondelete="SET NULL"), nullable=True)
     sent_at    = Column(DateTime, default=datetime.utcnow, nullable=False)
     channel    = Column(String(20),  nullable=False)   # 'email' | 'telegram'
     severity   = Column(String(20),  nullable=False)

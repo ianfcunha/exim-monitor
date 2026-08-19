@@ -15,7 +15,10 @@ from fastapi import Query
 
 from ..alerts import send_test_email, send_test_telegram
 from ..auth import get_current_user, require_admin
-from ..database import AlertHistory, AlertSettings, User, get_alert_settings, get_db, to_utc_iso
+from ..database import (
+    AlertHistory, AlertSettings, Server, User, get_alert_settings, get_db, to_utc_iso,
+)
+from ..reports import send_weekly_report
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -44,6 +47,8 @@ class AlertSettingsSchema(BaseModel):
     severity_threshold: str = "HIGH"
     queue_threshold:    int = Field(0, ge=0)
     cooldown_minutes:   int = Field(30, ge=1, le=1440)
+    # Relatório semanal por e-mail
+    weekly_report_enabled: bool = False
 
     class Config:
         from_attributes = True
@@ -67,6 +72,8 @@ def _to_response(cfg: AlertSettings) -> dict:
         "severity_threshold":  cfg.severity_threshold,
         "queue_threshold":     cfg.queue_threshold,
         "cooldown_minutes":    cfg.cooldown_minutes,
+        "weekly_report_enabled":     cfg.weekly_report_enabled,
+        "weekly_report_last_sent_at": to_utc_iso(cfg.weekly_report_last_sent_at),
     }
 
 
@@ -102,6 +109,7 @@ def update_settings(
     cfg.severity_threshold = payload.severity_threshold
     cfg.queue_threshold    = payload.queue_threshold
     cfg.cooldown_minutes   = payload.cooldown_minutes
+    cfg.weekly_report_enabled = payload.weekly_report_enabled
 
     # Atualiza campos sensiveis apenas se vieram preenchidos (nao mascarados)
     if payload.resend_api_key and payload.resend_api_key != MASK:
@@ -157,6 +165,35 @@ def get_alert_history(
         }
         for r in rows
     ]
+
+
+@router.post("/test/weekly-report", summary="Dispara o relatório semanal imediatamente (teste)")
+async def test_weekly_report(
+    server_id: Optional[int] = Query(None, description="Servidor especifico; omitido = config padrao/legada"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Dispara o relatório semanal fora do agendamento normal — usado para
+    validar conteúdo/entrega sem esperar o ciclo semanal. mark_sent=False:
+    não mexe em weekly_report_last_sent_at, então não atrasa o próximo
+    envio automático.
+    """
+    cfg = get_alert_settings(db, server_id=server_id)
+    if not cfg.weekly_report_enabled:
+        raise HTTPException(400, "Ative o relatório semanal antes de testar.")
+    if not cfg.email_to or (not cfg.resend_api_key and not cfg.smtp_password):
+        raise HTTPException(400, "Configure e-mail e Resend API key (ou senha SMTP) antes de testar.")
+
+    server_name = "servidor padrão"
+    if server_id is not None:
+        server = db.get(Server, server_id)
+        server_name = server.name if server else server_name
+
+    sent = await send_weekly_report(server_id, server_name, mark_sent=False)
+    if not sent:
+        raise HTTPException(502, "Falha ao enviar o relatório de teste — veja os logs do backend.")
+    return {"ok": True, "message": f"Relatório semanal de teste enviado para {cfg.email_to}"}
 
 
 @router.post("/test/telegram", summary="Envia mensagem de teste no Telegram")
