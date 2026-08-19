@@ -45,6 +45,11 @@
 #   - Novo: EXIM_TH_CPU_PCT (80) / EXIM_TH_MEM_PCT (70) — thresholds do
 #           novo tipo de problema ALTO_CONSUMO_RECURSOS em classify();
 #           ação recomendada é só textual (sem restart automático)
+#   - Novo: analyze_suspicious_tlds() — conta envios ("=>") do LOG_SAMPLE
+#           para domínios com TLD em EXIM_SUSPICIOUS_TLDS (lista padrão
+#           configurável); EXIM_TH_TLD_SUSPEITA (20) dispara o novo tipo
+#           de problema TLD_SUSPEITA em classify(). Não cobre ACL
+#           específica de cliente (TODO — depende do ambiente real)
 # Changelog v5.4:
 #   - Novo: /var/log/exim_mainlog (padrão cPanel/WHM) nos fallbacks de log
 #           usados por --quick, --json e --check, mantendo os caminhos
@@ -196,6 +201,11 @@ TH_ALTA_REJEICAO=${EXIM_TH_ALTA_REJEICAO:-500}
 TH_FILA_ALTA=${EXIM_TH_FILA_ALTA:-2000}
 TH_CPU_PCT=${EXIM_TH_CPU_PCT:-80}
 TH_MEM_PCT=${EXIM_TH_MEM_PCT:-70}
+TH_TLD_SUSPEITA=${EXIM_TH_TLD_SUSPEITA:-20}
+# Lista de TLDs consideradas de alto risco/abuso — configurável, mesmo
+# padrão dos EXIM_TH_*. Não cobre a ACL específica de um cliente (ver
+# analyze_suspicious_tlds abaixo).
+EXIM_SUSPICIOUS_TLDS="${EXIM_SUSPICIOUS_TLDS:-zip,top,xyz,work,click,country,stream}"
 DATE=$(date "+%Y-%m-%d %H:%M:%S")
 # Timestamp ISO 8601 em UTC com sufixo Z — usado só nos campos "timestamp"
 # do JSON. $DATE (hora local do servidor, sem timezone) segue sendo usado
@@ -714,6 +724,40 @@ analyze_log() {
         grep -oP '@\K[a-zA-Z0-9.-]+' | sort | uniq -c | sort -rn | head -8)
 }
 
+# ============================================================
+# ENVIOS PARA TLDs SUSPEITAS
+# Conta, nas linhas "=>" (entregues) do LOG_SAMPLE, quantos envios no
+# período foram para domínios cujo TLD está em EXIM_SUSPICIOUS_TLDS.
+# Destinatário = token logo após " => " — mesmo parsing confirmado
+# contra amostra real do mainlog no Passo 3 (get_log_entries_ranged /
+# _parse_log_line em backend/app/ssh.py): nas linhas de entrega, esse
+# token é de fato o destinatário (T= logo depois é o nome do transport,
+# não faz parte do endereço).
+# TODO: não implementa a ACL específica do cliente que bloqueia TLDs no
+# Exim dele — depende do texto exato da regra/log dele, só será
+# confirmado quando ele liberar acesso ao ambiente real. Isso aqui é só
+# a lista padrão configurável.
+# ============================================================
+analyze_suspicious_tlds() {
+    TLD_SUSPEITA_COUNT=0
+    TLD_SUSPEITA_DOMAINS=""
+    [ -z "$EXIM_SUSPICIOUS_TLDS" ] && return
+
+    local tld_alt
+    tld_alt=$(echo "$EXIM_SUSPICIOUS_TLDS" | tr ',' '|')
+
+    local recipients
+    recipients=$(echo "$LOG_SAMPLE" | grep ' => ' | \
+        grep -oP '(?<= => )[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+' | \
+        grep -iE "\\.(${tld_alt})\$")
+
+    TLD_SUSPEITA_COUNT=$(echo "$recipients" | grep -c .)
+    [ -z "$TLD_SUSPEITA_COUNT" ] && TLD_SUSPEITA_COUNT=0
+
+    TLD_SUSPEITA_DOMAINS=$(echo "$recipients" | grep -oP '@\K.*' | \
+        sort | uniq -c | sort -rn | head -10)
+}
+
 
 # ============================================================
 # ANÁLISE DE TRÁFEGO POR HORA
@@ -1007,6 +1051,11 @@ classify() {
         # demais pra ser self-service; recomendação fica só textual.
         PROBLEM="ALTO_CONSUMO_RECURSOS"; SEVERITY="MEDIUM"
         PROBLEM_DESC="Alto consumo de recursos pelo Exim — CPU ${EXIM_CPU_TOTAL:-0}%, MEM ${EXIM_MEM_TOTAL:-0}% (investigar manualmente antes de reiniciar o daemon)"
+        ACTIONS_RECOMMENDED=()
+
+    elif [ "${TLD_SUSPEITA_COUNT:-0}" -gt "$TH_TLD_SUSPEITA" ]; then
+        PROBLEM="TLD_SUSPEITA"; SEVERITY="MEDIUM"
+        PROBLEM_DESC="$TLD_SUSPEITA_COUNT envios para TLDs de alto risco — revisar conta de origem"
         ACTIONS_RECOMMENDED=()
 
     elif [ "$QUEUE" -gt "$TH_FILA_ALTA" ]; then
@@ -2625,6 +2674,7 @@ main() {
 
     if [ "$QUICK_MODE" -eq 1 ]; then
         analyze_log
+        analyze_suspicious_tlds
         analyze_hourly_stats
         TOP_SENDER=""; TOP_SENDER_COUNT=0
         BOUNCE_COUNT=0; TOP_RECIPIENT=""; TOP_RECIPIENT_COUNT=0
@@ -2637,6 +2687,7 @@ main() {
 
     [ "$JSON_MODE" -eq 1 ] && {
         analyze_senders; analyze_recipients; analyze_log
+        analyze_suspicious_tlds
         analyze_defers;  analyze_age;        analyze_php_mailers_json
         classify
         output_json; exit 0
@@ -2650,6 +2701,7 @@ main() {
 
     _prog "analisando log de entrega"
     analyze_log
+    analyze_suspicious_tlds
     analyze_defers
     analyze_hourly_stats
 
