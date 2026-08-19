@@ -28,6 +28,40 @@
 #        --snapshot=0    desativa o before_snapshot das ações destrutivas
 #                          acima (ligado por padrão — ver Changelog v5.7)
 # ============================================================
+# Changelog v5.8:
+#   - Novo: "queue.size_distribution" no JSON completo (--json/--action) —
+#           over_1mb/over_5mb/under_10kb + "sampled" (true quando a fila é
+#           grande demais e size_distribution reflete só a amostra lida,
+#           não a fila inteira — mesma amostragem de QUEUE_LIMIT já usada
+#           pros outros agregados). Novo diagnóstico FILA_MENSAGENS_GRANDES
+#           em classify() — só dispara quando mensagens >5MB são MAIORIA
+#           da fila (não só presentes em meio a milhares de pequenas, que
+#           já cai em SPAM_MASSIVO/FILA_ALTA); threshold configurável via
+#           EXIM_TH_QUEUE_MSGS_GRANDES (default 3).
+#   - Fix: QUEUE_SIZE (campo "size_kb") somava a coluna 2 de "exim -bp"
+#           sem converter o sufixo K/M/G ("50K" virava 50, "2.0M" virava
+#           2.0) — subestimava o tamanho real da fila em até ~1000x
+#           quando havia mensagens grandes. analyze_age() agora converte
+#           pra bytes antes de somar (mesma lógica usada pro novo
+#           size_distribution).
+#   - Fix (bug pré-existente real, achado testando o item acima): "exim -bp"
+#           preenche a coluna de idade com um espaço à esquerda pra idades
+#           curtas (" 4m", não "4m") — analyze_senders() e show_relay_detail()
+#           filtravam linhas de cabeçalho com /^[0-9]/ contra a linha inteira,
+#           que nunca batia nesse caso (a maioria das filas reais, já que a
+#           maior parte das mensagens tem idade de 1 dígito). TOP_SENDER,
+#           TOP_SENDER_DOMAINS, BOUNCE_COUNT e a detecção de RELAY_SUSPECT
+#           ficavam silenciosamente vazios/zerados. Corrigido pra checar $1
+#           (idade, já sem o padding — awk separa campos por whitespace
+#           independente da indentação) — mesmo padrão que analyze_age() já
+#           usava corretamente pra OLD_DAYS/HOURS/MINS.
+#   - Fix: exim-test.sh --clean e o bloco --freeze de inject() usavam
+#           "exiqgrep -s" (filtra pelo campo de TAMANHO) em vez de "-f"
+#           (filtra por sender) — nunca encontravam as mensagens injetadas
+#           pelo próprio script, silenciosamente. exim-test.sh também ganhou
+#           --size (K/M) pra injetar mensagens de tamanho controlado, usado
+#           pra validar o size_distribution acima.
+# ============================================================
 # Changelog v5.7:
 #   - Novo: before_snapshot no JSON de ações destrutivas (clean-full/
 #           frozen/bounces/sender/auth, block-ip/sender) — estado
@@ -185,7 +219,7 @@
 # exiqgrep etc. costumam morar) sejam encontrados mesmo assim.
 export PATH="$PATH:/usr/sbin:/sbin:/usr/local/sbin"
 
-VERSION="5.7"
+VERSION="5.8"
 LOG_PATH="/var/log/exim4/mainlog"
 # Lista única de candidatos a mainlog — consumida por collect() (quick e
 # completo) e run_check(). Debian/exim4, Debian/exim genérico, cPanel/WHM
@@ -225,6 +259,7 @@ TH_CPU_PCT=${EXIM_TH_CPU_PCT:-80}
 TH_MEM_PCT=${EXIM_TH_MEM_PCT:-70}
 TH_TLD_SUSPEITA=${EXIM_TH_TLD_SUSPEITA:-20}
 TH_CERT_DAYS=${EXIM_TH_CERT_DAYS:-15}   # dias restantes p/ considerar cert TLS perto de expirar
+TH_QUEUE_MSGS_GRANDES=${EXIM_TH_QUEUE_MSGS_GRANDES:-3}  # min. de msgs >5MB p/ considerar FILA_MENSAGENS_GRANDES
 # Lista de TLDs consideradas de alto risco/abuso — configurável, mesmo
 # padrão dos EXIM_TH_*. Não cobre a ACL específica de um cliente (ver
 # analyze_suspicious_tlds abaixo).
@@ -631,9 +666,20 @@ trap 'rm -f /tmp/eximmon_*.* 2>/dev/null' EXIT INT TERM
 # Formato de destinatário: linhas indentadas com espaço "           dest@dom"
 # ============================================================
 analyze_senders() {
+    # FIX v5.8: exim -bp alinha a coluna de idade com um espaço de
+    # preenchimento à esquerda pra idades curtas (ex.: " 4m", não "4m") —
+    # /^[0-9]/ contra $0 nunca batia nessas linhas (a maioria das filas
+    # reais, já que a maior parte das mensagens tem menos de 10 unidades
+    # de idade), fazendo TOP_SENDER/BOUNCE_COUNT/RELAY_SUSPECT ficarem
+    # silenciosamente vazios/zerados sempre que a fila era "jovem".
+    # $1 (idade) já vem sem o padding — awk separa campos por whitespace
+    # independente de quantos espaços tem antes — então o filtro correto
+    # é no valor de $1, não em $0. Mesmo padrão já usado em analyze_age().
+    local _hdr='$1 ~ /^[0-9]+[dhm]$/'
+
     # Remetentes com endereço (exclui <>)
     TOP_SENDERS=$(echo "$QUEUE_RAW" | \
-        awk '/^[0-9]/{
+        awk "$_hdr"'{
             n=split($4,a,"[<>]")
             if(a[2]!="" && a[2]!="<>") print a[2]
         }' | sort | uniq -c | sort -rn | head -15)
@@ -642,12 +688,12 @@ analyze_senders() {
     # O split anterior por [<>@] pegava local-parts com ponto (ex: case.file)
     # antes do domínio real. Agora usamos regex para extrair m[1] = domínio.
     TOP_SENDER_DOMAINS=$(echo "$QUEUE_RAW" | \
-        awk '/^[0-9]/{
+        awk "$_hdr"'{
             if(match($4,/@([^>@]+)>/,m)) print m[1]
         }' | grep -v '^$' | sort | uniq -c | sort -rn | head -10)
 
     BOUNCE_COUNT=$(echo "$QUEUE_RAW" | \
-        awk '/^[0-9]/{ if($4=="<>") c++ } END{print c+0}')
+        awk "$_hdr"'{ if($4=="<>") c++ } END{print c+0}')
 
     TOP_SENDER=$(echo "$TOP_SENDERS" | head -1 | awk '{print $2}')
     TOP_SENDER_COUNT=$(echo "$TOP_SENDERS" | head -1 | awk '{print $1}')
@@ -662,10 +708,10 @@ analyze_senders() {
         RELAY_SUSPECT_SEND="$TOP_SENDER_COUNT"
         # Bounces (<>) cujo destinatário contém o endereço suspeito
         RELAY_SUSPECT_BOUNCE=$(echo "$QUEUE_RAW" | \
-            awk -v addr="$RELAY_SUSPECT" '/^[0-9]/{ if($4=="<>" && $5~addr) c++ } END{print c+0}')
+            awk -v addr="$RELAY_SUSPECT" "$_hdr"'{ if($4=="<>" && $5~addr) c++ } END{print c+0}')
         # Domínios para quem o suspeito enviou
         RELAY_TARGET_DOMAINS=$(echo "$QUEUE_RAW" | \
-            awk -v addr="$RELAY_SUSPECT" '/^[0-9]/{ if($4~addr){ match($5,/@([^>]+)/,m); if(m[1]!="") print m[1] } }' | \
+            awk -v addr="$RELAY_SUSPECT" "$_hdr"'{ if($4~addr){ match($5,/@([^>]+)/,m); if(m[1]!="") print m[1] } }' | \
             sort | uniq -c | sort -rn | head -10)
     fi
 }
@@ -981,7 +1027,35 @@ analyze_age() {
     OLD_DAYS=$(echo  "$QUEUE_RAW" | awk '$1~/^[0-9]+d$/{c++} END{print c+0}')
     OLD_HOURS=$(echo "$QUEUE_RAW" | awk '$1~/^[0-9]+h$/{c++} END{print c+0}')
     OLD_MINS=$(echo  "$QUEUE_RAW" | awk '$1~/^[0-9]+m$/{c++} END{print c+0}')
-    QUEUE_SIZE=$(echo "$QUEUE_RAW" | awk '{sum+=$2} END{printf "%.1f",sum/1024}' 2>/dev/null)
+
+    # Coluna 2 de "exim -bp" traz o tamanho em bytes puro OU com sufixo
+    # K/M/G (ex.: "443", "50K", "2.0M") — somar $2 direto sem converter
+    # o sufixo (como o QUEUE_SIZE fazia antes) subestima em até ~1000x
+    # pra mensagens grandes, porque awk trunca "50K" no prefixo numérico
+    # "50" e ignora a unidade. to_bytes() abaixo corrige isso e também
+    # alimenta a distribuição de tamanho usada no diagnóstico
+    # FILA_MENSAGENS_GRANDES (classify()) e no bloco "queue" do JSON.
+    local _size_stats
+    _size_stats=$(echo "$QUEUE_RAW" | awk '
+        function to_bytes(s,   n) {
+            n = s + 0
+            if (s ~ /G$/) return n * 1024 * 1024 * 1024
+            if (s ~ /M$/) return n * 1024 * 1024
+            if (s ~ /K$/) return n * 1024
+            return n
+        }
+        $1 ~ /^[0-9]+[dhm]$/ {
+            b = to_bytes($2)
+            total_bytes += b
+            if (b >= 1048576) over_1mb++
+            if (b >= 5242880) over_5mb++
+            if (b < 10240)    under_10kb++
+        }
+        END { printf "%.0f %d %d %d", total_bytes+0, over_1mb+0, over_5mb+0, under_10kb+0 }
+    ')
+    read -r _QUEUE_TOTAL_BYTES QSZ_OVER_1MB QSZ_OVER_5MB QSZ_UNDER_10KB <<< "$_size_stats"
+
+    QUEUE_SIZE=$(awk -v b="${_QUEUE_TOTAL_BYTES:-0}" 'BEGIN{printf "%.1f", b/1024}' 2>/dev/null)
     [ -z "$QUEUE_SIZE" ] && QUEUE_SIZE="N/A"
 }
 
@@ -1082,6 +1156,18 @@ classify() {
         PROBLEM="TLD_SUSPEITA"; SEVERITY="MEDIUM"
         PROBLEM_DESC="$TLD_SUSPEITA_COUNT envios para TLDs de alto risco — revisar conta de origem"
         ACTIONS_RECOMMENDED=()
+
+    elif [ "${QSZ_OVER_5MB:-0}" -ge "$TH_QUEUE_MSGS_GRANDES" ] && \
+         [ "${QUEUE:-0}" -gt 0 ] && \
+         [ $(( QSZ_OVER_5MB * 100 / QUEUE )) -ge 50 ]; then
+        # Só dispara quando mensagens >5MB são a MAIORIA da fila (não só
+        # "presentes" em meio a milhares de pequenas — isso já é coberto
+        # por SPAM_MASSIVO/FILA_ALTA) — sinal específico de "poucas
+        # mensagens gigantes" (anexo pesado, backup por engano etc.)
+        # dominando o tempo de entrega, não spam/flood.
+        PROBLEM="FILA_MENSAGENS_GRANDES"; SEVERITY="MEDIUM"
+        PROBLEM_DESC="$QSZ_OVER_5MB de $QUEUE mensagens na fila são >5MB — poucas mensagens gigantes podem estar dominando o tempo de entrega"
+        ACTIONS_RECOMMENDED=("retry-queue")
 
     elif [ "$QUEUE" -gt "$TH_FILA_ALTA" ]; then
         PROBLEM="FILA_ALTA"; SEVERITY="LOW"
@@ -1279,6 +1365,8 @@ output_json() {
     printf '  "queue": {\n'
     printf '    "total": %s, "frozen": %s, "bounces": %s,\n'         "${QUEUE:-0}" "${FROZEN_COUNT:-0}" "${BOUNCE_COUNT:-0}"
     printf '    "size_kb": "%s",\n' "${QUEUE_SIZE:-N/A}"
+    printf '    "size_distribution": { "over_1mb": %s, "over_5mb": %s, "under_10kb": %s, "sampled": %s },\n' \
+        "${QSZ_OVER_1MB:-0}" "${QSZ_OVER_5MB:-0}" "${QSZ_UNDER_10KB:-0}" "$([ "${QUEUE_SAMPLED:-0}" -eq 1 ] && echo true || echo false)"
     printf '    "age": { "days": %s, "hours": %s, "minutes": %s }\n'         "${OLD_DAYS:-0}" "${OLD_HOURS:-0}" "${OLD_MINS:-0}"
     printf '  },\n'
     printf '  "log": {\n'
@@ -2613,10 +2701,10 @@ find_php_mailers() {
 }
 show_relay_detail() {
     echo -e "${BOLD}Mensagens From: $RELAY_SUSPECT${RESET}"
-    echo "$QUEUE_RAW" | awk -v a="$RELAY_SUSPECT" '/^[0-9]/{ if($4~a) print }' | head -20
+    echo "$QUEUE_RAW" | awk -v a="$RELAY_SUSPECT" '$1~/^[0-9]+[dhm]$/{ if($4~a) print }' | head -20
     echo
     echo -e "${BOLD}Bounces (<>) chegando para $RELAY_SUSPECT${RESET}"
-    echo "$QUEUE_RAW" | awk -v a="$RELAY_SUSPECT" '/^[0-9]/{ if($4=="<>" && $5~a) print }' | head -20
+    echo "$QUEUE_RAW" | awk -v a="$RELAY_SUSPECT" '$1~/^[0-9]+[dhm]$/{ if($4=="<>" && $5~a) print }' | head -20
 }
 show_last_log_errors() {
     echo "$LOG_SAMPLE" | grep -E ' (rejected|failed|error|SMTP error|panic|defer)' | tail -20

@@ -9,6 +9,10 @@
 #   -n NUM       Número de mensagens a injetar (padrão: 10)
 #   -d DOMAIN    Domínio de destino (padrão: test-invalid.local → gera deferred)
 #   -s SENDER    Remetente (padrão: test@exim-monitor.local)
+#   --size SIZE  Preenche o corpo de cada mensagem até ~SIZE (aceita sufixo
+#                K/M, ex.: 500K, 6M) — sem isso as mensagens ficam com
+#                poucas centenas de bytes. Usado para validar a distribuição
+#                de tamanho da fila (queue.size_distribution no --json).
 #   --freeze     Injeta mensagens e as congela imediatamente (frozen)
 #   --clean      Remove TODAS as mensagens de teste injetadas por este script
 #   --watch      Apenas observa a fila a cada 5s sem injetar nada
@@ -17,6 +21,7 @@
 # Exemplos:
 #   bash exim-test.sh -n 20                  # injeta 20 mensagens deferred
 #   bash exim-test.sh -n 5 --freeze          # injeta 5 e as congela
+#   bash exim-test.sh -n 3 --size 6M         # injeta 3 mensagens de ~6MB
 #   bash exim-test.sh --clean                # limpa as mensagens de teste
 #   bash exim-test.sh --watch                # monitora a fila em tempo real
 #   ADMIN_PASSWORD=senha bash exim-test.sh --compare
@@ -34,6 +39,7 @@ DOMAIN="test-invalid.exim-monitor.local"
 SENDER="test-inject@exim-monitor.local"
 MODE="inject"
 FREEZE=false
+SIZE=""
 API_URL="http://127.0.0.1:8000"
 DIAG_SCRIPT="/root/exim-monitor/diag-exim.sh"
 TEST_TAG="EXIM-MONITOR-TEST"
@@ -44,6 +50,7 @@ while [[ $# -gt 0 ]]; do
         -n)        N="$2";           shift 2 ;;
         -d)        DOMAIN="$2";      shift 2 ;;
         -s)        SENDER="$2";      shift 2 ;;
+        --size)    SIZE="$2";        shift 2 ;;
         --freeze)  FREEZE=true;      shift   ;;
         --clean)   MODE="clean";     shift   ;;
         --watch)   MODE="watch";     shift   ;;
@@ -51,6 +58,17 @@ while [[ $# -gt 0 ]]; do
         *) echo "Opcao desconhecida: $1"; exit 1 ;;
     esac
 done
+
+# Converte "500K"/"6M"/bytes puro para um número de bytes.
+_size_to_bytes() {
+    local s="$1"
+    case "$s" in
+        *[Kk]) echo $(( ${s%[Kk]} * 1024 )) ;;
+        *[Mm]) echo $(( ${s%[Mm]} * 1024 * 1024 )) ;;
+        *[Gg]) echo $(( ${s%[Gg]} * 1024 * 1024 * 1024 )) ;;
+        *)     echo "$s" ;;
+    esac
+}
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 info() { echo -e "${CYAN}${BOLD}[INFO]${RESET}  $*"; }
@@ -78,6 +96,18 @@ inject() {
 
     BEFORE=$(queue_count)
     info "Fila antes da injecao: ${BOLD}$BEFORE${RESET} mensagens"
+
+    # --size: gera um bloco de preenchimento uma unica vez e reaproveita em
+    # todas as mensagens (evita recriar N vezes) — texto puro ('A' repetido),
+    # seguro pra corpo de e-mail, sem depender de /dev/urandom+base64 (que
+    # infla ~33% e complicaria acertar o tamanho exato).
+    _PAD_FILE=""
+    if [ -n "$SIZE" ]; then
+        _PAD_BYTES=$(_size_to_bytes "$SIZE")
+        _PAD_FILE=$(mktemp /tmp/eximtest_pad.XXXXXX)
+        head -c "$_PAD_BYTES" /dev/zero | tr '\0' 'A' > "$_PAD_FILE"
+        info "Preenchendo corpo de cada mensagem para ~${BOLD}$SIZE${RESET} (${_PAD_BYTES} bytes)"
+    fi
     sep
 
     INJECTED=0
@@ -88,7 +118,7 @@ inject() {
         # -odq  = queue-only, nao tenta entrega imediata
         # -f    = define envelope sender
         # sem -odq, EXIM tenta DNS na hora e descarta como falha permanente (NXDOMAIN)
-        if printf '%s\n' \
+        if { printf '%s\n' \
             "Subject: [$TEST_TAG] Mensagem de teste #$i" \
             "From: $SENDER" \
             "To: $RECIPIENT" \
@@ -99,7 +129,8 @@ inject() {
             "Mensagem de teste #$i injetada pelo exim-test.sh" \
             "Tag: $TEST_TAG  |  Seq: $i/$N" \
             "Dominio destino invalido -> ficara em DEFERRED automaticamente." \
-            "Para remover: bash exim-test.sh --clean" \
+            "Para remover: bash exim-test.sh --clean"; \
+            [ -n "$_PAD_FILE" ] && cat "$_PAD_FILE"; } \
             | exim -odq -f "$SENDER" "$RECIPIENT" 2>/dev/null; then
             INJECTED=$((INJECTED + 1))
             printf "  ${DIM}[%3d/%d]${RESET} injetada -> %s\n" "$i" "$N" "$RECIPIENT"
@@ -107,6 +138,7 @@ inject() {
             warn "Falha ao injetar mensagem #$i"
         fi
     done
+    [ -n "$_PAD_FILE" ] && rm -f "$_PAD_FILE"
 
     sep
     ok "Injetadas: ${BOLD}$INJECTED${RESET} mensagens"
@@ -118,7 +150,7 @@ inject() {
             if exim -Mf "$msg_id" 2>/dev/null; then
                 FROZEN=$((FROZEN + 1))
             fi
-        done < <(exiqgrep -s "$SENDER" -i 2>/dev/null || true)
+        done < <(exiqgrep -f "$SENDER" -i 2>/dev/null || true)
         ok "Congeladas: ${BOLD}$FROZEN${RESET} mensagens"
     fi
 
@@ -147,6 +179,10 @@ inject() {
 }
 
 # ── MODO: limpar mensagens de teste ───────────────────────────────────────────
+# FIX: usava "exiqgrep -s" (filtra pelo campo de TAMANHO, não sender —
+# "-f" é o filtro de sender) — nunca encontrava as mensagens injetadas por
+# este script, então --clean e o bloco --freeze de inject() sempre agiam
+# sobre zero mensagens silenciosamente.
 clean() {
     info "Removendo mensagens de teste (remetente: $SENDER)..."
     sep
@@ -157,7 +193,7 @@ clean() {
             REMOVED=$((REMOVED + 1))
             echo -e "  ${DIM}removida${RESET} $msg_id"
         fi
-    done < <(exiqgrep -s "$SENDER" -i 2>/dev/null \
+    done < <(exiqgrep -f "$SENDER" -i 2>/dev/null \
         | grep -E '^[A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+$' || true)
 
     sep
