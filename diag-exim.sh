@@ -30,6 +30,19 @@
 #        --snapshot=0    desativa o before_snapshot das ações destrutivas
 #                          acima (ligado por padrão — ver Changelog v5.7)
 # ============================================================
+# Changelog v5.10:
+#   - Limpeza: removida block_ip_iptables() — função morta (nunca mais
+#           chamada por nada, só definida) desde que block_ip_firewall_d()
+#           a substituiu no menu interativo (ver Changelog mais antigo
+#           logo abaixo). A consolidação real de bloqueio de IP pedida
+#           nesta sessão (escrever regra + checar duplicata + reiniciar
+#           firewall.service numa função única, compartilhada entre a
+#           ação via API e o menu interativo) já tinha sido feita antes
+#           desta sessão — ver _block_ip_persist(), chamada tanto por
+#           execute_action() (case block-ip) quanto por
+#           block_ip_firewall_d(). Essa função morta ficou pra trás nesse
+#           refactor e só foi notada agora.
+# ============================================================
 # Changelog v5.9:
 #   - Novo em --check: 3 checks informativos de configuração insegura
 #           comum (mesmo padrão de cpanel/csf/imunify360, não afetam o
@@ -241,7 +254,7 @@
 # exiqgrep etc. costumam morar) sejam encontrados mesmo assim.
 export PATH="$PATH:/usr/sbin:/sbin:/usr/local/sbin"
 
-VERSION="5.9"
+VERSION="5.10"
 LOG_PATH="/var/log/exim4/mainlog"
 # Lista única de candidatos a mainlog — consumida por collect() (quick e
 # completo) e run_check(). Debian/exim4, Debian/exim genérico, cPanel/WHM
@@ -2351,15 +2364,6 @@ clean_by_auth_user() {
     echo -e "${GREEN}[OK]${RESET}"
     QUEUE_CLEANED=1
 }
-block_ip_iptables() {
-    if command -v iptables &>/dev/null; then
-        iptables -I INPUT -s "$1" -p tcp --dport 25 -j DROP
-        echo -e "${GREEN}[OK] $1 bloqueado na porta 25 (apenas sessão atual).${RESET}"
-    else
-        echo -e "${RED}[ERRO] iptables não disponível.${RESET}"
-    fi
-}
-
 # ============================================================
 # BLOQUEIO DE IP — PERSISTÊNCIA COMPARTILHADA
 # Escreve a regra em /etc/firewall.d/03_custom, checa duplicata e
