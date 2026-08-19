@@ -37,6 +37,14 @@
 #           configuráveis via env var, mesmo padrão dos EXIM_TH_*
 #   - Novo: checks "csf" (agora via EXIM_CSF_BIN) e "imunify360" em
 #           --check
+#   - Novo: _collect_exim_resources() — substitui a contagem simples
+#           (pgrep -c) por amostra real via `ps -C exim -o pid,%cpu,%mem,
+#           etime`; soma EXIM_CPU_TOTAL/EXIM_MEM_TOTAL e guarda top-3
+#           processos por CPU; campos cpu_total/mem_total/top_processes
+#           no JSON ("exim": {...}), ambos os modos (quick e full)
+#   - Novo: EXIM_TH_CPU_PCT (80) / EXIM_TH_MEM_PCT (70) — thresholds do
+#           novo tipo de problema ALTO_CONSUMO_RECURSOS em classify();
+#           ação recomendada é só textual (sem restart automático)
 # Changelog v5.4:
 #   - Novo: /var/log/exim_mainlog (padrão cPanel/WHM) nos fallbacks de log
 #           usados por --quick, --json e --check, mantendo os caminhos
@@ -186,6 +194,8 @@ TH_ALTO_DEFERIMENTO=${EXIM_TH_ALTO_DEFERIMENTO:-500}
 TH_BOUNCE_STORM=${EXIM_TH_BOUNCE_STORM:-500}
 TH_ALTA_REJEICAO=${EXIM_TH_ALTA_REJEICAO:-500}
 TH_FILA_ALTA=${EXIM_TH_FILA_ALTA:-2000}
+TH_CPU_PCT=${EXIM_TH_CPU_PCT:-80}
+TH_MEM_PCT=${EXIM_TH_MEM_PCT:-70}
 DATE=$(date "+%Y-%m-%d %H:%M:%S")
 # Timestamp ISO 8601 em UTC com sufixo Z — usado só nos campos "timestamp"
 # do JSON. $DATE (hora local do servidor, sem timezone) segue sendo usado
@@ -343,6 +353,37 @@ detect_exim_version() {
 }
 
 # ============================================================
+# CONSUMO DE RECURSOS DOS PROCESSOS DO EXIM
+# Substitui a contagem simples (pgrep -c) por uma amostra real via ps,
+# somando %CPU/%MEM de todos os processos e guardando o top-3 por CPU
+# para diagnóstico (feedback de cliente: dashboard não mostrava consumo
+# de recursos, só contagem de processos).
+# Popula: EXIM_PROCS, EXIM_CPU_TOTAL, EXIM_MEM_TOTAL, EXIM_TOP_PROC_JSON
+# ============================================================
+_collect_exim_resources() {
+    local ps_out
+    ps_out=$(ps -C "$EXIM_BIN" -o pid,%cpu,%mem,etime --no-headers 2>/dev/null)
+    if [ -z "$ps_out" ]; then
+        # Fallback legado (formato `ps aux`): USER PID %CPU %MEM ... — sem
+        # etime nesse formato, usa "-" como placeholder.
+        ps_out=$(ps aux 2>/dev/null | grep "[e]xim" \
+            | awk '{printf "%s %s %s -\n", $2, $3, $4}')
+    fi
+
+    EXIM_PROCS=$(printf '%s\n' "$ps_out" | grep -c .)
+    [ -z "$EXIM_PROCS" ] && EXIM_PROCS=0
+
+    EXIM_CPU_TOTAL=$(printf '%s\n' "$ps_out" | awk '{c+=$2} END{printf "%.1f", c+0}')
+    EXIM_MEM_TOTAL=$(printf '%s\n' "$ps_out" | awk '{m+=$3} END{printf "%.1f", m+0}')
+    [ -z "$EXIM_CPU_TOTAL" ] && EXIM_CPU_TOTAL="0.0"
+    [ -z "$EXIM_MEM_TOTAL" ] && EXIM_MEM_TOTAL="0.0"
+
+    EXIM_TOP_PROC_JSON=$(printf '%s\n' "$ps_out" | sort -rn -k2 | head -3 | awk '
+        { printf "%s{\"pid\":%s,\"cpu\":%s,\"mem\":%s,\"etime\":\"%s\"}", (NR>1?",":""), $1, $2, $3, $4 }')
+    EXIM_TOP_PROC_JSON="[${EXIM_TOP_PROC_JSON}]"
+}
+
+# ============================================================
 # LEITURA DO LOG COM SUPORTE A LOG ROTATION
 # Tenta ler mainlog.1.gz → mainlog.1 → mainlog (fallback).
 # Reconhece também o padrão de rotação do cPanel/WHM, que não usa
@@ -443,7 +484,7 @@ collect() {
         QUEUE_SAMPLED=0
         LOG_SAMPLE=$(cat "$_TMP_LOG" 2>/dev/null)
         rm -f "$_TMP_LOG"
-        EXIM_PROCS=$(pgrep -c "$EXIM_BIN" 2>/dev/null || ps aux | grep -c "[e]xim")
+        _collect_exim_resources
         EXIM_PID=$(cat /var/run/exim4/exim.pid 2>/dev/null || pgrep -n "$EXIM_BIN" 2>/dev/null)
         [ -n "$EXIM_PID" ] && EXIM_UPTIME=$(ps -p "$EXIM_PID" -o etime= 2>/dev/null | xargs) || EXIM_UPTIME="N/A"
         [ -s "$_WDOG_FILE" ] && COLLECT_TIMED_OUT=1
@@ -538,7 +579,7 @@ collect() {
     rm -f "$_TMP_QUEUE" "$_TMP_LOG" "$_TMP_FROZEN"
 
     OLDEST_IN_QUEUE=$(echo "$QUEUE_RAW" | awk 'NR==1{print $1}')
-    EXIM_PROCS=$(pgrep -c "$EXIM_BIN" 2>/dev/null || ps aux | grep -c "[e]xim")
+    _collect_exim_resources
     EXIM_PID=$(cat /var/run/exim4/exim.pid 2>/dev/null || pgrep -n "$EXIM_BIN" 2>/dev/null)
     [ -n "$EXIM_PID" ] && EXIM_UPTIME=$(ps -p "$EXIM_PID" -o etime= 2>/dev/null | xargs) || EXIM_UPTIME="N/A"
     [ -s "$_WDOG_FILE" ] && COLLECT_TIMED_OUT=1
@@ -882,6 +923,14 @@ classify() {
     PROBLEM="NORMAL"; SEVERITY="OK"; PROBLEM_DESC="Fila operando normalmente"
     ACTIONS_RECOMMENDED=()
 
+    # EXIM_CPU_TOTAL/EXIM_MEM_TOTAL são floats (soma de %CPU/%MEM de todos
+    # os processos exim) — test -gt exige inteiro, então trunca na parte
+    # decimal só para a comparação de threshold.
+    local _exim_cpu_int="${EXIM_CPU_TOTAL%.*}"
+    local _exim_mem_int="${EXIM_MEM_TOTAL%.*}"
+    [ -z "$_exim_cpu_int" ] && _exim_cpu_int=0
+    [ -z "$_exim_mem_int" ] && _exim_mem_int=0
+
     if   [ "$RELAY_SUSPECT_SEND" -gt "$TH_SPAM_RELAY_SEND" ] && \
          [ "$RELAY_SUSPECT_BOUNCE" -gt "$TH_SPAM_RELAY_BOUNCE" ]; then
         PROBLEM="SPAM_RELAY"; SEVERITY="CRITICAL"
@@ -952,6 +1001,13 @@ classify() {
         PROBLEM="ALTA_REJEICAO"; SEVERITY="MEDIUM"
         PROBLEM_DESC="Alta taxa de rejeição — $REJECT_COUNT rejeições"
         ACTIONS_RECOMMENDED=("retry-queue")
+
+    elif [ "${_exim_cpu_int:-0}" -gt "$TH_CPU_PCT" ] || [ "${_exim_mem_int:-0}" -gt "$TH_MEM_PCT" ]; then
+        # Sem ação de um clique de propósito — reiniciar o daemon é arriscado
+        # demais pra ser self-service; recomendação fica só textual.
+        PROBLEM="ALTO_CONSUMO_RECURSOS"; SEVERITY="MEDIUM"
+        PROBLEM_DESC="Alto consumo de recursos pelo Exim — CPU ${EXIM_CPU_TOTAL:-0}%, MEM ${EXIM_MEM_TOTAL:-0}% (investigar manualmente antes de reiniciar o daemon)"
+        ACTIONS_RECOMMENDED=()
 
     elif [ "$QUEUE" -gt "$TH_FILA_ALTA" ]; then
         PROBLEM="FILA_ALTA"; SEVERITY="LOW"
@@ -1125,7 +1181,8 @@ output_json() {
         printf '    "description": "%s",\n' "$PROBLEM_DESC"
         printf '    "actions_recommended": [%s]\n' "$_ar_json"
         printf '  },\n'
-        printf '  "exim": { "processes": %s, "uptime": "%s", "version": "%s" }\n'             "${EXIM_PROCS:-0}" "$EXIM_UPTIME" "$EXIM_VER_STR"
+        printf '  "exim": { "processes": %s, "uptime": "%s", "version": "%s", "cpu_total": %s, "mem_total": %s, "top_processes": %s }\n' \
+            "${EXIM_PROCS:-0}" "$EXIM_UPTIME" "$EXIM_VER_STR" "${EXIM_CPU_TOTAL:-0}" "${EXIM_MEM_TOTAL:-0}" "${EXIM_TOP_PROC_JSON:-[]}"
         printf '}\n'
         return
     fi
@@ -1171,7 +1228,8 @@ output_json() {
     printf '    "description": "%s",\n' "$PROBLEM_DESC"
     printf '    "actions_recommended": [%s]\n' "$_ar_json"
     printf '  },\n'
-    printf '  "exim": { "processes": %s, "uptime": "%s", "version": "%s" }\n'         "${EXIM_PROCS:-0}" "$EXIM_UPTIME" "$EXIM_VER_STR"
+    printf '  "exim": { "processes": %s, "uptime": "%s", "version": "%s", "cpu_total": %s, "mem_total": %s, "top_processes": %s }\n' \
+        "${EXIM_PROCS:-0}" "$EXIM_UPTIME" "$EXIM_VER_STR" "${EXIM_CPU_TOTAL:-0}" "${EXIM_MEM_TOTAL:-0}" "${EXIM_TOP_PROC_JSON:-[]}"
     printf '}\n'
 }
 
