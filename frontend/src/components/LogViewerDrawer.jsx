@@ -3,12 +3,33 @@
  * Exibe as últimas N linhas com cores por tipo, filtros e auto-refresh.
  * Suporte a copy-to-clipboard em cada linha.
  */
-import { Check, Copy, RefreshCw, X } from 'lucide-react'
+import { Check, Copy, Download, RefreshCw, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { fetchLogTail } from '../api/client'
+import { exportLogMessages, fetchLogTail } from '../api/client'
+
+const isoDaysAgo = (n) => {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  return d.toISOString().slice(0, 10)
+}
+
+async function extractErrorMessage(err) {
+  const data = err?.response?.data
+  if (data instanceof Blob) {
+    try {
+      const parsed = JSON.parse(await data.text())
+      const detail = parsed?.detail
+      if (Array.isArray(detail)) return detail.map(d => d.msg ?? JSON.stringify(d)).join('; ')
+      if (detail) return detail
+    } catch { /* corpo não era JSON — cai no fallback abaixo */ }
+  } else if (data?.detail) {
+    return data.detail
+  }
+  return err.message ?? 'Erro ao exportar log'
+}
 
 const TYPE_CONFIG = {
   delivered: { label: 'Entregues', color: '#16A34A', bg: 'rgba(22,163,74,0.08)',  dot: '#16A34A' },
@@ -132,6 +153,14 @@ export default function LogViewerDrawer({ onClose }) {
   const [refreshing, setRefreshing]   = useState(false)
   const intervalRef = useRef(null)
 
+  const [showExport, setShowExport]     = useState(false)
+  const [exportStart, setExportStart]   = useState(() => isoDaysAgo(7))
+  const [exportEnd, setExportEnd]       = useState(() => isoDaysAgo(0))
+  const [exportAccount, setExportAccount] = useState('')
+  const [exportFormat, setExportFormat] = useState('csv')
+  const [exporting, setExporting]       = useState(false)
+  const [exportError, setExportError]   = useState(null)
+
   const load = useCallback(async (showSpinner = false) => {
     if (showSpinner) setRefreshing(true)
     setError(null)
@@ -154,6 +183,32 @@ export default function LogViewerDrawer({ onClose }) {
     }
     return () => clearInterval(intervalRef.current)
   }, [autoRefresh, load])
+
+  const handleExport = async () => {
+    setExporting(true)
+    setExportError(null)
+    try {
+      const params = { start: exportStart, end: exportEnd, format: exportFormat }
+      if (exportAccount.trim()) params.account = exportAccount.trim()
+      if (filter !== 'all') params.type = filter
+      const res = await exportLogMessages(params)
+      const cd = res.headers?.['content-disposition'] ?? ''
+      const match = cd.match(/filename="?([^"]+)"?/)
+      const filename = match?.[1] ?? `exim-log_${exportStart}_${exportEnd}.${exportFormat}`
+      const url = window.URL.createObjectURL(res.data)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (e) {
+      setExportError(await extractErrorMessage(e))
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const visible = entries.filter(e => {
     if (filter !== 'all' && e.type !== filter) return false
@@ -217,6 +272,24 @@ export default function LogViewerDrawer({ onClose }) {
                 ))}
               </SelectContent>
             </Select>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setShowExport(v => !v)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 7,
+                    fontSize: 11, fontWeight: 500, cursor: 'pointer',
+                    border: showExport ? '1px solid #BAE6FD' : '1px solid #E2E8F0',
+                    background: showExport ? '#F0F9FF' : '#fff',
+                    color: showExport ? '#0369A1' : '#64748B', transition: 'all 0.15s',
+                  }}
+                >
+                  <Download size={11} />
+                  Exportar
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Exportar log por período e conta</TooltipContent>
+            </Tooltip>
             <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: 7, border: '1px solid #E2E8F0', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#64748B' }}>
               <X size={14} />
             </button>
@@ -250,6 +323,63 @@ export default function LogViewerDrawer({ onClose }) {
             onChange={e => setSearch(e.target.value)}
             style={{ width: '100%', padding: '6px 10px', borderRadius: 7, fontSize: 12, border: '1px solid #E2E8F0', outline: 'none', color: '#0F172A', background: '#F8FAFC', boxSizing: 'border-box' }}
           />
+
+          {showExport && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end', padding: '10px', borderRadius: 8, background: '#F8FAFC', border: '1px solid #E2E8F0' }}>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, color: '#64748B' }}>
+                De
+                <input type="date" value={exportStart} max={exportEnd}
+                  onChange={e => setExportStart(e.target.value)}
+                  style={{ padding: '5px 8px', borderRadius: 6, fontSize: 11, border: '1px solid #E2E8F0', color: '#0F172A' }} />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, color: '#64748B' }}>
+                Até
+                <input type="date" value={exportEnd} min={exportStart} max={isoDaysAgo(0)}
+                  onChange={e => setExportEnd(e.target.value)}
+                  style={{ padding: '5px 8px', borderRadius: 6, fontSize: 11, border: '1px solid #E2E8F0', color: '#0F172A' }} />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, color: '#64748B', flex: '1 1 160px', minWidth: 140 }}>
+                Conta (e-mail, opcional)
+                <input type="text" placeholder="usuario@dominio.com" value={exportAccount}
+                  onChange={e => setExportAccount(e.target.value)}
+                  style={{ padding: '5px 8px', borderRadius: 6, fontSize: 11, border: '1px solid #E2E8F0', color: '#0F172A' }} />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, color: '#64748B' }}>
+                Formato
+                <Select value={exportFormat} onValueChange={setExportFormat}>
+                  <SelectTrigger className="h-[28px] py-0 text-[11px]" style={{ minWidth: 78 }}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="csv">CSV</SelectItem>
+                    <SelectItem value="txt">Texto (.log)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+              <button
+                onClick={handleExport} disabled={exporting}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 7,
+                  fontSize: 11, fontWeight: 600, cursor: exporting ? 'default' : 'pointer',
+                  border: '1px solid #0EA5E9', background: '#0EA5E9', color: '#fff',
+                  opacity: exporting ? 0.6 : 1, height: 28,
+                }}
+              >
+                {exporting
+                  ? <RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} />
+                  : <Download size={12} />}
+                {exporting ? 'Exportando…' : 'Exportar'}
+              </button>
+              {filter !== 'all' && (
+                <span style={{ fontSize: 10, color: '#94A3B8', width: '100%' }}>
+                  Tipo filtrado atualmente aplicado à exportação: <strong>{TYPE_CONFIG[filter]?.label ?? filter}</strong>
+                </span>
+              )}
+              {exportError && (
+                <span style={{ fontSize: 11, color: '#DC2626', width: '100%' }}>{exportError}</span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Corpo */}

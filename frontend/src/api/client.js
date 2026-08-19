@@ -92,6 +92,15 @@ export const fetchLogMessages = (type, limit = 100, serverId = null) =>
 export const fetchLogTail = (limit = 300, serverId = null) =>
   api.get('/messages/tail', { params: { limit, ...(serverId ? { server_id: serverId } : {}) } }).then(r => r.data)
 
+// Retorna a resposta completa (não só .data) — quem chama precisa do
+// header Content-Disposition (nome do arquivo) e do blob para disparar
+// o download no navegador.
+export const exportLogMessages = (params, serverId = null) =>
+  api.get('/messages/export', {
+    params: { ...params, ...(serverId ? { server_id: serverId } : {}) },
+    responseType: 'blob',
+  })
+
 // ── Servidores ────────────────────────────────────────────────────────────
 export const fetchServers      = () => api.get('/servers').then(r => r.data)
 export const createServer      = (payload) => api.post('/servers', payload).then(r => r.data)
