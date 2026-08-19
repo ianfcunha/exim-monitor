@@ -15,6 +15,7 @@ server_cfg = {
 }
 """
 import base64
+import datetime
 import hashlib
 import io
 import json
@@ -412,14 +413,28 @@ _LOG_GREP: Dict[str, str] = {
 
 
 def _parse_log_line(line: str, msg_type: str) -> Optional[Dict[str, str]]:
-    """Parse de uma linha do mainlog do EXIM."""
+    """
+    Parse de uma linha do mainlog do EXIM.
+
+    Destinatário: confirmado contra amostra real do mainlog (não existe um
+    tag T=<...> com endereço — isso era suposição, T= é o nome do
+    transport, ex. "remote_smtp"). O endereço logo após o marcador de tipo
+    (<=/=>/**/==) É o destinatário nas linhas "=>" (delivered), "**"
+    (rejected) e "==" (deferred) — confirmado em mainlog.1 real. Já nas
+    linhas "<=" (sent/recebido), esse mesmo primeiro token é na verdade o
+    REMETENTE (duplicado do F=) — o destinatário de uma mensagem recebida
+    não aparece nessa linha, só na(s) linha(s) de entrega correspondente(s)
+    (mesmo message_id, linha "=>" separada) — por isso "recipient" fica
+    vazio para msg_type="sent".
+    """
+    raw = line.strip()
     m = re.match(
         r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})'
         r'(?:\s+\[\d+\])?'
         r'\s+([A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+)'
         r'\s+(\S+)'
         r'\s*(.*)',
-        line.strip(),
+        raw,
     )
     if not m:
         return None
@@ -429,8 +444,15 @@ def _parse_log_line(line: str, msg_type: str) -> Optional[Dict[str, str]]:
     sender_m = re.search(r'F=<([^>]*)>', rest)
     sender   = sender_m.group(1) if sender_m else ""
 
-    first_token = rest.split()[0] if rest.split() else ""
-    recipient   = first_token.strip("<>") if "@" in first_token else ""
+    recipient = ""
+    if msg_type != "sent":
+        first_token = rest.split()[0] if rest.split() else ""
+        recipient   = first_token.strip("<>:,;") if "@" in first_token else ""
+    elif not sender:
+        # Linha "<=" sem F= explícito (formato raro) — o primeiro token
+        # após o marcador é o próprio remetente, não um destinatário.
+        first_token = rest.split()[0] if rest.split() else ""
+        sender = first_token.strip("<>:,;") if "@" in first_token else ""
 
     detail = ""
     if msg_type == "delivered":
@@ -448,6 +470,8 @@ def _parse_log_line(line: str, msg_type: str) -> Optional[Dict[str, str]]:
         detail = f"{int(s.group(1)) // 1024} KB" if s else ""
 
     return {
+        "raw":        raw,
+        "type":       msg_type,
         "timestamp":  ts,
         "message_id": msg_id,
         "sender":     sender,
@@ -518,3 +542,112 @@ def get_log_entries(msg_type: str, limit: int = 200,
             entries.append(parsed)
 
     return list(reversed(entries))
+
+
+# ── Navegação por intervalo de datas (export por período/conta) ───────────
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_ACCOUNT_UNSAFE = re.compile(r"[^A-Za-z0-9._%+@-]+")
+_MAX_RANGE_DAYS = 92  # guarda-corpo — evita comando remoto/varredura gigante
+
+
+def _sanitize_account(account: str) -> str:
+    """Mesma cautela de _sanitize_actor/_sanitize_ip — reduz a caracteres
+    seguros de e-mail/local-part antes de interpolar no grep remoto."""
+    return _ACCOUNT_UNSAFE.sub("", account)[:128]
+
+
+def get_log_entries_ranged(
+    start_date: str,
+    end_date: str,
+    account: Optional[str] = None,
+    msg_type: Optional[str] = None,
+    limit: int = 5000,
+    server_cfg: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Varre o mainlog (arquivo ativo + rotacionados) num intervalo de datas
+    [start_date, end_date] (strings "YYYY-MM-DD", inclusive), filtrando
+    opcionalmente por conta (remetente OU destinatário — basta o e-mail ou
+    a parte local aparecer na linha, cobre os dois casos) e por tipo de
+    mensagem. Filtra remotamente via grep — não traz o log inteiro pela
+    SSH. Reconhece tanto o rotacionado genérico (.1/.1.gz) quanto o padrão
+    de rotação datada do cPanel/WHM (exim_mainlog-YYYYMMDD.gz), somando
+    candidatos para cada dia do intervalo.
+
+    Usado por GET /api/messages/export (Passo 4). Levanta SSHError em
+    parâmetros inválidos (datas fora de formato, intervalo invertido ou
+    maior que _MAX_RANGE_DAYS, tipo desconhecido).
+    """
+    if not (_DATE_RE.match(start_date) and _DATE_RE.match(end_date)):
+        raise SSHError("start/end devem estar no formato YYYY-MM-DD")
+
+    d0 = datetime.date.fromisoformat(start_date)
+    d1 = datetime.date.fromisoformat(end_date)
+    if d1 < d0:
+        raise SSHError(f"Intervalo invertido: end ({end_date}) anterior a start ({start_date})")
+    if (d1 - d0).days > _MAX_RANGE_DAYS:
+        raise SSHError(f"Intervalo maior que {_MAX_RANGE_DAYS} dias — reduza start/end")
+
+    day_list = []
+    d = d0
+    while d <= d1:
+        day_list.append(d.strftime("%Y%m%d"))
+        d += datetime.timedelta(days=1)
+    day_list_iso = [f"{d[:4]}-{d[4:6]}-{d[6:]}" for d in day_list]
+
+    if msg_type is not None and msg_type not in _LOG_GREP:
+        raise SSHError(f"Tipo inválido: '{msg_type}'. Opções: {', '.join(_LOG_GREP)}")
+
+    candidates = " ".join(f'"{p}"' for p in _LOG_CANDIDATES)
+    day_globs = " ".join(f"$ACTIVE-{day}.gz" for day in day_list)
+    # Filtra linhas fora do intervalo pedido nos arquivos que podem cobrir
+    # mais de um dia (ativo e .1/.1.gz) — os .gz datados já são por dia.
+    date_filter = "|".join(day_list_iso)
+
+    account_filter = ""
+    if account:
+        safe_account = _sanitize_account(account)
+        if not safe_account:
+            raise SSHError(f"Conta inválida: '{account}'")
+        account_filter = f" | grep -F '{safe_account}'"
+
+    type_filter = ""
+    if msg_type:
+        type_filter = f" | grep -E '{_LOG_GREP[msg_type]}'"
+
+    cmd = (
+        'ACTIVE=""\n'
+        f"for f in {candidates}; do [ -f \"$f\" ] && ACTIVE=\"$f\" && break; done\n"
+        '[ -z "$ACTIVE" ] && exit 0\n'
+        'FILES=""\n'
+        '[ -f "$ACTIVE" ] && FILES="$FILES $ACTIVE"\n'
+        '[ -f "$ACTIVE.1" ] && FILES="$FILES $ACTIVE.1"\n'
+        '[ -f "$ACTIVE.1.gz" ] && FILES="$FILES $ACTIVE.1.gz"\n'
+        f'for g in {day_globs}; do [ -f "$g" ] && FILES="$FILES $g"; done\n'
+        'for f in $FILES; do\n'
+        '    case "$f" in\n'
+        '        *.gz) zcat "$f" 2>/dev/null ;;\n'
+        '        *)    cat "$f" 2>/dev/null ;;\n'
+        '    esac\n'
+        'done | grep -E \'^(' + date_filter + ') \'' + account_filter + type_filter +
+        f' | tail -{limit}'
+    )
+    raw = _run_raw(cmd, timeout=60, server_cfg=server_cfg)
+
+    entries = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        detected_type = msg_type
+        if not detected_type:
+            detected_type = "other"
+            for marker, t in _TYPE_MARKERS.items():
+                if marker in line:
+                    detected_type = t
+                    break
+        parsed = _parse_log_line(line, detected_type)
+        entries.append(parsed if parsed else {"raw": line, "type": detected_type})
+
+    return entries
