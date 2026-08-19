@@ -3,7 +3,7 @@
  */
 import { ArrowLeft, RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { fetchAlertHistory, fetchAlertSettings, saveAlertSettings, testEmail, testTelegram, testWeeklyReport } from '../api/client'
+import { fetchAlertHistory, fetchAlertSettings, saveAlertSettings, testEmail, testTelegram, testWeeklyReport, testWebhook } from '../api/client'
 import { Select as SelectPrimitive, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { useServer } from '../contexts/ServerContext'
@@ -114,7 +114,7 @@ function GhostBtn({ onClick, children }) {
 
 /* ── Histórico de Alertas ── */
 const SEV_COLOR = { CRITICAL: '#DC2626', HIGH: '#D97706', MEDIUM: '#0EA5E9', LOW: '#64748B', OK: '#16A34A' }
-const CH_LABEL  = { email: '✉ E-mail', telegram: '✈ Telegram' }
+const CH_LABEL  = { email: '✉ E-mail', telegram: '✈ Telegram', webhook: '🔗 Webhook' }
 
 function AlertHistorySection() {
   const [rows, setRows]   = useState([])
@@ -257,7 +257,7 @@ export default function Settings({ onBack }) {
     }
   }
 
-  const TEST_FN = { email: testEmail, telegram: testTelegram, weeklyReport: testWeeklyReport }
+  const TEST_FN = { email: testEmail, telegram: testTelegram, weeklyReport: testWeeklyReport, webhook: testWebhook }
 
   const runTest = async (type) => {
     setTestMsg(prev => ({ ...prev, [type]: { text: 'Enviando…', err: false } }))
@@ -399,6 +399,28 @@ export default function Settings({ onBack }) {
                 <Feedback msg={testMsg.telegram?.text} isError={testMsg.telegram?.err} />
               </div>
             </div>
+          )}
+        </Section>
+
+        {/* Webhook */}
+        <Section title="Webhook Genérico">
+          <Field label="URL do webhook" hint="Recebe um POST em JSON (severidade, problema, servidor, timestamp) a cada alerta — deixe em branco para desativar">
+            <Input value={cfg.webhook_url} onChange={set('webhook_url')} placeholder="https://seu-endpoint.com/webhook" />
+          </Field>
+          {cfg.webhook_url && (
+            <>
+              <Field label="Secret (opcional)" hint="Assina o payload em HMAC-SHA256 — header X-EximMonitor-Signature">
+                <Input
+                  value={cfg.webhook_secret === MASK ? '' : (cfg.webhook_secret || '')}
+                  onChange={set('webhook_secret')} type="password"
+                  placeholder={cfg.webhook_secret === MASK ? 'Secret salvo — altere para trocar' : 'opcional'}
+                />
+              </Field>
+              <div style={{ marginTop: 14 }}>
+                <GhostBtn onClick={() => runTest('webhook')}>Enviar webhook de teste</GhostBtn>
+                <Feedback msg={testMsg.webhook?.text} isError={testMsg.webhook?.err} />
+              </div>
+            </>
           )}
         </Section>
 

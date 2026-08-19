@@ -5,6 +5,7 @@ Canais suportados:
   - E-mail via Resend API (preferencial — basta configurar resend_api_key)
   - E-mail via SMTP (fallback — SendGrid, Mailgun, Gmail, qualquer provedor)
   - Telegram via Bot API
+  - Webhook genérico (POST JSON, opcionalmente assinado em HMAC-SHA256)
 
 Logica de disparo:
   1. Severidade sobe para nivel >= threshold  (OK->HIGH, OK->CRITICAL, HIGH->CRITICAL)
@@ -15,6 +16,8 @@ Toda IO de rede e executada em thread separada (asyncio.to_thread) para
 nao bloquear o event loop.
 """
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
 import smtplib
@@ -24,7 +27,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Dict, Optional
 
-from .database import AlertHistory, AlertSettings, SessionLocal, get_alert_settings
+from .database import AlertHistory, AlertSettings, Server, SessionLocal, get_alert_settings
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +48,7 @@ def _server_state(server_id: Optional[int]) -> dict:
             "last_severity": "OK",
             "email_sent_at": None,
             "telegram_sent_at": None,
+            "webhook_sent_at": None,
         }
     return _state[server_id]
 
@@ -163,6 +167,33 @@ def _send_telegram_sync(cfg: AlertSettings, severity: str, problem: str,
     logger.info("Alerta Telegram enviado para chat %s", cfg.telegram_chat_id)
 
 
+def _send_webhook_sync(cfg: AlertSettings, severity: str, problem: str, queue_total: int,
+                       server_id: Optional[int], server_name: Optional[str]) -> None:
+    """
+    POST JSON genérico — integra com qualquer receptor (Slack incoming
+    webhook não entende esse formato bruto, mas serviços tipo n8n/Zapier/
+    endpoint proprio do cliente sim). Assina o corpo em HMAC-SHA256 quando
+    webhook_secret está configurado, no mesmo espírito de webhooks do
+    Stripe/GitHub — header X-EximMonitor-Signature = "sha256=<hex>".
+    """
+    payload = {
+        "severity":    severity,
+        "problem":     problem,
+        "queue_total": queue_total,
+        "server_id":   server_id,
+        "server_name": server_name,
+        "timestamp":   datetime.utcnow().isoformat() + "Z",
+    }
+    body = json.dumps(payload).encode()
+    headers = {"Content-Type": "application/json"}
+    if cfg.webhook_secret:
+        signature = hmac.new(cfg.webhook_secret.encode(), body, hashlib.sha256).hexdigest()
+        headers["X-EximMonitor-Signature"] = f"sha256={signature}"
+    req = urllib.request.Request(cfg.webhook_url, data=body, headers=headers)
+    urllib.request.urlopen(req, timeout=10)
+    logger.info("Webhook enviado para %s", cfg.webhook_url)
+
+
 # ── Histórico de alertas ───────────────────────────────────────────────────
 
 def _record_history(channel: str, severity: str, problem: str,
@@ -255,6 +286,24 @@ async def check_and_alert(severity: str, problem: str, queue_total: int,
                     logger.error("Falha ao enviar Telegram: %s", exc)
                     _record_history("telegram", severity, problem, queue_total, False, str(exc)[:500], server_id=server_id)
 
+        # ── Webhook ───────────────────────────────────────────────────
+        if cfg.webhook_url:
+            last = state["webhook_sent_at"]
+            if last is None or (now - last) >= cooldown:
+                server_name = None
+                if server_id is not None:
+                    server = db.get(Server, server_id)
+                    server_name = server.name if server else None
+                try:
+                    await asyncio.to_thread(
+                        _send_webhook_sync, cfg, severity, problem, queue_total, server_id, server_name
+                    )
+                    state["webhook_sent_at"] = now
+                    _record_history("webhook", severity, problem, queue_total, True, server_id=server_id)
+                except Exception as exc:
+                    logger.error("Falha ao enviar webhook: %s", exc)
+                    _record_history("webhook", severity, problem, queue_total, False, str(exc)[:500], server_id=server_id)
+
     finally:
         db.close()
 
@@ -270,4 +319,12 @@ async def send_test_telegram(cfg: AlertSettings) -> None:
     """Envia mensagem de teste no Telegram."""
     await asyncio.to_thread(
         _send_telegram_sync, cfg, "HIGH", "TESTE_ALERTA", 42
+    )
+
+
+async def send_test_webhook(cfg: AlertSettings, server_id: Optional[int] = None,
+                            server_name: Optional[str] = None) -> None:
+    """Envia webhook de teste — usado pelo endpoint POST /api/settings/test/webhook."""
+    await asyncio.to_thread(
+        _send_webhook_sync, cfg, "HIGH", "TESTE_ALERTA", 42, server_id, server_name
     )

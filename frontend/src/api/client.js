@@ -132,5 +132,7 @@ export const testTelegram       = (serverId = null) =>
   api.post('/settings/test/telegram', null, { params: serverId ? { server_id: serverId } : {} }).then(r => r.data)
 export const testWeeklyReport   = (serverId = null) =>
   api.post('/settings/test/weekly-report', null, { params: serverId ? { server_id: serverId } : {} }).then(r => r.data)
+export const testWebhook        = (serverId = null) =>
+  api.post('/settings/test/webhook', null, { params: serverId ? { server_id: serverId } : {} }).then(r => r.data)
 
 export default api

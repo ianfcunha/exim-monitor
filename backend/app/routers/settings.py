@@ -13,7 +13,7 @@ from typing import Optional
 
 from fastapi import Query
 
-from ..alerts import send_test_email, send_test_telegram
+from ..alerts import send_test_email, send_test_telegram, send_test_webhook
 from ..auth import get_current_user, require_admin
 from ..database import (
     AlertHistory, AlertSettings, Server, User, get_alert_settings, get_db, to_utc_iso,
@@ -49,6 +49,9 @@ class AlertSettingsSchema(BaseModel):
     cooldown_minutes:   int = Field(30, ge=1, le=1440)
     # Relatório semanal por e-mail
     weekly_report_enabled: bool = False
+    # Webhook genérico
+    webhook_url:    str = ""
+    webhook_secret: str = ""   # "" = nao alterar se vier mascarado
 
     class Config:
         from_attributes = True
@@ -74,6 +77,8 @@ def _to_response(cfg: AlertSettings) -> dict:
         "cooldown_minutes":    cfg.cooldown_minutes,
         "weekly_report_enabled":     cfg.weekly_report_enabled,
         "weekly_report_last_sent_at": to_utc_iso(cfg.weekly_report_last_sent_at),
+        "webhook_url":    cfg.webhook_url,
+        "webhook_secret": MASK if cfg.webhook_secret else "",
     }
 
 
@@ -110,6 +115,7 @@ def update_settings(
     cfg.queue_threshold    = payload.queue_threshold
     cfg.cooldown_minutes   = payload.cooldown_minutes
     cfg.weekly_report_enabled = payload.weekly_report_enabled
+    cfg.webhook_url         = payload.webhook_url
 
     # Atualiza campos sensiveis apenas se vieram preenchidos (nao mascarados)
     if payload.resend_api_key and payload.resend_api_key != MASK:
@@ -118,6 +124,8 @@ def update_settings(
         cfg.smtp_password = payload.smtp_password
     if payload.telegram_bot_token and payload.telegram_bot_token != MASK:
         cfg.telegram_bot_token = payload.telegram_bot_token
+    if payload.webhook_secret and payload.webhook_secret != MASK:
+        cfg.webhook_secret = payload.webhook_secret
 
     db.commit()
     db.refresh(cfg)
@@ -210,3 +218,25 @@ async def test_telegram(
     except Exception as exc:
         raise HTTPException(502, f"Falha ao enviar Telegram: {exc}")
     return {"ok": True, "message": f"Mensagem enviada ao chat {cfg.telegram_chat_id}"}
+
+
+@router.post("/test/webhook", summary="Envia webhook de teste")
+async def test_webhook(
+    server_id: Optional[int] = Query(None, description="Servidor especifico; omitido = config padrao/legada"),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    cfg = get_alert_settings(db, server_id=server_id)
+    if not cfg.webhook_url:
+        raise HTTPException(400, "Configure a URL do webhook antes de testar.")
+
+    server_name = None
+    if server_id is not None:
+        server = db.get(Server, server_id)
+        server_name = server.name if server else None
+
+    try:
+        await send_test_webhook(cfg, server_id=server_id, server_name=server_name)
+    except Exception as exc:
+        raise HTTPException(502, f"Falha ao enviar webhook: {exc}")
+    return {"ok": True, "message": f"Webhook de teste enviado para {cfg.webhook_url}"}

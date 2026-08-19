@@ -182,6 +182,11 @@ class AlertSettings(Base):
     # envio e reenviar o relatório fora de hora.
     weekly_report_last_sent_at = Column(DateTime, nullable=True)
 
+    # ── Webhook genérico ─────────────────────────────────────────────────
+    webhook_url    = Column(String(500), default="", nullable=False)
+    # Se preenchido, assina o payload em HMAC-SHA256 (header X-EximMonitor-Signature)
+    webhook_secret = Column(String(500), default="", nullable=False)
+
 
 class AlertHistory(Base):
     """

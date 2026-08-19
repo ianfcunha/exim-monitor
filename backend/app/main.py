@@ -32,7 +32,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Versão atual do schema — atualizar junto com cada nova migration
-_SCHEMA_VERSION = "007"
+_SCHEMA_VERSION = "008"
 
 _DDL_ALEMBIC_VERSION = """
     CREATE TABLE IF NOT EXISTS alembic_version (
@@ -323,6 +323,24 @@ def run_migrations() -> None:
                 {"v": "007"},
             )
             logger.info("Migration 007 aplicada com sucesso")
+            current = {"007"}
+
+        if "007" in current and "008" not in current:
+            logger.info("Aplicando migration 007 → 008 (webhook genérico)...")
+            conn.execute(text("""
+                ALTER TABLE alert_settings
+                    ADD COLUMN IF NOT EXISTS webhook_url VARCHAR(500) NOT NULL DEFAULT ''
+            """))
+            conn.execute(text("""
+                ALTER TABLE alert_settings
+                    ADD COLUMN IF NOT EXISTS webhook_secret VARCHAR(500) NOT NULL DEFAULT ''
+            """))
+            conn.execute(text("DELETE FROM alembic_version"))
+            conn.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
+                {"v": "008"},
+            )
+            logger.info("Migration 008 aplicada com sucesso")
 
         logger.info("Banco de dados pronto (schema %s)", _SCHEMA_VERSION)
 
