@@ -10,7 +10,7 @@ const Switch = React.forwardRef(({ className, ...props }, ref) => (
       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card',
       'disabled:cursor-not-allowed disabled:opacity-50',
       'data-[state=checked]:border-primary-dark data-[state=checked]:bg-primary',
-      'data-[state=unchecked]:border-[#CBD5E1] data-[state=unchecked]:bg-border',
+      'data-[state=unchecked]:border-border data-[state=unchecked]:bg-border',
       className
     )}
     {...props}

@@ -4,6 +4,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { AuthProvider } from './contexts/AuthContext'
 import { ServerProvider } from './contexts/ServerContext'
 import { ToastProvider } from './contexts/ToastContext'
+import { useDarkMode } from './hooks/useDarkMode'
 import ActionHistoryPage from './pages/ActionHistoryPage'
 import Dashboard from './pages/Dashboard'
 import InviteAccept from './pages/InviteAccept'
@@ -19,6 +20,10 @@ function getInviteToken() {
 
 export default function App() {
   const [token, setToken] = useState(() => localStorage.getItem('exim_token'))
+  // Chamado incondicionalmente, antes de qualquer early-return — aplica a
+  // classe .dark no <html> em toda tela (Login incluso), não só onde o
+  // controle de toggle é exibido (menu de configurações do Dashboard).
+  const { isDark, toggleTheme } = useDarkMode()
 
   useEffect(() => {
     if (token) localStorage.setItem('exim_token', token)
@@ -42,7 +47,7 @@ export default function App() {
       <ServerProvider>
         <BrowserRouter>
           <Routes>
-            <Route path="/dashboard" element={<Dashboard onLogout={logout} />} />
+            <Route path="/dashboard" element={<Dashboard onLogout={logout} isDark={isDark} onToggleTheme={toggleTheme} />} />
             <Route path="/servers"   element={<ServersPage />} />
             <Route path="/users"     element={<UsersPage />} />
             <Route path="/settings"  element={<Settings />} />

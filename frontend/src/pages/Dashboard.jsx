@@ -12,7 +12,7 @@
  */
 import {
   CheckCircle, ChevronDown, Clock, FileText, History, Inbox,
-  LogOut, MailOpen, RefreshCw, Server, Settings, Users, XCircle,
+  LogOut, MailOpen, Moon, RefreshCw, Server, Settings, Sun, Users, XCircle,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -106,7 +106,7 @@ function StatusPill({ color, label, children }) {
 }
 
 // ── Dropdown de configurações ────────────────────────────────────────────────
-function SettingsMenu({ onLogout, isAdmin }) {
+function SettingsMenu({ onLogout, isAdmin, isDark, onToggleTheme }) {
   const navigate = useNavigate()
   return (
     <DropdownMenu>
@@ -138,6 +138,11 @@ function SettingsMenu({ onLogout, isAdmin }) {
             <History size={13} /> Histórico de ações
           </DropdownMenuItem>
         )}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={(e) => { e.preventDefault(); onToggleTheme() }}>
+          {isDark ? <Sun size={13} /> : <Moon size={13} />}
+          {isDark ? 'Modo claro' : 'Modo escuro'}
+        </DropdownMenuItem>
         {isAdmin && <DropdownMenuSeparator />}
         <DropdownMenuItem destructive onSelect={onLogout}>
           <LogOut size={13} /> Sair
@@ -157,7 +162,7 @@ const METRIC_TOOLTIPS = {
 }
 
 // ── Componente principal ─────────────────────────────────────────────────────
-export default function Dashboard({ onLogout }) {
+export default function Dashboard({ onLogout, isDark, onToggleTheme }) {
   const { isAdmin, username } = useAuth()
   const { activeServer }      = useServer()
   const quick                 = useQuickStatus()
@@ -418,7 +423,7 @@ export default function Dashboard({ onLogout }) {
               <span className="hidden sm:inline">Logs</span>
             </HBtn>
 
-            <SettingsMenu onLogout={onLogout} isAdmin={isAdmin} />
+            <SettingsMenu onLogout={onLogout} isAdmin={isAdmin} isDark={isDark} onToggleTheme={onToggleTheme} />
           </div>
         </div>
       </header>
