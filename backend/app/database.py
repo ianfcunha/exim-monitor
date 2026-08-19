@@ -11,7 +11,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, create_engine, func
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text, create_engine, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, relationship, sessionmaker
 from sqlalchemy.pool import QueuePool
@@ -249,7 +249,10 @@ class ActionHistory(Base):
     action      = Column(String(50),  nullable=False)
     param       = Column(String(300), nullable=True)
     success     = Column(Boolean,     nullable=False, default=True)
-    message     = Column(String(500), nullable=True)
+    # TEXT (não VARCHAR(500) — migration 009): before_snapshot de ações
+    # destrutivas (amostra de IDs da fila afetada, estado de bloqueio
+    # anterior etc.) é anexado aqui pelo router, e não cabia em 500 chars.
+    message     = Column(Text, nullable=True)
 
 
 def record_action_history(

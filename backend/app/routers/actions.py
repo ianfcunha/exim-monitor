@@ -16,9 +16,12 @@ Ações disponíveis:
                     leitura (param: domínio, opcional — sem ele o
                     script tenta detectar a partir do remetente ativo)
 
-Body JSON: { "param": "valor" }  (opcional conforme a ação)
+Body JSON: { "param": "valor", "snapshot": true }  (snapshot opcional,
+default true — captura o estado antes de ações destrutivas; ver
+before_snapshot no JSON de resposta e em GET /history)
 Viewer não pode executar ações.
 """
+import json
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -58,6 +61,11 @@ ACTIONS_REQUIRING_PARAM = frozenset({
 
 class ActionRequest(BaseModel):
     param: Optional[str] = None
+    # Captura o estado antes de ações destrutivas (before_snapshot) —
+    # exposto como opção pro usuário decidir antes de confirmar a ação
+    # (ex.: pular numa fila gigante pra não pagar o custo de listar IDs).
+    # Ações não-destrutivas simplesmente ignoram esse campo.
+    snapshot: bool = True
 
 
 # ── Score de confiança de domínio (check-deliverability) ────────────────────
@@ -161,7 +169,8 @@ def execute_action(
 
     try:
         result = run_action(
-            action, body.param, server_cfg=server_cfg, actor=current_user.username
+            action, body.param, server_cfg=server_cfg, actor=current_user.username,
+            snapshot=body.snapshot,
         )
     except SSHError as exc:
         record_action_history(
@@ -173,10 +182,24 @@ def execute_action(
     if action == "check-deliverability" and result.get("success", False):
         result["trust_score"] = _compute_trust_score(result)
 
+    # before_snapshot (estado antes de ações destrutivas — clean-*/block-*)
+    # não tem coluna própria em ActionHistory; vai anexado ao `message`
+    # (por isso essa coluna virou TEXT na migration 009 — varchar(500) não
+    # sobraria espaço pra amostra de IDs + mensagem). Só o histórico
+    # persistido carrega isso — a resposta HTTP já devolve before_snapshot
+    # como campo estruturado separado, sem precisar reparsear o texto.
+    history_message = result.get("message")
+    before_snapshot = result.get("before_snapshot")
+    if before_snapshot:
+        history_message = (
+            f"{history_message}\n\n--- Estado antes da ação ---\n"
+            f"{json.dumps(before_snapshot, ensure_ascii=False, indent=2)}"
+        )
+
     record_action_history(
         db, server_id=server_id, actor=current_user.username, action=action,
         param=body.param, success=result.get("success", False),
-        message=result.get("message"),
+        message=history_message,
     )
 
     if not result.get("success", False):

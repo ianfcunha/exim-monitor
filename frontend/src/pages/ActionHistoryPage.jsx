@@ -4,19 +4,30 @@
  * precisar SSH de volta no servidor pra ler actions.log em texto.
  * Apenas admins acessam esta página.
  */
-import { ArrowLeft, CheckCircle, History, XCircle } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { ArrowLeft, CheckCircle, ChevronDown, ChevronRight, History, XCircle } from 'lucide-react'
+import { Fragment, useEffect, useState } from 'react'
 import { fetchActionHistory } from '../api/client'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useServer } from '../contexts/ServerContext'
 
 const LIMIT_OPTIONS = [50, 100, 200, 500]
+const SNAPSHOT_MARKER = '\n\n--- Estado antes da ação ---\n'
 
 function fmt(iso) {
   return new Date(iso).toLocaleString('pt-BR', {
     day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit',
   })
+}
+
+// message = "<mensagem legível>" + SNAPSHOT_MARKER + "<JSON do before_snapshot>",
+// anexados no backend (routers/actions.py) por não haver coluna própria
+// pro snapshot — separa de volta pra exibir cada parte com seu próprio estilo.
+function splitMessage(message) {
+  if (!message) return { text: '', snapshot: null }
+  const idx = message.indexOf(SNAPSHOT_MARKER)
+  if (idx === -1) return { text: message, snapshot: null }
+  return { text: message.slice(0, idx), snapshot: message.slice(idx + SNAPSHOT_MARKER.length) }
 }
 
 export default function ActionHistoryPage({ onBack }) {
@@ -26,8 +37,17 @@ export default function ActionHistoryPage({ onBack }) {
   const [error, setError]       = useState(null)
   const [serverId, setServerId] = useState('all')
   const [limit, setLimit]       = useState(100)
+  const [expanded, setExpanded] = useState(() => new Set())
 
   const serverName = (id) => servers.find(s => s.id === id)?.name ?? (id ? `#${id}` : '—')
+
+  const toggleExpanded = (id) => {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
 
   const load = () => {
     setLoading(true)
@@ -136,6 +156,7 @@ export default function ActionHistoryPage({ onBack }) {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
+                    <th style={{ padding: '8px 4px', width: 28 }} aria-hidden="true" />
                     <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94A3B8', whiteSpace: 'nowrap' }}>Quando</th>
                     <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94A3B8', whiteSpace: 'nowrap' }}>Ator</th>
                     <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94A3B8', whiteSpace: 'nowrap' }}>Ação</th>
@@ -145,36 +166,79 @@ export default function ActionHistoryPage({ onBack }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map(r => (
-                    <tr key={r.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
-                      <td style={{ padding: '9px 12px', color: '#64748B', whiteSpace: 'nowrap', fontFamily: 'monospace', fontSize: 11 }}>
-                        {fmt(r.executed_at)}
-                      </td>
-                      <td style={{ padding: '9px 12px', color: '#0F172A', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                        {r.actor}
-                      </td>
-                      <td style={{ padding: '9px 12px', color: '#0F172A', whiteSpace: 'nowrap' }}>
-                        {r.action}
-                      </td>
-                      <td style={{ padding: '9px 12px', color: '#64748B', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.param ?? ''}>
-                        {r.param ?? '—'}
-                      </td>
-                      <td style={{ padding: '9px 12px', color: '#64748B', whiteSpace: 'nowrap' }}>
-                        {serverName(r.server_id)}
-                      </td>
-                      <td style={{ padding: '9px 12px', whiteSpace: 'nowrap' }}>
-                        {r.success ? (
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: '#F0FDF4', color: '#15803D', border: '1px solid #BBF7D0' }}>
-                            <CheckCircle size={10} /> Sucesso
-                          </span>
-                        ) : (
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: '#FEF2F2', color: '#991B1B', border: '1px solid #FECACA' }}>
-                            <XCircle size={10} /> Falha
-                          </span>
+                  {rows.map(r => {
+                    const { text: msgText, snapshot } = splitMessage(r.message)
+                    const hasDetails = !!(msgText || snapshot)
+                    const isOpen = expanded.has(r.id)
+                    return (
+                      <Fragment key={r.id}>
+                        <tr style={{ borderBottom: isOpen ? 'none' : '1px solid #F1F5F9' }}>
+                          <td style={{ padding: '9px 4px', textAlign: 'center' }}>
+                            {hasDetails && (
+                              <button
+                                onClick={() => toggleExpanded(r.id)}
+                                aria-expanded={isOpen}
+                                aria-label={isOpen ? 'Ocultar detalhes' : 'Mostrar detalhes'}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8', display: 'flex', padding: 2 }}
+                              >
+                                {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                              </button>
+                            )}
+                          </td>
+                          <td style={{ padding: '9px 12px', color: '#64748B', whiteSpace: 'nowrap', fontFamily: 'monospace', fontSize: 11 }}>
+                            {fmt(r.executed_at)}
+                          </td>
+                          <td style={{ padding: '9px 12px', color: '#0F172A', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                            {r.actor}
+                          </td>
+                          <td style={{ padding: '9px 12px', color: '#0F172A', whiteSpace: 'nowrap' }}>
+                            {r.action}
+                          </td>
+                          <td style={{ padding: '9px 12px', color: '#64748B', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.param ?? ''}>
+                            {r.param ?? '—'}
+                          </td>
+                          <td style={{ padding: '9px 12px', color: '#64748B', whiteSpace: 'nowrap' }}>
+                            {serverName(r.server_id)}
+                          </td>
+                          <td style={{ padding: '9px 12px', whiteSpace: 'nowrap' }}>
+                            {r.success ? (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: '#F0FDF4', color: '#15803D', border: '1px solid #BBF7D0' }}>
+                                <CheckCircle size={10} /> Sucesso
+                              </span>
+                            ) : (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: '#FEF2F2', color: '#991B1B', border: '1px solid #FECACA' }}>
+                                <XCircle size={10} /> Falha
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                        {isOpen && hasDetails && (
+                          <tr style={{ borderBottom: '1px solid #F1F5F9' }}>
+                            <td />
+                            <td colSpan={6} style={{ padding: '0 12px 12px' }}>
+                              <div style={{ borderRadius: 8, background: '#F8FAFC', border: '1px solid #E2E8F0', padding: '10px 12px' }}>
+                                {msgText && (
+                                  <p style={{ margin: 0, fontSize: 12, color: '#334155', whiteSpace: 'pre-wrap' }}>{msgText}</p>
+                                )}
+                                {snapshot && (
+                                  <div style={{ marginTop: msgText ? 8 : 0 }}>
+                                    <p style={{ margin: '0 0 4px', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94A3B8' }}>
+                                      Estado antes da ação
+                                    </p>
+                                    <pre style={{
+                                      margin: 0, fontSize: 11, fontFamily: 'monospace', color: '#0F172A',
+                                      background: '#fff', border: '1px solid #E2E8F0', borderRadius: 6,
+                                      padding: '8px 10px', overflowX: 'auto', whiteSpace: 'pre',
+                                    }}>{snapshot}</pre>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
                         )}
-                      </td>
-                    </tr>
-                  ))}
+                      </Fragment>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>

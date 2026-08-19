@@ -292,14 +292,24 @@ def _sanitize_actor(actor: str) -> str:
 
 def run_action(action: str, param: Optional[str] = None,
                server_cfg: Optional[Dict[str, Any]] = None,
-               actor: Optional[str] = None) -> Dict[str, Any]:
-    """Executa uma ação isolada e retorna o JSON de resultado."""
+               actor: Optional[str] = None,
+               snapshot: bool = True) -> Dict[str, Any]:
+    """
+    Executa uma ação isolada e retorna o JSON de resultado.
+
+    snapshot=True (default): pede ao script pra incluir before_snapshot
+    (estado antes de ações destrutivas) na resposta — ver diag-exim.sh
+    --snapshot=. O usuário pode desativar antes de confirmar a ação
+    (custo extra de listar IDs antes de limpar filas muito grandes).
+    """
     action_arg = f"{action}:{param}" if param else action
     args = f"--action={action_arg}"
     if actor:
         safe_actor = _sanitize_actor(actor)
         if safe_actor:
             args += f" --actor={safe_actor}"
+    if not snapshot:
+        args += " --snapshot=0"
     return _run(args, server_cfg)
 
 

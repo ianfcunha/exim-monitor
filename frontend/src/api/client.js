@@ -64,10 +64,10 @@ export const refreshStatus = (serverId = null) =>
   api.post('/status/refresh', null, { params: serverId ? { server_id: serverId } : {} }).then(r => r.data)
 
 // ── Acoes (com server_id) ──────────────────────────────────────────────────
-export const runAction = (action, param = null, serverId = null) =>
+export const runAction = (action, param = null, serverId = null, snapshot = true) =>
   api.post(
     `/actions/${action}`,
-    { param },
+    { param, snapshot },
     { params: serverId ? { server_id: serverId } : {} }
   ).then(r => r.data)
 

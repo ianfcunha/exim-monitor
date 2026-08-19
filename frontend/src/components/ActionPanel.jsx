@@ -10,6 +10,14 @@ import { useRef, useState } from 'react'
 import { runAction } from '../api/client'
 import { Button } from '@/components/ui/button'
 import { useToast } from '../contexts/ToastContext'
+import { useServer } from '../contexts/ServerContext'
+
+// Ações que suportam before_snapshot no diag-exim.sh (Sessão 2, Item 1) —
+// só essas mostram o checkbox de captura de estado antes de confirmar.
+const SNAPSHOT_ACTIONS = new Set([
+  'clean-full', 'clean-frozen', 'clean-bounces', 'clean-sender', 'clean-auth',
+  'block-ip', 'block-sender',
+])
 
 const ACTIONS = [
   { id: 'retry-queue',   label: 'Reprocessar fila',   Icon: RotateCcw,      color: 'sky',    confirm: false, param: null },
@@ -32,10 +40,12 @@ const COLOR_MAP = {
 
 export default function ActionPanel({ onActionComplete, recommendedActions = [] }) {
   const toast                       = useToast()
+  const { activeServer }            = useServer()
   const [pending, setPending]       = useState(null)
   const [confirmId, setConfirmId]   = useState(null)
   const [paramValue, setParamValue] = useState('')
   const [paramError, setParamError] = useState('')
+  const [snapshot, setSnapshot]     = useState(true)
   const inputRef                    = useRef(null)
 
   const hasRecommended = recommendedActions.length > 0
@@ -43,6 +53,7 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
   const requestAction = (action) => {
     setParamValue('')
     setParamError('')
+    setSnapshot(true)
     setConfirmId(action.id)
     if (action.param) setTimeout(() => inputRef.current?.focus(), 50)
   }
@@ -68,7 +79,7 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
     setConfirmId(null)
     setPending(action.id)
     try {
-      const res = await runAction(action.id, param)
+      const res = await runAction(action.id, param, activeServer?.id ?? null, snapshot)
       toast({ type: 'ok', msg: res.message || `${action.label} concluído.` })
       onActionComplete?.()
     } catch (err) {
@@ -178,6 +189,18 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
                 </span>
               )}
             </div>
+          )}
+
+          {SNAPSHOT_ACTIONS.has(confirmAction.id) && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, fontSize: 11, color: '#991B1B', cursor: 'pointer', userSelect: 'none' }}>
+              <input
+                type="checkbox"
+                checked={snapshot}
+                onChange={e => setSnapshot(e.target.checked)}
+                style={{ width: 13, height: 13, accentColor: '#DC2626' }}
+              />
+              Registrar o estado atual antes de executar (recomendado)
+            </label>
           )}
 
           <div className="flex gap-2">

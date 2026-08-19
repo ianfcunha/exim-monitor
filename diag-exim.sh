@@ -25,6 +25,18 @@
 #                          check-ip-status --ip=<ip> — status em CSF/
 #                          Imunify360/MagicSpam (monitoramento)
 #                          unblock-ip --ip=<ip> --tool=csf|imunify360
+#        --snapshot=0    desativa o before_snapshot das ações destrutivas
+#                          acima (ligado por padrão — ver Changelog v5.7)
+# ============================================================
+# Changelog v5.7:
+#   - Novo: before_snapshot no JSON de ações destrutivas (clean-full/
+#           frozen/bounces/sender/auth, block-ip/sender) — estado
+#           relevante capturado ANTES de mutar (contagem + amostra de IDs
+#           da fila afetada, ou se o IP/sender já estava bloqueado) para
+#           dar visibilidade real de auditoria, não é undo — mensagens
+#           removidas continuam removidas. Ligado por padrão; --snapshot=0
+#           desativa (ex.: filas gigantes onde o usuário não quer o custo
+#           extra de listar IDs antes de limpar).
 # ============================================================
 # Changelog v5.6:
 #   - Novo: check_cert_json() — expiração do certificado TLS via STARTTLS
@@ -173,7 +185,7 @@
 # exiqgrep etc. costumam morar) sejam encontrados mesmo assim.
 export PATH="$PATH:/usr/sbin:/sbin:/usr/local/sbin"
 
-VERSION="5.6"
+VERSION="5.7"
 LOG_PATH="/var/log/exim4/mainlog"
 # Lista única de candidatos a mainlog — consumida por collect() (quick e
 # completo) e run_check(). Debian/exim4, Debian/exim genérico, cPanel/WHM
@@ -190,6 +202,7 @@ QUEUE_SAMPLE_THRESHOLD=10000  # acima disso usa amostra da fila
 QUEUE_LINES=5000
 HOURS_WINDOW=6                # janela padrão para análise por hora
 GLOBAL_TIMEOUT=120            # timeout total de coleta em segundos (T2-1)
+SNAPSHOT_SAMPLE_LIMIT=20      # max de IDs de mensagem no before_snapshot de acoes destrutivas
 
 # ── Thresholds de classificação — configuráveis via variável de ambiente ──
 # Exemplo: EXIM_TH_AUTH_ABUSE=100 bash diag-exim.sh --quick
@@ -250,6 +263,7 @@ ACTOR_NAME=""          # T3-3: usuário que disparou a ação (--actor=)
 PROFILE="standard"     # T3-4: perfil de coleta (light|standard|full)
 IP_PARAM=""            # --action=check-ip-status/unblock-ip: --ip=<ip>
 TOOL_PARAM=""           # --action=unblock-ip: --tool=csf|imunify360
+SNAPSHOT_MODE=1         # --action=<destrutiva>: captura before_snapshot por padrao; --snapshot=0 desativa
 for arg in "$@"; do
     case "$arg" in
         --auto)        AUTO_MODE=1 ;;
@@ -269,6 +283,7 @@ for arg in "$@"; do
         --profile=*)   PROFILE="${arg#--profile=}" ;;
         --ip=*)        IP_PARAM="${arg#--ip=}" ;;
         --tool=*)      TOOL_PARAM="${arg#--tool=}" ;;
+        --snapshot=*)  SNAPSHOT_MODE="${arg#--snapshot=}" ;;
     esac
 done
 
@@ -1346,6 +1361,26 @@ _validate_action_param() {
 }
 
 # ============================================================
+# SNAPSHOT "ANTES" DE AÇÕES DESTRUTIVAS
+# Converte uma lista de IDs (uma por linha, já filtrados pelo padrão
+# alfanumérico de Message-ID do Exim — ver os grep -E '^[A-Za-z0-9-]{6,}$'
+# usados antes de montar essas listas) num array JSON de strings. Usado
+# por execute_action() para compor "before_snapshot" — visibilidade de
+# reversibilidade real na auditoria, não é undo de verdade (mensagens
+# removidas continuam removidas), só registra o que existia antes.
+# ============================================================
+_json_id_array() {
+    local ids="$1" out="" first=1 id
+    while IFS= read -r id; do
+        [ -z "$id" ] && continue
+        [ "$first" -eq 1 ] || out="${out},"
+        out="${out}\"${id}\""
+        first=0
+    done <<< "$ids"
+    printf '%s' "$out"
+}
+
+# ============================================================
 # EXECUTOR DE AÇÕES — modo --action=
 # Despacha para a função de limpeza/bloqueio correspondente
 # e emite JSON de resultado. Não requer análise prévia.
@@ -1363,30 +1398,35 @@ execute_action() {
 
         clean-full)
             local count; count=$("$EXIM_BIN" -bpc 2>/dev/null || echo 0)
-            timeout "$GLOBAL_TIMEOUT" "$EXIM_BIN" -bp 2>/dev/null \
-                | awk '{print $3}' \
-                | grep -E '^[A-Za-z0-9-]{6,}$' \
-                | xargs -r -P4 "$EXIM_BIN" -Mrm >/dev/null 2>&1
+            local ids; ids=$(timeout "$GLOBAL_TIMEOUT" "$EXIM_BIN" -bp 2>/dev/null \
+                | awk '{print $3}' | grep -E '^[A-Za-z0-9-]{6,}$')
+            local _before=""
+            [ "$SNAPSHOT_MODE" = "1" ] && _before="\"before_snapshot\": {\"queue_total\": ${count:-0}, \"sample_ids\": [$(_json_id_array "$(echo "$ids" | head -"$SNAPSHOT_SAMPLE_LIMIT")")]}"
+            echo "$ids" | xargs -r -P4 "$EXIM_BIN" -Mrm >/dev/null 2>&1
             output_action_json "true" "$cmd" \
-                "Fila limpa — $count mensagens removidas"
+                "Fila limpa — $count mensagens removidas" "$_before"
             ;;
 
         clean-frozen)
             local ids; ids=$(exiqgrep -z -i 2>/dev/null \
                 | grep -E '^[A-Za-z0-9-]{6,}$')
             local count; count=$(echo "$ids" | grep -c . 2>/dev/null); count=${count:-0}
+            local _before=""
+            [ "$SNAPSHOT_MODE" = "1" ] && _before="\"before_snapshot\": {\"frozen_count\": ${count}, \"sample_ids\": [$(_json_id_array "$(echo "$ids" | head -"$SNAPSHOT_SAMPLE_LIMIT")")]}"
             echo "$ids" | xargs -r -P4 "$EXIM_BIN" -Mrm >/dev/null 2>&1
             output_action_json "true" "$cmd" \
-                "$count mensagens frozen removidas"
+                "$count mensagens frozen removidas" "$_before"
             ;;
 
         clean-bounces)
             local ids; ids=$($SUDO exiqgrep -f '<>' -i 2>/dev/null \
                 | grep -E '^[A-Za-z0-9-]{6,}$')
             local count; count=$(echo "$ids" | grep -c . 2>/dev/null); count=${count:-0}
+            local _before=""
+            [ "$SNAPSHOT_MODE" = "1" ] && _before="\"before_snapshot\": {\"bounce_count\": ${count}, \"sample_ids\": [$(_json_id_array "$(echo "$ids" | head -"$SNAPSHOT_SAMPLE_LIMIT")")]}"
             echo "$ids" | xargs -r -P4 "$EXIM_BIN" -Mrm >/dev/null 2>&1
             output_action_json "true" "$cmd" \
-                "$count bounces (<>) removidos"
+                "$count bounces (<>) removidos" "$_before"
             ;;
 
         clean-sender)
@@ -1403,9 +1443,11 @@ execute_action() {
             local ids; ids=$($SUDO exiqgrep -f "$param" -i 2>/dev/null \
                 | grep -E '^[A-Za-z0-9-]{6,}$')
             local count; count=$(echo "$ids" | grep -c . 2>/dev/null); count=${count:-0}
+            local _before=""
+            [ "$SNAPSHOT_MODE" = "1" ] && _before="\"before_snapshot\": {\"count\": ${count}, \"sender\": \"${param}\", \"sample_ids\": [$(_json_id_array "$(echo "$ids" | head -"$SNAPSHOT_SAMPLE_LIMIT")")]}"
             echo "$ids" | xargs -r -P4 "$EXIM_BIN" -Mrm >/dev/null 2>&1
             output_action_json "true" "$cmd" \
-                "$count mensagens de '$param' removidas"
+                "$count mensagens de '$param' removidas" "$_before"
             ;;
 
         clean-auth)
@@ -1419,13 +1461,16 @@ execute_action() {
                     "Parâmetro inválido: '$param' contém caracteres não permitidos"
                 exit 1
             fi
-            local removed=0
+            local removed=0 _match_ids=""
             for mid in $(exiqgrep -f "" -i 2>/dev/null | head -500); do
                 "$EXIM_BIN" -Mvh "$mid" 2>/dev/null | grep -q "auth_id.*${param}" \
-                    && { "$EXIM_BIN" -Mrm "$mid" >/dev/null 2>&1; removed=$((removed+1)); }
+                    && { _match_ids="${_match_ids}${mid}"$'\n'; removed=$((removed+1)); }
             done
+            local _before=""
+            [ "$SNAPSHOT_MODE" = "1" ] && _before="\"before_snapshot\": {\"count\": ${removed}, \"auth_user\": \"${param}\", \"sample_ids\": [$(_json_id_array "$(printf '%s' "$_match_ids" | head -"$SNAPSHOT_SAMPLE_LIMIT")")]}"
+            printf '%s' "$_match_ids" | xargs -r "$EXIM_BIN" -Mrm >/dev/null 2>&1
             output_action_json "true" "$cmd" \
-                "$removed mensagens do usuário '$param' removidas"
+                "$removed mensagens do usuário '$param' removidas" "$_before"
             ;;
 
         block-ip)
@@ -1450,7 +1495,15 @@ execute_action() {
             # >/dev/null (não só 2>/dev/null): algumas builds de iptables
             # imprimem a regra encontrada em stdout mesmo em -C (check),
             # o que contaminaria o JSON de saída com uma linha extra
-            if $SUDO iptables -C INPUT -s "$param" -j DROP >/dev/null 2>&1; then
+            local _already_iptables=0
+            $SUDO iptables -C INPUT -s "$param" -j DROP >/dev/null 2>&1 && _already_iptables=1
+            local _already_persisted=0
+            [ -f /etc/firewall.d/03_custom ] && grep -qF "$param" /etc/firewall.d/03_custom 2>/dev/null && _already_persisted=1
+            local _before=""
+            if [ "$SNAPSHOT_MODE" = "1" ]; then
+                _before="\"before_snapshot\": {\"already_blocked_iptables\": $([ "$_already_iptables" -eq 1 ] && printf true || printf false), \"already_persisted\": $([ "$_already_persisted" -eq 1 ] && printf true || printf false)}"
+            fi
+            if [ "$_already_iptables" -eq 1 ]; then
                 _result_msgs="iptables: já bloqueado"
             else
                 if $SUDO iptables -I INPUT -s "$param" -j DROP >/dev/null 2>&1; then
@@ -1464,7 +1517,7 @@ execute_action() {
             local _persist_msg
             _persist_msg=$(_block_ip_persist "$param" "# Bloqueado via API em $DATE")
             output_action_json "true" "$cmd" \
-                "IP $param processado — ${_result_msgs}; ${_persist_msg}"
+                "IP $param processado — ${_result_msgs}; ${_persist_msg}" "$_before"
             ;;
 
         check-ip-status)
@@ -1571,11 +1624,13 @@ execute_action() {
                     "Remetente $param já está na blacklist ($exim_bl_s)"
                 exit 0
             fi
+            local _before=""
+            [ "$SNAPSHOT_MODE" = "1" ] && _before="\"before_snapshot\": {\"already_blacklisted\": false, \"blacklist_file\": \"${exim_bl_s}\"}"
             printf '%s\n' "$param" | $SUDO tee -a "$exim_bl_s" >/dev/null 2>&1 \
                 || { output_action_json "false" "$cmd" \
                     "Falha ao escrever em $exim_bl_s"; exit 1; }
             output_action_json "true" "$cmd" \
-                "Remetente $param adicionado à blacklist ($exim_bl_s)"
+                "Remetente $param adicionado à blacklist ($exim_bl_s)" "$_before"
             ;;
 
         retry-queue)
