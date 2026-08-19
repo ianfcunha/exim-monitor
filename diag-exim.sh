@@ -21,7 +21,22 @@
 #                          block-ip:<ip> | block-sender:<addr> | retry-queue
 #                          check-deliverability[:dominio] — blocklists via
 #                          DNSBL + SPF/DKIM/DMARC, sem alterar nada
+#                          check-ip-status --ip=<ip> — status em CSF/
+#                          Imunify360/MagicSpam (monitoramento)
+#                          unblock-ip --ip=<ip> --tool=csf|imunify360
 # ============================================================
+# Changelog v5.5:
+#   - Novo: --action=check-ip-status --ip=<ip> — consulta CSF (csf -g +
+#           lfd.log) e Imunify360 (ip-list local list --by-ip --json);
+#           MagicSpam entra só como monitoramento/TODO (cliente resolve
+#           desbloqueio direto no painel dele)
+#   - Novo: --action=unblock-ip --ip=<ip> --tool=csf|imunify360 — csf -tr/
+#           -dr (temp/permanente conforme csf -t) ou whitelist no
+#           Imunify360 (ip-list local add --purpose white)
+#   - Novo: EXIM_CSF_BIN / EXIM_IMUNIFY_BIN — nomes de binário
+#           configuráveis via env var, mesmo padrão dos EXIM_TH_*
+#   - Novo: checks "csf" (agora via EXIM_CSF_BIN) e "imunify360" em
+#           --check
 # Changelog v5.4:
 #   - Novo: /var/log/exim_mainlog (padrão cPanel/WHM) nos fallbacks de log
 #           usados por --quick, --json e --check, mantendo os caminhos
@@ -136,7 +151,7 @@
 # exiqgrep etc. costumam morar) sejam encontrados mesmo assim.
 export PATH="$PATH:/usr/sbin:/sbin:/usr/local/sbin"
 
-VERSION="5.4"
+VERSION="5.5"
 LOG_PATH="/var/log/exim4/mainlog"
 # Lista única de candidatos a mainlog — consumida por collect() (quick e
 # completo) e run_check(). Debian/exim4, Debian/exim genérico, cPanel/WHM
@@ -185,6 +200,12 @@ EXIM_BIN=""
 for _eb in exim4 exim; do
     command -v "$_eb" &>/dev/null && { EXIM_BIN="$_eb"; break; }
 done
+# ── CSF / Imunify360 — nomes de binário configuráveis via env var ──
+# Caminho exato ainda não confirmado no ambiente real do cliente (cPanel/
+# WHM com CSF + Imunify360 + MagicSpam); mesmo padrão de configurabilidade
+# já usado pelos thresholds EXIM_TH_* — permite override sem editar o script.
+EXIM_CSF_BIN="${EXIM_CSF_BIN:-csf}"
+EXIM_IMUNIFY_BIN="${EXIM_IMUNIFY_BIN:-imunify360-agent}"
 # Prefixar sudo quando não for root (ambientes sem acesso root direto)
 if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
     SUDO="sudo"
@@ -197,6 +218,8 @@ AUTO_MODE=0; JSON_MODE=0; CLEAN_SPAM_AUTO=0; QUICK_MODE=0; CHECK_MODE=0
 ACTION_CMD=""; ACTION_PARAM=""
 ACTOR_NAME=""          # T3-3: usuário que disparou a ação (--actor=)
 PROFILE="standard"     # T3-4: perfil de coleta (light|standard|full)
+IP_PARAM=""            # --action=check-ip-status/unblock-ip: --ip=<ip>
+TOOL_PARAM=""           # --action=unblock-ip: --tool=csf|imunify360
 for arg in "$@"; do
     case "$arg" in
         --auto)        AUTO_MODE=1 ;;
@@ -214,6 +237,8 @@ for arg in "$@"; do
             ;;
         --actor=*)     ACTOR_NAME="${arg#--actor=}" ;;
         --profile=*)   PROFILE="${arg#--profile=}" ;;
+        --ip=*)        IP_PARAM="${arg#--ip=}" ;;
+        --tool=*)      TOOL_PARAM="${arg#--tool=}" ;;
     esac
 done
 
@@ -1017,12 +1042,21 @@ run_check() {
     # Informativo — nao afeta _ok. CSF e o firewall de fato mais comum
     # em ambientes cPanel; sua ausencia so importa quando block-ip
     # tentar usa-lo (fora do escopo deste item).
-    local _csf_ok="false" _csf_msg="CSF nao encontrado no PATH"
-    if command -v csf &>/dev/null; then
+    local _csf_ok="false" _csf_msg="CSF nao encontrado no PATH ($EXIM_CSF_BIN)"
+    if command -v "$EXIM_CSF_BIN" &>/dev/null; then
         _csf_ok="true"
-        _csf_msg="OK — csf disponivel"
+        _csf_msg="OK — $EXIM_CSF_BIN disponivel"
     fi
-    _checks="${_checks}{\"check\":\"csf\",\"ok\":${_csf_ok},\"detail\":\"${_csf_msg}\"}"
+    _checks="${_checks}{\"check\":\"csf\",\"ok\":${_csf_ok},\"detail\":\"${_csf_msg}\"},"
+
+    # ── Check 7: Imunify360 ───────────────────────────────────────
+    # Informativo — nao afeta _ok. Usado por check-ip-status/unblock-ip.
+    local _imun_ok="false" _imun_msg="Imunify360 nao encontrado no PATH ($EXIM_IMUNIFY_BIN)"
+    if command -v "$EXIM_IMUNIFY_BIN" &>/dev/null; then
+        _imun_ok="true"
+        _imun_msg="OK — $EXIM_IMUNIFY_BIN disponivel"
+    fi
+    _checks="${_checks}{\"check\":\"imunify360\",\"ok\":${_imun_ok},\"detail\":\"${_imun_msg}\"}"
 
     printf '{\n'
     printf '  "timestamp": "%s",\n' "$DATE_ISO"
@@ -1316,6 +1350,86 @@ execute_action() {
                 "IP $param processado — ${_result_msgs}; ${_persist_msg}"
             ;;
 
+        check-ip-status)
+            if [ -z "$IP_PARAM" ]; then
+                output_action_json "false" "$cmd" \
+                    "Parâmetro obrigatório: --action=check-ip-status --ip=<ip>"
+                exit 1
+            fi
+            local _ip_valid=0
+            echo "$IP_PARAM" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$' && _ip_valid=1
+            echo "$IP_PARAM" | grep -qE '^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$' && _ip_valid=1
+            if [ "$_ip_valid" -eq 0 ]; then
+                output_action_json "false" "$cmd" \
+                    "Endereço IP inválido: '$IP_PARAM' (esperado IPv4 ou IPv6)"
+                exit 1
+            fi
+            local _status_json; _status_json=$(check_ip_status_json "$IP_PARAM")
+            output_action_json "true" "$cmd" \
+                "Status de bloqueio verificado para $IP_PARAM" "$_status_json"
+            ;;
+
+        unblock-ip)
+            if [ -z "$IP_PARAM" ] || [ -z "$TOOL_PARAM" ]; then
+                output_action_json "false" "$cmd" \
+                    "Parâmetros obrigatórios: --action=unblock-ip --ip=<ip> --tool=csf|imunify360"
+                exit 1
+            fi
+            if ! _validate_action_param "$TOOL_PARAM"; then
+                output_action_json "false" "$cmd" \
+                    "Parâmetro inválido: tool='$TOOL_PARAM' contém caracteres não permitidos"
+                exit 1
+            fi
+            local _ip_valid=0
+            echo "$IP_PARAM" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$' && _ip_valid=1
+            echo "$IP_PARAM" | grep -qE '^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$' && _ip_valid=1
+            if [ "$_ip_valid" -eq 0 ]; then
+                output_action_json "false" "$cmd" \
+                    "Endereço IP inválido: '$IP_PARAM' (esperado IPv4 ou IPv6)"
+                exit 1
+            fi
+            case "$TOOL_PARAM" in
+                csf)
+                    if ! command -v "$EXIM_CSF_BIN" &>/dev/null; then
+                        output_action_json "false" "$cmd" \
+                            "CSF não encontrado no PATH (binário: $EXIM_CSF_BIN — ajuste via EXIM_CSF_BIN se o caminho for outro)"
+                        exit 1
+                    fi
+                    # Bloqueio temporário e permanente usam comandos diferentes
+                    # (-tr vs -dr) — csf -t lista os temporários vigentes.
+                    local _csf_out
+                    if $SUDO "$EXIM_CSF_BIN" -t 2>/dev/null | grep -qF "$IP_PARAM"; then
+                        _csf_out=$($SUDO "$EXIM_CSF_BIN" -tr "$IP_PARAM" 2>&1)
+                    else
+                        _csf_out=$($SUDO "$EXIM_CSF_BIN" -dr "$IP_PARAM" 2>&1)
+                    fi
+                    _csf_out=$(printf '%s' "$_csf_out" | tr '\n' ' ' | sed 's/"/\\"/g')
+                    output_action_json "true" "$cmd" \
+                        "CSF: $IP_PARAM desbloqueado — ${_csf_out}"
+                    ;;
+                imunify360)
+                    if ! command -v "$EXIM_IMUNIFY_BIN" &>/dev/null; then
+                        output_action_json "false" "$cmd" \
+                            "Imunify360 não encontrado no PATH (binário: $EXIM_IMUNIFY_BIN — ajuste via EXIM_IMUNIFY_BIN se o caminho for outro)"
+                        exit 1
+                    fi
+                    # Desbloqueio via whitelist (não remove da blacklist —
+                    # confirmado como suficiente pelo cliente na call de demo)
+                    local _imun_out
+                    _imun_out=$($SUDO "$EXIM_IMUNIFY_BIN" ip-list local add --purpose white "$IP_PARAM" \
+                        --comment "desbloqueado via Mail IQ" 2>&1)
+                    _imun_out=$(printf '%s' "$_imun_out" | tr '\n' ' ' | sed 's/"/\\"/g')
+                    output_action_json "true" "$cmd" \
+                        "Imunify360: $IP_PARAM desbloqueado (whitelist) — ${_imun_out}"
+                    ;;
+                *)
+                    output_action_json "false" "$cmd" \
+                        "Tool desconhecida: '$TOOL_PARAM'. Opções: csf, imunify360"
+                    exit 1
+                    ;;
+            esac
+            ;;
+
         block-sender)
             # T3-2: Bloqueia remetente na blacklist do EXIM
             if [ -z "$param" ]; then
@@ -1373,7 +1487,7 @@ execute_action() {
 
         *)
             output_action_json "false" "$cmd" \
-                "Ação desconhecida: '$cmd'. Opções: clean-full, clean-frozen, clean-bounces, clean-sender:<addr>, clean-auth:<user>, block-ip:<ip>, block-sender:<email>, retry-queue, check-deliverability[:dominio]"
+                "Ação desconhecida: '$cmd'. Opções: clean-full, clean-frozen, clean-bounces, clean-sender:<addr>, clean-auth:<user>, block-ip:<ip>, block-sender:<email>, retry-queue, check-deliverability[:dominio], check-ip-status --ip=<ip>, unblock-ip --ip=<ip> --tool=csf|imunify360"
             exit 1
             ;;
     esac
@@ -2095,6 +2209,74 @@ check_deliverability_json() {
     printf '"domain": "%s", "spf": {"found": %s, "record": "%s"}, "dkim": {"found": %s, "selector": "%s"}, "dmarc": {"found": %s, "record": "%s"}' \
         "$domain" "$spf_found" "$spf_rec" "$dkim_found" "$dkim_sel" "$dmarc_found" "$dmarc_rec"
 }
+
+# ============================================================
+# STATUS DE BLOQUEIO POR IP — CSF / Imunify360 / MagicSpam
+# Usadas por --action=check-ip-status e --action=unblock-ip.
+# Cada helper retorna um fragmento JSON "<ferramenta>": {...} —
+# mesma convenção de check_blacklists_json/check_deliverability_json.
+# Ferramenta não instalada: só {"installed": false} (sem os demais campos).
+# ============================================================
+_ip_status_csf_json() {
+    local ip="$1"
+    if ! command -v "$EXIM_CSF_BIN" &>/dev/null; then
+        printf '"csf": {"installed": false}'
+        return
+    fi
+    local g_out; g_out=$($SUDO "$EXIM_CSF_BIN" -g "$ip" 2>&1)
+    local blocked="false"
+    printf '%s' "$g_out" | grep -qiE 'DROP|DENY|csf\.deny' && blocked="true"
+    # csf -t lista os bloqueios temporários vigentes — se o IP não estiver
+    # lá mas ainda assim bloqueado, é regra permanente (csf.deny/iptables).
+    local type="none"
+    if [ "$blocked" = "true" ]; then
+        if $SUDO "$EXIM_CSF_BIN" -t 2>/dev/null | grep -qF "$ip"; then
+            type="temp"
+        else
+            type="permanent"
+        fi
+    fi
+    # Motivo do bloqueio — cruza com lfd.log, quando disponível
+    local reason=""
+    [ -r /var/log/lfd.log ] && reason=$(grep -F "$ip" /var/log/lfd.log 2>/dev/null | tail -1)
+    local g_esc reason_esc
+    g_esc=$(printf '%s' "$g_out" | tr '\n' ' ' | sed 's/"/\\"/g')
+    reason_esc=$(printf '%s' "$reason" | sed 's/"/\\"/g')
+    printf '"csf": {"installed": true, "blocked": %s, "type": "%s", "reason": "%s", "raw": "%s"}' \
+        "$blocked" "$type" "$reason_esc" "$g_esc"
+}
+
+_ip_status_imunify_json() {
+    local ip="$1"
+    if ! command -v "$EXIM_IMUNIFY_BIN" &>/dev/null; then
+        printf '"imunify360": {"installed": false}'
+        return
+    fi
+    local out; out=$($SUDO "$EXIM_IMUNIFY_BIN" ip-list local list --by-ip "$ip" --json 2>&1)
+    local blocked="false"
+    printf '%s' "$out" | grep -qiE '"purpose"[[:space:]]*:[[:space:]]*"drop"' && blocked="true"
+    local out_esc; out_esc=$(printf '%s' "$out" | tr '\n' ' ' | sed 's/"/\\"/g')
+    printf '"imunify360": {"installed": true, "blocked": %s, "raw": "%s"}' "$blocked" "$out_esc"
+}
+
+# TODO: MagicSpam ainda não tem detecção de assinatura de log confirmada —
+# o cliente já resolve desbloqueio direto no painel do MagicSpam, então
+# esta ferramenta entra só como monitoramento/placeholder por enquanto.
+# Não adivinhar o texto da mensagem de rejeição dele aqui: validar contra
+# uma amostra real de log quando o cliente liberar acesso ao ambiente.
+_ip_status_magicspam_json() {
+    printf '"magicspam": {"installed": null, "note": "monitoramento via log - deteccao de assinatura pendente de validacao em ambiente real"}'
+}
+
+check_ip_status_json() {
+    local ip="$1"
+    local csf_json imun_json ms_json
+    csf_json=$(_ip_status_csf_json "$ip")
+    imun_json=$(_ip_status_imunify_json "$ip")
+    ms_json=$(_ip_status_magicspam_json)
+    printf '%s, %s, %s' "$csf_json" "$imun_json" "$ms_json"
+}
+
 find_php_mailers() {
     section "BUSCA DE SCRIPTS PHP MALICIOSOS"
 

@@ -312,6 +312,49 @@ def run_check(server_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     return _run("--check", server_cfg)
 
 
+# ── Bloqueio de IP em CSF / Imunify360 ──────────────────────────────────────
+
+_UNSAFE_IP_CHARS = re.compile(r"[^0-9a-fA-F:.]+")
+UNBLOCK_TOOLS = ("csf", "imunify360")
+
+
+def _sanitize_ip(ip: str) -> str:
+    """Reduz a um conjunto seguro de caracteres de IPv4/IPv6 antes de
+    interpolar no comando shell remoto — mesma cautela de _sanitize_actor."""
+    return _UNSAFE_IP_CHARS.sub("", ip).strip(":")[:64]
+
+
+def check_ip_status(ip: str, server_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Consulta o status de bloqueio de um IP em CSF/Imunify360/MagicSpam
+    (diag-exim.sh --action=check-ip-status). Não altera nada no servidor.
+    """
+    safe_ip = _sanitize_ip(ip)
+    if not safe_ip:
+        raise SSHError(f"IP inválido: '{ip}'")
+    return _run(f"--action=check-ip-status --ip={safe_ip}", server_cfg)
+
+
+def unblock_ip(ip: str, tool: str, server_cfg: Optional[Dict[str, Any]] = None,
+               actor: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Desbloqueia um IP na ferramenta indicada (diag-exim.sh
+    --action=unblock-ip). MagicSpam não tem desbloqueio aqui — o cliente
+    já resolve isso direto no painel dele (confirmado na call de demo).
+    """
+    safe_ip = _sanitize_ip(ip)
+    if not safe_ip:
+        raise SSHError(f"IP inválido: '{ip}'")
+    if tool not in UNBLOCK_TOOLS:
+        raise SSHError(f"Tool inválida: '{tool}' — use uma de {UNBLOCK_TOOLS}")
+    args = f"--action=unblock-ip --ip={safe_ip} --tool={tool}"
+    if actor:
+        safe_actor = _sanitize_actor(actor)
+        if safe_actor:
+            args += f" --actor={safe_actor}"
+    return _run(args, server_cfg)
+
+
 # ── Mensagens: fila e log ──────────────────────────────────────────────────
 
 def _parse_queue(raw: str) -> List[Dict[str, Any]]:
