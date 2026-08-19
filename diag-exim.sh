@@ -20,10 +20,19 @@
 #                          clean-sender:<addr> | clean-auth:<user>
 #                          block-ip:<ip> | block-sender:<addr> | retry-queue
 #                          check-deliverability[:dominio] — blocklists via
-#                          DNSBL + SPF/DKIM/DMARC, sem alterar nada
+#                          DNSBL + SPF/DKIM/DMARC + expiração do cert TLS
+#                          (STARTTLS na porta 25), sem alterar nada
 #                          check-ip-status --ip=<ip> — status em CSF/
 #                          Imunify360/MagicSpam (monitoramento)
 #                          unblock-ip --ip=<ip> --tool=csf|imunify360
+# ============================================================
+# Changelog v5.6:
+#   - Novo: check_cert_json() — expiração do certificado TLS via STARTTLS
+#           na porta 25 (openssl s_client + x509 -enddate), somado à saída
+#           de --action=check-deliverability como "cert": {valid,
+#           days_remaining, expires_at}. EXIM_TH_CERT_DAYS (15) é o
+#           threshold sugerido para "perto de expirar" — usado pelo
+#           backend, não pelo script (script só coleta dado estruturado).
 # ============================================================
 # Changelog v5.5:
 #   - Novo: --action=check-ip-status --ip=<ip> — consulta CSF (csf -g +
@@ -164,7 +173,7 @@
 # exiqgrep etc. costumam morar) sejam encontrados mesmo assim.
 export PATH="$PATH:/usr/sbin:/sbin:/usr/local/sbin"
 
-VERSION="5.5"
+VERSION="5.6"
 LOG_PATH="/var/log/exim4/mainlog"
 # Lista única de candidatos a mainlog — consumida por collect() (quick e
 # completo) e run_check(). Debian/exim4, Debian/exim genérico, cPanel/WHM
@@ -202,6 +211,7 @@ TH_FILA_ALTA=${EXIM_TH_FILA_ALTA:-2000}
 TH_CPU_PCT=${EXIM_TH_CPU_PCT:-80}
 TH_MEM_PCT=${EXIM_TH_MEM_PCT:-70}
 TH_TLD_SUSPEITA=${EXIM_TH_TLD_SUSPEITA:-20}
+TH_CERT_DAYS=${EXIM_TH_CERT_DAYS:-15}   # dias restantes p/ considerar cert TLS perto de expirar
 # Lista de TLDs consideradas de alto risco/abuso — configurável, mesmo
 # padrão dos EXIM_TH_*. Não cobre a ACL específica de um cliente (ver
 # analyze_suspicious_tlds abaixo).
@@ -1584,12 +1594,13 @@ execute_action() {
                     "Parâmetro inválido: '$_domain' contém caracteres não permitidos"
                 exit 1
             fi
-            local _bl_json _deliv_json
+            local _bl_json _deliv_json _cert_json
             _bl_json=$(check_blacklists_json)
             _deliv_json=$(check_deliverability_json "$_domain")
+            _cert_json=$(check_cert_json "$_domain")
             output_action_json "true" "$cmd" \
                 "Checagem de deliverability concluída" \
-                "${_bl_json}, ${_deliv_json}"
+                "${_bl_json}, ${_deliv_json}, ${_cert_json}"
             ;;
 
         *)
@@ -2315,6 +2326,43 @@ check_deliverability_json() {
     dmarc_rec=$(printf '%s' "$dmarc_rec" | sed 's/"/\\"/g')
     printf '"domain": "%s", "spf": {"found": %s, "record": "%s"}, "dkim": {"found": %s, "selector": "%s"}, "dmarc": {"found": %s, "record": "%s"}' \
         "$domain" "$spf_found" "$spf_rec" "$dkim_found" "$dkim_sel" "$dmarc_found" "$dmarc_rec"
+}
+
+# Expiração do certificado TLS usado pelo STARTTLS na porta 25 (SMTP).
+# "valid" só indica que um certificado foi obtido e parseado com sucesso —
+# um cert já expirado ainda retorna valid:true com days_remaining negativo;
+# quem decide o que fazer com isso (alertar, compor score) é quem consome
+# o JSON, não este script (mesma separação de responsabilidade do resto
+# de check_*_json — aqui só coleta dado estruturado).
+check_cert_json() {
+    local domain="${1:-$(_detect_domain)}"
+    local enddate
+    # -servername vazio faz o openssl abortar o handshake antes de expor o
+    # cert ("Unable to set TLS servername extension") — sem domínio
+    # detectado (ex.: servidor novo, sem histórico de log ainda), omite a
+    # extensão SNI e usa o cert padrão do Exim.
+    if [ -n "$domain" ]; then
+        enddate=$(timeout 10 openssl s_client -starttls smtp -connect localhost:25 -servername "$domain" \
+            </dev/null 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | sed -E 's/^notAfter=//')
+    else
+        enddate=$(timeout 10 openssl s_client -starttls smtp -connect localhost:25 \
+            </dev/null 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | sed -E 's/^notAfter=//')
+    fi
+    if [ -z "$enddate" ]; then
+        printf '"cert": {"valid": false, "days_remaining": null, "expires_at": null}'
+        return
+    fi
+    local end_epoch now_epoch days_remaining expires_at
+    end_epoch=$(date -d "$enddate" +%s 2>/dev/null)
+    if [ -z "$end_epoch" ]; then
+        printf '"cert": {"valid": false, "days_remaining": null, "expires_at": null}'
+        return
+    fi
+    now_epoch=$(date +%s)
+    days_remaining=$(( (end_epoch - now_epoch) / 86400 ))
+    expires_at=$(date -u -d "$enddate" "+%Y-%m-%dT%H:%M:%SZ" 2>/dev/null)
+    printf '"cert": {"valid": true, "days_remaining": %d, "expires_at": "%s"}' \
+        "$days_remaining" "$expires_at"
 }
 
 # ============================================================

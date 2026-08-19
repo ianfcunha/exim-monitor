@@ -21,6 +21,77 @@ function StatusDot({ ok }) {
   )
 }
 
+const GRADE_COLOR = {
+  A: { bg: '#F0FDF4', border: '#BBF7D0', fg: '#15803D' },
+  B: { bg: '#F0F9FF', border: '#BAE6FD', fg: '#0369A1' },
+  C: { bg: '#FFFBEB', border: '#FDE68A', fg: '#B45309' },
+  D: { bg: '#FFF7ED', border: '#FED7AA', fg: '#C2410C' },
+  F: { bg: '#FEF2F2', border: '#FECACA', fg: '#991B1B' },
+}
+
+function TrustScoreBadge({ trustScore }) {
+  if (!trustScore) return null
+  const c = GRADE_COLOR[trustScore.grade] || GRADE_COLOR.F
+  const labels = { blocklist: 'Blocklist', spf: 'SPF', dkim: 'DKIM', dmarc: 'DMARC', cert: 'Certificado TLS' }
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 14, borderRadius: 10,
+      padding: '12px 16px', background: c.bg, border: `1px solid ${c.border}`,
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        width: 44, height: 44, borderRadius: 999, flexShrink: 0,
+        background: c.fg, color: '#fff', fontSize: 20, fontWeight: 800,
+      }}>
+        {trustScore.grade}
+      </div>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+          <span style={{ fontSize: 15, fontWeight: 800, color: c.fg }}>{trustScore.score}/100</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: c.fg }}>score de confiança do domínio</span>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+          {Object.entries(trustScore.breakdown || {}).map(([key, ok]) => (
+            <span key={key} style={{
+              fontSize: 10, fontWeight: 600, padding: '1px 7px', borderRadius: 999,
+              background: ok ? 'rgba(22,163,74,0.12)' : 'rgba(220,38,38,0.10)',
+              color: ok ? '#16A34A' : '#DC2626',
+            }}>
+              {ok ? '✔' : '✖'} {labels[key] || key}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function fmtCertDate(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+}
+
+function CertRow({ cert, ok }) {
+  const days = cert?.days_remaining
+  let text
+  if (!cert?.valid) {
+    text = 'certificado não encontrado'
+  } else if (days < 0) {
+    text = `expirado há ${Math.abs(days)} dia${Math.abs(days) !== 1 ? 's' : ''} (${fmtCertDate(cert.expires_at)})`
+  } else {
+    text = `expira em ${days} dia${days !== 1 ? 's' : ''} (${fmtCertDate(cert.expires_at)})`
+  }
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+      <StatusDot ok={!!ok} />
+      <span style={{ fontSize: 12, fontWeight: 600, color: '#0F172A', width: 52, flexShrink: 0 }}>TLS</span>
+      <span style={{ fontSize: 11, color: ok ? '#64748B' : '#DC2626' }}>{text}</span>
+    </div>
+  )
+}
+
 function AuthRow({ label, found, record }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
@@ -96,6 +167,8 @@ export default function DeliverabilityCard() {
 
       {result && !error && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <TrustScoreBadge trustScore={result.trust_score} />
+
           <div>
             <div style={{ fontSize: 10, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
               Blocklists{result.ip ? ` — IP ${result.ip}` : ''}
@@ -129,6 +202,7 @@ export default function DeliverabilityCard() {
             <AuthRow label="SPF"   found={result.spf?.found}   record={result.spf?.record} />
             <AuthRow label="DKIM"  found={result.dkim?.found}  record={result.dkim?.selector ? `seletor padrão: ${result.dkim.selector}` : ''} />
             <AuthRow label="DMARC" found={result.dmarc?.found} record={result.dmarc?.record} />
+            <CertRow cert={result.cert} ok={result.trust_score?.breakdown?.cert ?? (result.cert?.valid && result.cert?.days_remaining >= 0)} />
           </div>
         </div>
       )}

@@ -60,6 +60,63 @@ class ActionRequest(BaseModel):
     param: Optional[str] = None
 
 
+# ── Score de confiança de domínio (check-deliverability) ────────────────────
+# Combina os componentes já estruturados que o script retorna em blocklists/
+# spf/dkim/dmarc/cert num único número 0-100 + selo A-F — só pra dar uma
+# leitura rápida no dashboard. Pesos arbitrários mas documentados aqui (não
+# há fórmula "oficial" de mercado pra isso): blocklist e certificado pesam
+# mais porque um domínio limpo mas sem SPF ainda entrega e-mail, enquanto
+# estar numa DNSBL ou servir um cert expirado quebra a entrega na hora.
+# Mesmo threshold sugerido de EXIM_TH_CERT_DAYS (15 dias) do script — se o
+# cliente mudar o threshold lá, pode divergir do usado aqui; não há acoplamento
+# automático porque o script não expõe o threshold usado no JSON de retorno.
+_CERT_DAYS_WARN_THRESHOLD = 15
+
+_TRUST_SCORE_WEIGHTS = {
+    "blocklist": 30,  # nenhuma DNSBL listando o IP
+    "spf":       20,
+    "dkim":      20,
+    "dmarc":     15,
+    "cert":      15,  # cert TLS válido e com folga (>= threshold de dias)
+}
+
+
+def _compute_trust_score(result: dict) -> dict:
+    """Deriva {"score": 0-100, "grade": "A".."F", "breakdown": {...}} a
+    partir do JSON de check-deliverability. Não falha se algum componente
+    estiver ausente — trata como reprovado nesse item."""
+    breakdown = {}
+
+    blocklists = result.get("blocklists") or []
+    blocklist_clean = bool(blocklists) and all(not b.get("listed") for b in blocklists)
+    breakdown["blocklist"] = blocklist_clean
+
+    spf_ok   = bool((result.get("spf") or {}).get("found"))
+    dkim_ok  = bool((result.get("dkim") or {}).get("found"))
+    dmarc_ok = bool((result.get("dmarc") or {}).get("found"))
+    breakdown["spf"], breakdown["dkim"], breakdown["dmarc"] = spf_ok, dkim_ok, dmarc_ok
+
+    cert = result.get("cert") or {}
+    days_remaining = cert.get("days_remaining")
+    cert_ok = bool(cert.get("valid")) and days_remaining is not None and days_remaining >= _CERT_DAYS_WARN_THRESHOLD
+    breakdown["cert"] = cert_ok
+
+    score = sum(weight for key, weight in _TRUST_SCORE_WEIGHTS.items() if breakdown.get(key))
+
+    if score >= 90:
+        grade = "A"
+    elif score >= 75:
+        grade = "B"
+    elif score >= 60:
+        grade = "C"
+    elif score >= 40:
+        grade = "D"
+    else:
+        grade = "F"
+
+    return {"score": score, "grade": grade, "breakdown": breakdown}
+
+
 @router.post("/{action}", summary="Executa ação no servidor EXIM (admin only)")
 @limiter.limit("20/minute")
 def execute_action(
@@ -112,6 +169,9 @@ def execute_action(
             param=body.param, success=False, message=str(exc),
         )
         raise HTTPException(status_code=503, detail=str(exc))
+
+    if action == "check-deliverability" and result.get("success", False):
+        result["trust_score"] = _compute_trust_score(result)
 
     record_action_history(
         db, server_id=server_id, actor=current_user.username, action=action,
