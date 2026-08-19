@@ -122,9 +122,13 @@ export const getInviteLink  = (id) => api.get(`/users/${id}/invite-link`).then(r
 // ── Configuracoes de alertas ──────────────────────────────────────────────
 export const fetchAlertHistory  = (limit = 50) =>
   api.get('/settings/alerts/history', { params: { limit } }).then(r => r.data)
-export const fetchAlertSettings = () => api.get('/settings/alerts').then(r => r.data)
-export const saveAlertSettings  = (payload) => api.put('/settings/alerts', payload).then(r => r.data)
-export const testEmail          = () => api.post('/settings/test/email').then(r => r.data)
-export const testTelegram       = () => api.post('/settings/test/telegram').then(r => r.data)
+export const fetchAlertSettings = (serverId = null) =>
+  api.get('/settings/alerts', { params: serverId ? { server_id: serverId } : {} }).then(r => r.data)
+export const saveAlertSettings  = (payload, serverId = null) =>
+  api.put('/settings/alerts', payload, { params: serverId ? { server_id: serverId } : {} }).then(r => r.data)
+export const testEmail          = (serverId = null) =>
+  api.post('/settings/test/email', null, { params: serverId ? { server_id: serverId } : {} }).then(r => r.data)
+export const testTelegram       = (serverId = null) =>
+  api.post('/settings/test/telegram', null, { params: serverId ? { server_id: serverId } : {} }).then(r => r.data)
 
 export default api

@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { fetchAlertHistory, fetchAlertSettings, saveAlertSettings, testEmail, testTelegram } from '../api/client'
 import { Select as SelectPrimitive, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { useServer } from '../contexts/ServerContext'
 
 const SEVERITY_OPTIONS = ['HIGH', 'CRITICAL']
 const MASK = '••••••••'
@@ -227,6 +228,9 @@ function AlertHistorySection() {
 
 /* ── Principal ── */
 export default function Settings({ onBack }) {
+  const { activeServer } = useServer()
+  const serverId = activeServer?.id ?? null
+
   const [cfg, setCfg]         = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving]   = useState(false)
@@ -235,15 +239,16 @@ export default function Settings({ onBack }) {
   const [testMsg, setTestMsg] = useState({})
 
   useEffect(() => {
-    fetchAlertSettings().then(setCfg).catch(() => setCfg({})).finally(() => setLoading(false))
-  }, [])
+    setLoading(true)
+    fetchAlertSettings(serverId).then(setCfg).catch(() => setCfg({})).finally(() => setLoading(false))
+  }, [serverId])
 
   const set = key => val => setCfg(prev => ({ ...prev, [key]: val }))
 
   const handleSave = async () => {
     setSaving(true); setSaveMsg('')
     try {
-      const updated = await saveAlertSettings(cfg)
+      const updated = await saveAlertSettings(cfg, serverId)
       setCfg(updated); setSaveErr(false); setSaveMsg('Configurações salvas com sucesso.')
     } catch (e) {
       setSaveErr(true); setSaveMsg(e?.response?.data?.detail || 'Erro ao salvar.')
@@ -255,7 +260,7 @@ export default function Settings({ onBack }) {
   const runTest = async (type) => {
     setTestMsg(prev => ({ ...prev, [type]: { text: 'Enviando…', err: false } }))
     try {
-      const res = await (type === 'email' ? testEmail() : testTelegram())
+      const res = await (type === 'email' ? testEmail(serverId) : testTelegram(serverId))
       setTestMsg(prev => ({ ...prev, [type]: { text: res.message, err: false } }))
     } catch (e) {
       setTestMsg(prev => ({ ...prev, [type]: { text: e?.response?.data?.detail || 'Falha no teste.', err: true } }))
@@ -302,6 +307,21 @@ export default function Settings({ onBack }) {
       </header>
 
       <div style={{ maxWidth: 760, margin: '0 auto', padding: '20px 24px' }}>
+
+        {/* Indicador do servidor sendo configurado */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16,
+          borderRadius: 8, padding: '9px 14px',
+          background: activeServer ? '#F0F9FF' : '#F8FAFC',
+          border: `1px solid ${activeServer ? '#BAE6FD' : '#E2E8F0'}`,
+        }}>
+          <span style={{ width: 6, height: 6, borderRadius: 999, background: activeServer ? '#0EA5E9' : '#94A3B8', flexShrink: 0 }} />
+          <span style={{ fontSize: 12, color: activeServer ? '#0369A1' : '#64748B' }}>
+            {activeServer
+              ? <>Configurando alertas para: <strong>{activeServer.name}</strong></>
+              : 'Configurando alertas padrão (nenhum servidor selecionado)'}
+          </span>
+        </div>
 
         {/* E-mail */}
         <Section title="Alertas por E-mail">
