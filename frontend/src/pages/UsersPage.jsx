@@ -11,13 +11,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useAuth } from '../contexts/AuthContext'
 
 const ROLE_LABEL = { admin: 'Admin', viewer: 'Viewer' }
-const ROLE_COLOR = { admin: '#0369A1', viewer: '#64748B' }
-const ROLE_BG    = { admin: '#F0F9FF', viewer: '#F8FAFC' }
+const ROLE_COLOR = { admin: 'var(--accent-fg)', viewer: 'var(--muted)' }
+const ROLE_BG    = { admin: 'var(--accent-bg)', viewer: 'var(--surface)' }
 
 const inputStyle = {
   width: '100%', padding: '9px 13px', borderRadius: 8, fontSize: 12,
-  border: '1px solid #E2E8F0', outline: 'none', color: '#0F172A',
-  background: '#F8FAFC', boxSizing: 'border-box',
+  border: '1px solid var(--border)', outline: 'none', color: 'var(--text)',
+  background: 'var(--surface)', boxSizing: 'border-box',
   transition: 'border-color 0.15s',
 }
 
@@ -125,26 +125,26 @@ export default function UsersPage() {
     : '—'
 
   return (
-    <div style={{ minHeight: '100vh', background: '#F1F5F9' }}>
+    <div style={{ minHeight: '100vh', background: 'var(--surface)' }}>
 
       {/* Header */}
       <header style={{
         position: 'sticky', top: 0, zIndex: 10,
         padding: '0 24px', background: '#fff',
-        borderBottom: '1px solid #E2E8F0',
+        borderBottom: '1px solid var(--border)',
         boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
       }}>
         <div style={{ maxWidth: 760, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 56, gap: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
             <button onClick={onBack}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#94A3B8', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-              onMouseEnter={e => e.currentTarget.style.color = '#0EA5E9'}
-              onMouseLeave={e => e.currentTarget.style.color = '#94A3B8'}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--dim)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+              onMouseEnter={e => e.currentTarget.style.color = 'var(--sky)'}
+              onMouseLeave={e => e.currentTarget.style.color = 'var(--dim)'}
             >
               <ArrowLeft size={14} /> Dashboard
             </button>
-            <span style={{ color: '#E2E8F0' }}>|</span>
-            <span style={{ fontSize: 10, letterSpacing: '0.28em', textTransform: 'uppercase', color: '#0EA5E9', fontWeight: 700 }}>
+            <span style={{ color: 'var(--border)' }}>|</span>
+            <span style={{ fontSize: 10, letterSpacing: '0.28em', textTransform: 'uppercase', color: 'var(--sky)', fontWeight: 700 }}>
               Usuários e Convites
             </span>
           </div>
@@ -153,7 +153,7 @@ export default function UsersPage() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <button onClick={load}
-                  style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748B' }}>
+                  style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)' }}>
                   <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} />
                 </button>
               </TooltipTrigger>
@@ -164,9 +164,9 @@ export default function UsersPage() {
               style={{
                 display: 'flex', alignItems: 'center', gap: 6,
                 padding: '7px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600,
-                border: showForm ? '1px solid #BAE6FD' : '1px solid #E2E8F0',
-                background: showForm ? '#F0F9FF' : '#fff',
-                color: showForm ? '#0369A1' : '#64748B',
+                border: showForm ? '1px solid var(--accent-border)' : '1px solid var(--border)',
+                background: showForm ? 'var(--accent-bg)' : '#fff',
+                color: showForm ? 'var(--accent-fg)' : 'var(--muted)',
                 cursor: 'pointer',
               }}
             >
@@ -182,27 +182,27 @@ export default function UsersPage() {
         {/* Formulário de convite */}
         {showForm && (
           <div style={{
-            background: '#fff', border: '1px solid #E2E8F0', borderRadius: 12,
+            background: '#fff', border: '1px solid var(--border)', borderRadius: 12,
             padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
           }}>
-            <p style={{ fontSize: 10, letterSpacing: '0.28em', textTransform: 'uppercase', color: '#0EA5E9', fontWeight: 700, marginBottom: 16 }}>
+            <p style={{ fontSize: 10, letterSpacing: '0.28em', textTransform: 'uppercase', color: 'var(--sky)', fontWeight: 700, marginBottom: 16 }}>
               Novo Convite
             </p>
             <form onSubmit={handleInvite}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px auto', gap: 10, alignItems: 'flex-end', marginBottom: 12 }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#64748B', marginBottom: 5 }}>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 5 }}>
                     E-mail do convidado
                   </label>
                   <input
                     type="email" value={email} onChange={e => setEmail(e.target.value)}
                     placeholder="colega@empresa.com" required style={inputStyle}
-                    onFocus={e => e.target.style.borderColor = '#0EA5E9'}
-                    onBlur={e  => e.target.style.borderColor = '#E2E8F0'}
+                    onFocus={e => e.target.style.borderColor = 'var(--sky)'}
+                    onBlur={e  => e.target.style.borderColor = 'var(--border)'}
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#64748B', marginBottom: 5 }}>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 5 }}>
                     Perfil
                   </label>
                   <Select value={role} onValueChange={setRole}>
@@ -217,15 +217,15 @@ export default function UsersPage() {
                 </div>
                 <button type="submit" disabled={sending} style={{
                   padding: '9px 18px', borderRadius: 8, fontSize: 12, fontWeight: 700,
-                  border: 'none', background: sending ? '#7DD3F0' : '#0EA5E9',
+                  border: 'none', background: sending ? '#7DD3F0' : 'var(--sky)',
                   color: '#fff', cursor: sending ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap',
                 }}>
                   {sending ? 'Enviando…' : 'Enviar convite'}
                 </button>
               </div>
-              <p style={{ fontSize: 11, color: '#94A3B8' }}>
-                <strong style={{ color: '#64748B' }}>Admin</strong> — acesso completo, pode gerenciar servidores e convidar membros. &nbsp;
-                <strong style={{ color: '#64748B' }}>Viewer</strong> — somente leitura, sem executar ações.
+              <p style={{ fontSize: 11, color: 'var(--dim)' }}>
+                <strong style={{ color: 'var(--muted)' }}>Admin</strong> — acesso completo, pode gerenciar servidores e convidar membros. &nbsp;
+                <strong style={{ color: 'var(--muted)' }}>Viewer</strong> — somente leitura, sem executar ações.
               </p>
             </form>
           </div>
@@ -235,16 +235,16 @@ export default function UsersPage() {
         {inviteMsg && (
           <div style={{
             padding: '12px 16px', borderRadius: 10, fontSize: 12,
-            background: inviteMsg.ok ? '#F0FDF4' : '#FEF2F2',
-            border: `1px solid ${inviteMsg.ok ? '#BBF7D0' : '#FECACA'}`,
-            color: inviteMsg.ok ? '#166534' : '#991B1B',
+            background: inviteMsg.ok ? 'var(--ok-bg)' : 'var(--danger-bg)',
+            border: `1px solid ${inviteMsg.ok ? 'var(--ok-border)' : 'var(--danger-border)'}`,
+            color: inviteMsg.ok ? 'var(--ok)' : 'var(--danger)',
           }}>
             {inviteMsg.text}
             {inviteMsg.url && (
               <div style={{ marginTop: 8, wordBreak: 'break-all' }}>
                 <strong>Link manual:</strong>{' '}
                 <a href={inviteMsg.url} target="_blank" rel="noreferrer"
-                  style={{ color: '#0369A1', fontFamily: 'monospace', fontSize: 11 }}>
+                  style={{ color: 'var(--accent-fg)', fontFamily: 'monospace', fontSize: 11 }}>
                   {inviteMsg.url}
                 </a>
               </div>
@@ -254,35 +254,35 @@ export default function UsersPage() {
 
         {/* Erro */}
         {error && (
-          <div style={{ padding: '10px 14px', borderRadius: 10, background: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B', fontSize: 12 }}>
+          <div style={{ padding: '10px 14px', borderRadius: 10, background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', color: 'var(--danger)', fontSize: 12 }}>
             {error}
           </div>
         )}
 
         {/* Lista */}
         <div style={{
-          background: '#fff', border: '1px solid #E2E8F0', borderRadius: 12,
+          background: '#fff', border: '1px solid var(--border)', borderRadius: 12,
           boxShadow: '0 1px 3px rgba(0,0,0,0.05)', overflow: 'hidden',
         }}>
           {/* Cabeçalho */}
           <div style={{
-            padding: '12px 20px', borderBottom: '1px solid #F1F5F9',
+            padding: '12px 20px', borderBottom: '1px solid var(--surface)',
             display: 'flex', alignItems: 'center', gap: 6,
           }}>
-            <Users size={13} color="#94A3B8" />
-            <span style={{ fontSize: 11, color: '#94A3B8', fontWeight: 600 }}>
+            <Users size={13} color="var(--dim)" />
+            <span style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 600 }}>
               {loading ? '…' : `${users.length} ${users.length === 1 ? 'membro' : 'membros'}`}
             </span>
           </div>
 
           {/* Conteúdo */}
           {loading ? (
-            <div style={{ padding: '40px 0', textAlign: 'center', color: '#94A3B8', fontSize: 13 }}>
+            <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--dim)', fontSize: 13 }}>
               <RefreshCw size={16} style={{ animation: 'spin 1s linear infinite', marginBottom: 8 }} />
               <div>Carregando…</div>
             </div>
           ) : users.length === 0 ? (
-            <div style={{ padding: '40px 0', textAlign: 'center', color: '#94A3B8', fontSize: 13 }}>
+            <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--dim)', fontSize: 13 }}>
               Nenhum usuário cadastrado ainda.
             </div>
           ) : (
@@ -290,7 +290,7 @@ export default function UsersPage() {
               <div key={u.id} style={{
                 display: 'flex', alignItems: 'center', gap: 14,
                 padding: '14px 20px',
-                borderBottom: i < users.length - 1 ? '1px solid #F1F5F9' : 'none',
+                borderBottom: i < users.length - 1 ? '1px solid var(--surface)' : 'none',
               }}>
                 {/* Avatar */}
                 <div style={{
@@ -305,7 +305,7 @@ export default function UsersPage() {
                 {/* Info */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 2 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: '#0F172A' }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
                       {u.invite_pending ? u.email : u.username}
                     </span>
 
@@ -351,7 +351,7 @@ export default function UsersPage() {
                       <span style={{
                         display: 'inline-flex', alignItems: 'center', gap: 3,
                         fontSize: 10, fontWeight: 600, padding: '1px 7px', borderRadius: 999,
-                        background: '#FFFBEB', color: '#D97706', border: '1px solid #FDE68A',
+                        background: 'var(--warn-bg)', color: 'var(--warn)', border: '1px solid var(--warn-border)',
                       }}>
                         <Clock size={9} /> Convite pendente
                       </span>
@@ -359,14 +359,14 @@ export default function UsersPage() {
                       <span style={{
                         display: 'inline-flex', alignItems: 'center', gap: 3,
                         fontSize: 10, fontWeight: 600, padding: '1px 7px', borderRadius: 999,
-                        background: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA',
+                        background: 'var(--danger-bg)', color: 'var(--danger)', border: '1px solid var(--danger-border)',
                       }}>
                         <Mail size={9} /> E-mail não verificado
                       </span>
                     ) : null}
                   </div>
 
-                  <div style={{ fontSize: 11, color: '#94A3B8' }}>
+                  <div style={{ fontSize: 11, color: 'var(--dim)' }}>
                     {u.invite_pending ? 'Aguardando aceite do convite' : u.email}
                     {u.last_login_at && (
                       <span style={{ marginLeft: 10 }}>· último login: {fmt(u.last_login_at)}</span>
@@ -383,8 +383,8 @@ export default function UsersPage() {
                       style={{
                         display: 'flex', alignItems: 'center', gap: 4,
                         padding: '5px 10px', borderRadius: 7, fontSize: 11, fontWeight: 500,
-                        border: '1px solid #E2E8F0', background: '#F8FAFC',
-                        color: '#64748B', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
+                        border: '1px solid var(--border)', background: 'var(--surface)',
+                        color: 'var(--muted)', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
                       }}
                     >
                       <Link size={11} /> Ver link
@@ -396,8 +396,8 @@ export default function UsersPage() {
                       style={{
                         display: 'flex', alignItems: 'center', gap: 4,
                         padding: '5px 10px', borderRadius: 7, fontSize: 11, fontWeight: 500,
-                        border: '1px solid #BAE6FD', background: '#F0F9FF',
-                        color: '#0369A1', cursor: resending[u.id] ? 'wait' : 'pointer',
+                        border: '1px solid var(--accent-border)', background: 'var(--accent-bg)',
+                        color: 'var(--accent-fg)', cursor: resending[u.id] ? 'wait' : 'pointer',
                         whiteSpace: 'nowrap', flexShrink: 0,
                         opacity: resending[u.id] ? 0.6 : 1,
                       }}
@@ -416,9 +416,9 @@ export default function UsersPage() {
                         onClick={() => handleDelete(u.id, u.invite_pending ? u.email : u.username)}
                         style={{
                           width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-                          border: '1px solid #FECACA', background: '#FEF2F2',
+                          border: '1px solid var(--danger-border)', background: 'var(--danger-bg)',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          cursor: 'pointer', color: '#DC2626',
+                          cursor: 'pointer', color: 'var(--danger)',
                         }}
                       >
                         <Trash2 size={13} />
@@ -445,25 +445,25 @@ export default function UsersPage() {
           <div style={{
             position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
             zIndex: 101, background: '#fff', borderRadius: 14,
-            border: '1px solid #E2E8F0', boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+            border: '1px solid var(--border)', boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
             padding: '24px', width: 'min(520px, 90vw)',
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
               <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: '#0F172A', marginBottom: 2 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 2 }}>
                   Link de Convite
                 </div>
-                <div style={{ fontSize: 12, color: '#94A3B8' }}>
-                  Para: <strong style={{ color: '#64748B' }}>{linkModal.email}</strong>
+                <div style={{ fontSize: 12, color: 'var(--dim)' }}>
+                  Para: <strong style={{ color: 'var(--muted)' }}>{linkModal.email}</strong>
                   {linkModal.expires_in_hours != null && (
                     <span> · expira em {linkModal.expires_in_hours}h</span>
                   )}
                 </div>
               </div>
               <button onClick={() => setLinkModal(null)} style={{
-                width: 28, height: 28, borderRadius: 7, border: '1px solid #E2E8F0',
-                background: '#F8FAFC', cursor: 'pointer', display: 'flex',
-                alignItems: 'center', justifyContent: 'center', color: '#94A3B8',
+                width: 28, height: 28, borderRadius: 7, border: '1px solid var(--border)',
+                background: 'var(--surface)', cursor: 'pointer', display: 'flex',
+                alignItems: 'center', justifyContent: 'center', color: 'var(--dim)',
               }}>
                 <X size={13} />
               </button>
@@ -472,11 +472,11 @@ export default function UsersPage() {
             <div style={{
               display: 'flex', alignItems: 'center', gap: 8,
               padding: '10px 12px', borderRadius: 8,
-              background: '#F8FAFC', border: '1px solid #E2E8F0',
+              background: 'var(--surface)', border: '1px solid var(--border)',
               marginBottom: 14,
             }}>
               <span style={{
-                flex: 1, fontSize: 11, fontFamily: 'monospace', color: '#0F172A',
+                flex: 1, fontSize: 11, fontFamily: 'monospace', color: 'var(--text)',
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               }}>
                 {linkModal.invite_url}
@@ -484,8 +484,8 @@ export default function UsersPage() {
               <button onClick={handleCopy} style={{
                 display: 'flex', alignItems: 'center', gap: 5,
                 padding: '5px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600,
-                border: 'none', background: copied ? '#F0FDF4' : '#0EA5E9',
-                color: copied ? '#16A34A' : '#fff', cursor: 'pointer', flexShrink: 0,
+                border: 'none', background: copied ? 'var(--ok-bg)' : 'var(--sky)',
+                color: copied ? 'var(--ok)' : '#fff', cursor: 'pointer', flexShrink: 0,
                 transition: 'all 0.2s',
               }}>
                 <Copy size={11} />
@@ -496,8 +496,8 @@ export default function UsersPage() {
             <a href={linkModal.invite_url} target="_blank" rel="noreferrer" style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
               padding: '8px 0', borderRadius: 8, fontSize: 12, fontWeight: 600,
-              border: '1px solid #E2E8F0', background: '#F8FAFC',
-              color: '#64748B', textDecoration: 'none',
+              border: '1px solid var(--border)', background: 'var(--surface)',
+              color: 'var(--muted)', textDecoration: 'none',
             }}>
               <Link size={12} /> Abrir link em nova aba
             </a>

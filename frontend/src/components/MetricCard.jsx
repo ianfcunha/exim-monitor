@@ -14,7 +14,7 @@ import { useRef, useState } from 'react'
 function TrendBadge({ value, positive }) {
   if (value == null || value === 0) return null
   const isGood  = positive === 'up' ? value > 0 : value < 0
-  const color   = isGood ? '#16A34A' : '#DC2626'
+  const color   = isGood ? 'var(--ok)' : 'var(--danger)'
   const bg      = isGood ? 'rgba(22,163,74,0.09)' : 'rgba(220,38,38,0.09)'
   const Icon    = value > 0 ? TrendingUp : TrendingDown
   const sign    = value > 0 ? '+' : ''
@@ -54,8 +54,8 @@ function Tip({ text, children }) {
           bottom: 'calc(100% + 7px)',
           left: '50%',
           transform: 'translateX(-50%)',
-          background: '#0F172A',
-          color: '#F8FAFC',
+          background: 'var(--text)',
+          color: 'var(--surface)',
           fontSize: 11,
           fontWeight: 400,
           borderRadius: 7,
@@ -74,7 +74,7 @@ function Tip({ text, children }) {
             transform: 'translateX(-50%)',
             borderWidth: '5px 5px 0',
             borderStyle: 'solid',
-            borderColor: '#0F172A transparent transparent',
+            borderColor: 'var(--text) transparent transparent',
           }} />
         </span>
       )}
@@ -122,7 +122,7 @@ export default function MetricCard({
               </p>
               {tooltip && (
                 <span style={{
-                  fontSize: 9, color: '#94A3B8',
+                  fontSize: 9, color: 'var(--dim)',
                   marginLeft: 3, cursor: 'help',
                   userSelect: 'none',
                 }}>ⓘ</span>
@@ -134,7 +134,7 @@ export default function MetricCard({
           {loading ? (
             <div
               className="h-9 w-24 rounded-lg animate-pulse"
-              style={{ background: '#E2E8F0' }}
+              style={{ background: 'var(--border)' }}
             />
           ) : (
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
@@ -163,7 +163,7 @@ export default function MetricCard({
             border: '1px solid rgba(14,165,233,0.18)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
-            <Icon size={18} color="#0EA5E9" strokeWidth={1.8} />
+            <Icon size={18} color="var(--sky)" strokeWidth={1.8} />
           </div>
         )}
       </div>

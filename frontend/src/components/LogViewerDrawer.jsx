@@ -32,11 +32,11 @@ async function extractErrorMessage(err) {
 }
 
 const TYPE_CONFIG = {
-  delivered: { label: 'Entregues', color: '#16A34A', bg: 'rgba(22,163,74,0.08)',  dot: '#16A34A' },
-  rejected:  { label: 'Rejeitados', color: '#DC2626', bg: 'rgba(220,38,38,0.08)', dot: '#DC2626' },
-  deferred:  { label: 'Deferidos', color: '#D97706', bg: 'rgba(217,119,6,0.08)',  dot: '#D97706' },
-  sent:      { label: 'Enviados', color: '#0EA5E9', bg: 'rgba(14,165,233,0.08)',  dot: '#0EA5E9' },
-  other:     { label: 'Outros', color: '#64748B', bg: 'transparent',              dot: '#94A3B8' },
+  delivered: { label: 'Entregues', color: 'var(--ok)', bg: 'rgba(22,163,74,0.08)',  dot: 'var(--ok)' },
+  rejected:  { label: 'Rejeitados', color: 'var(--danger)', bg: 'rgba(220,38,38,0.08)', dot: 'var(--danger)' },
+  deferred:  { label: 'Deferidos', color: 'var(--warn)', bg: 'rgba(217,119,6,0.08)',  dot: 'var(--warn)' },
+  sent:      { label: 'Enviados', color: 'var(--sky)', bg: 'rgba(14,165,233,0.08)',  dot: 'var(--sky)' },
+  other:     { label: 'Outros', color: 'var(--muted)', bg: 'transparent',              dot: 'var(--dim)' },
 }
 
 const LIMIT_OPTIONS = [100, 200, 300, 500]
@@ -51,13 +51,13 @@ function TypeChip({ type, active, onClick }) {
         display: 'flex', alignItems: 'center', gap: 5,
         padding: '3px 10px', borderRadius: 999, fontSize: 11, fontWeight: 500,
         cursor: 'pointer',
-        border: active ? `1px solid ${cfg.dot}` : '1px solid #E2E8F0',
+        border: active ? `1px solid ${cfg.dot}` : '1px solid var(--border)',
         background: active ? cfg.bg : '#fff',
-        color: active ? cfg.color : '#64748B',
+        color: active ? cfg.color : 'var(--muted)',
         transition: 'all 0.15s', whiteSpace: 'nowrap',
       }}
     >
-      <span style={{ width: 6, height: 6, borderRadius: '50%', background: active ? cfg.dot : '#CBD5E1', flexShrink: 0 }} />
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: active ? cfg.dot : 'var(--border)', flexShrink: 0 }} />
       {cfg.label}
     </button>
   )
@@ -88,8 +88,8 @@ function CopyBtn({ text }) {
           }}
         >
           {copied
-            ? <Check size={11} color="#16A34A" strokeWidth={2.5} />
-            : <Copy size={11} color="#64748B" strokeWidth={2} />
+            ? <Check size={11} color="var(--ok)" strokeWidth={2.5} />
+            : <Copy size={11} color="var(--muted)" strokeWidth={2} />
           }
         </button>
       </TooltipTrigger>
@@ -127,8 +127,8 @@ function LogLine({ entry, highlight }) {
       style={{
         display: 'flex', alignItems: 'flex-start', gap: 8,
         padding: '4px 12px',
-        borderBottom: '1px solid #F1F5F9',
-        background: hov ? '#F8FAFC' : cfg.bg,
+        borderBottom: '1px solid var(--surface)',
+        background: hov ? 'var(--surface)' : cfg.bg,
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
         fontSize: 11, lineHeight: 1.6, wordBreak: 'break-all',
         transition: 'background 0.1s',
@@ -224,16 +224,16 @@ export default function LogViewerDrawer({ onClose }) {
       <SheetContent aria-describedby={undefined} style={{ width: 'min(780px, 100vw)' }}>
 
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderBottom: '1px solid #E2E8F0', gap: 12, flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderBottom: '1px solid var(--border)', gap: 12, flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: '#F8FAFC', border: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <span style={{ fontSize: 14 }}>📋</span>
             </div>
             <div>
               <SheetTitle asChild>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>Log Viewer</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>Log Viewer</div>
               </SheetTitle>
-              <div style={{ fontSize: 10, color: '#94A3B8', fontFamily: 'monospace' }}>
+              <div style={{ fontSize: 10, color: 'var(--dim)', fontFamily: 'monospace' }}>
                 mainlog · {visible.length}{(filter !== 'all' || search) ? ` de ${entries.length}` : ''} entradas
               </div>
             </div>
@@ -245,9 +245,9 @@ export default function LogViewerDrawer({ onClose }) {
               style={{
                 display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 7,
                 fontSize: 11, fontWeight: 500, cursor: 'pointer',
-                border: autoRefresh ? '1px solid #BAE6FD' : '1px solid #E2E8F0',
-                background: autoRefresh ? '#F0F9FF' : '#fff',
-                color: autoRefresh ? '#0369A1' : '#64748B', transition: 'all 0.15s',
+                border: autoRefresh ? '1px solid var(--accent-border)' : '1px solid var(--border)',
+                background: autoRefresh ? 'var(--accent-bg)' : '#fff',
+                color: autoRefresh ? 'var(--accent-fg)' : 'var(--muted)', transition: 'all 0.15s',
               }}
             >
               <RefreshCw size={11} style={{ animation: refreshing ? 'spin 1s linear infinite' : undefined }} />
@@ -256,7 +256,7 @@ export default function LogViewerDrawer({ onClose }) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <button onClick={() => load(true)} disabled={refreshing}
-                  style={{ width: 30, height: 30, borderRadius: 7, border: '1px solid #E2E8F0', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#64748B', opacity: refreshing ? 0.5 : 1 }}>
+                  style={{ width: 30, height: 30, borderRadius: 7, border: '1px solid var(--border)', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--muted)', opacity: refreshing ? 0.5 : 1 }}>
                   <RefreshCw size={13} style={{ animation: refreshing ? 'spin 1s linear infinite' : undefined }} />
                 </button>
               </TooltipTrigger>
@@ -279,9 +279,9 @@ export default function LogViewerDrawer({ onClose }) {
                   style={{
                     display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 7,
                     fontSize: 11, fontWeight: 500, cursor: 'pointer',
-                    border: showExport ? '1px solid #BAE6FD' : '1px solid #E2E8F0',
-                    background: showExport ? '#F0F9FF' : '#fff',
-                    color: showExport ? '#0369A1' : '#64748B', transition: 'all 0.15s',
+                    border: showExport ? '1px solid var(--accent-border)' : '1px solid var(--border)',
+                    background: showExport ? 'var(--accent-bg)' : '#fff',
+                    color: showExport ? 'var(--accent-fg)' : 'var(--muted)', transition: 'all 0.15s',
                   }}
                 >
                   <Download size={11} />
@@ -290,24 +290,24 @@ export default function LogViewerDrawer({ onClose }) {
               </TooltipTrigger>
               <TooltipContent>Exportar log por período e conta</TooltipContent>
             </Tooltip>
-            <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: 7, border: '1px solid #E2E8F0', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#64748B' }}>
+            <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: 7, border: '1px solid var(--border)', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--muted)' }}>
               <X size={14} />
             </button>
           </div>
         </div>
 
         {/* Filtros */}
-        <div style={{ padding: '10px 16px', borderBottom: '1px solid #F1F5F9', display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
+        <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--surface)', display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
             <button onClick={() => setFilter('all')} style={{
               display: 'flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 999,
               fontSize: 11, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap',
-              border: filter === 'all' ? '1px solid #0EA5E9' : '1px solid #E2E8F0',
+              border: filter === 'all' ? '1px solid var(--sky)' : '1px solid var(--border)',
               background: filter === 'all' ? 'rgba(14,165,233,0.08)' : '#fff',
-              color: filter === 'all' ? '#0369A1' : '#64748B', transition: 'all 0.15s',
+              color: filter === 'all' ? 'var(--accent-fg)' : 'var(--muted)', transition: 'all 0.15s',
             }}>
               Todos
-              <span style={{ fontSize: 10, padding: '0 5px', borderRadius: 999, background: filter === 'all' ? '#0EA5E9' : '#E2E8F0', color: filter === 'all' ? '#fff' : '#64748B' }}>
+              <span style={{ fontSize: 10, padding: '0 5px', borderRadius: 999, background: filter === 'all' ? 'var(--sky)' : 'var(--border)', color: filter === 'all' ? '#fff' : 'var(--muted)' }}>
                 {entries.length}
               </span>
             </button>
@@ -321,32 +321,32 @@ export default function LogViewerDrawer({ onClose }) {
           <input
             type="text" placeholder="Filtrar por texto…" value={search}
             onChange={e => setSearch(e.target.value)}
-            style={{ width: '100%', padding: '6px 10px', borderRadius: 7, fontSize: 12, border: '1px solid #E2E8F0', outline: 'none', color: '#0F172A', background: '#F8FAFC', boxSizing: 'border-box', transition: 'border-color 0.15s, box-shadow 0.15s' }}
-            onFocus={e => { e.target.style.borderColor = '#0EA5E9'; e.target.style.boxShadow = '0 0 0 3px rgba(14,165,233,0.15)' }}
-            onBlur={e => { e.target.style.borderColor = '#E2E8F0'; e.target.style.boxShadow = 'none' }}
+            style={{ width: '100%', padding: '6px 10px', borderRadius: 7, fontSize: 12, border: '1px solid var(--border)', outline: 'none', color: 'var(--text)', background: 'var(--surface)', boxSizing: 'border-box', transition: 'border-color 0.15s, box-shadow 0.15s' }}
+            onFocus={e => { e.target.style.borderColor = 'var(--sky)'; e.target.style.boxShadow = '0 0 0 3px rgba(14,165,233,0.15)' }}
+            onBlur={e => { e.target.style.borderColor = 'var(--border)'; e.target.style.boxShadow = 'none' }}
           />
 
           {showExport && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end', padding: '10px', borderRadius: 8, background: '#F8FAFC', border: '1px solid #E2E8F0' }}>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, color: '#64748B' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end', padding: '10px', borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--border)' }}>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, color: 'var(--muted)' }}>
                 De
                 <input type="date" value={exportStart} max={exportEnd}
                   onChange={e => setExportStart(e.target.value)}
-                  style={{ padding: '5px 8px', borderRadius: 6, fontSize: 11, border: '1px solid #E2E8F0', color: '#0F172A' }} />
+                  style={{ padding: '5px 8px', borderRadius: 6, fontSize: 11, border: '1px solid var(--border)', color: 'var(--text)' }} />
               </label>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, color: '#64748B' }}>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, color: 'var(--muted)' }}>
                 Até
                 <input type="date" value={exportEnd} min={exportStart} max={isoDaysAgo(0)}
                   onChange={e => setExportEnd(e.target.value)}
-                  style={{ padding: '5px 8px', borderRadius: 6, fontSize: 11, border: '1px solid #E2E8F0', color: '#0F172A' }} />
+                  style={{ padding: '5px 8px', borderRadius: 6, fontSize: 11, border: '1px solid var(--border)', color: 'var(--text)' }} />
               </label>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, color: '#64748B', flex: '1 1 160px', minWidth: 140 }}>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, color: 'var(--muted)', flex: '1 1 160px', minWidth: 140 }}>
                 Conta (e-mail, opcional)
                 <input type="text" placeholder="usuario@dominio.com" value={exportAccount}
                   onChange={e => setExportAccount(e.target.value)}
-                  style={{ padding: '5px 8px', borderRadius: 6, fontSize: 11, border: '1px solid #E2E8F0', color: '#0F172A' }} />
+                  style={{ padding: '5px 8px', borderRadius: 6, fontSize: 11, border: '1px solid var(--border)', color: 'var(--text)' }} />
               </label>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, color: '#64748B' }}>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, color: 'var(--muted)' }}>
                 Formato
                 <Select value={exportFormat} onValueChange={setExportFormat}>
                   <SelectTrigger className="h-[28px] py-0 text-[11px]" style={{ minWidth: 78 }}>
@@ -363,7 +363,7 @@ export default function LogViewerDrawer({ onClose }) {
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 7,
                   fontSize: 11, fontWeight: 600, cursor: exporting ? 'default' : 'pointer',
-                  border: '1px solid #0EA5E9', background: '#0EA5E9', color: '#fff',
+                  border: '1px solid var(--sky)', background: 'var(--sky)', color: '#fff',
                   opacity: exporting ? 0.6 : 1, height: 28,
                 }}
               >
@@ -373,12 +373,12 @@ export default function LogViewerDrawer({ onClose }) {
                 {exporting ? 'Exportando…' : 'Exportar'}
               </button>
               {filter !== 'all' && (
-                <span style={{ fontSize: 10, color: '#94A3B8', width: '100%' }}>
+                <span style={{ fontSize: 10, color: 'var(--dim)', width: '100%' }}>
                   Tipo filtrado atualmente aplicado à exportação: <strong>{TYPE_CONFIG[filter]?.label ?? filter}</strong>
                 </span>
               )}
               {exportError && (
-                <span style={{ fontSize: 11, color: '#DC2626', width: '100%' }}>{exportError}</span>
+                <span style={{ fontSize: 11, color: 'var(--danger)', width: '100%' }}>{exportError}</span>
               )}
             </div>
           )}
@@ -387,15 +387,15 @@ export default function LogViewerDrawer({ onClose }) {
         {/* Corpo */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {loading ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 160, gap: 10, color: '#94A3B8', fontSize: 13 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 160, gap: 10, color: 'var(--dim)', fontSize: 13 }}>
               <RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} />Carregando log…
             </div>
           ) : error ? (
-            <div style={{ margin: 16, padding: '12px 14px', borderRadius: 10, background: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B', fontSize: 12 }}>
+            <div style={{ margin: 16, padding: '12px 14px', borderRadius: 10, background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', color: 'var(--danger)', fontSize: 12 }}>
               <strong>Erro:</strong> {error}
             </div>
           ) : visible.length === 0 ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 160, color: '#94A3B8', fontSize: 13 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 160, color: 'var(--dim)', fontSize: 13 }}>
               {search || filter !== 'all' ? 'Nenhuma entrada corresponde ao filtro.' : 'Log vazio.'}
             </div>
           ) : (
@@ -404,13 +404,13 @@ export default function LogViewerDrawer({ onClose }) {
         </div>
 
         {/* Footer */}
-        <div style={{ padding: '8px 16px', borderTop: '1px solid #F1F5F9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, color: '#94A3B8', flexShrink: 0 }}>
+        <div style={{ padding: '8px 16px', borderTop: '1px solid var(--surface)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, color: 'var(--dim)', flexShrink: 0 }}>
           <span>
-            Passe o mouse em uma linha para copiar · <kbd style={{ fontFamily: 'monospace', background: '#F1F5F9', padding: '1px 5px', borderRadius: 4, border: '1px solid #E2E8F0' }}>ESC</kbd> fechar
+            Passe o mouse em uma linha para copiar · <kbd style={{ fontFamily: 'monospace', background: 'var(--surface)', padding: '1px 5px', borderRadius: 4, border: '1px solid var(--border)' }}>ESC</kbd> fechar
           </span>
           <div style={{ display: 'flex', gap: 12 }}>
             {Object.entries(counts).filter(([, v]) => v > 0).map(([type, count]) => (
-              <span key={type} style={{ color: TYPE_CONFIG[type]?.color ?? '#64748B' }}>
+              <span key={type} style={{ color: TYPE_CONFIG[type]?.color ?? 'var(--muted)' }}>
                 {TYPE_CONFIG[type]?.label ?? type}: {count}
               </span>
             ))}

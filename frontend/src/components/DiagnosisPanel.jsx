@@ -38,27 +38,30 @@ const ACTION_LABELS = {
   'retry-queue':   'Forçar reprocessamento',
 }
 
-// Estilos por ação — ação principal é a primeira da lista
+// Estilos por ação — ação principal é a primeira da lista. Chip sólido
+// escuro DE PROPÓSITO nos dois temas (não var(--text), que vira quase
+// branco no escuro) — é o único badge "cheio" da lista, contraste com
+// os outros que são outline/pastel.
 const ACTION_STYLE_PRIMARY = {
-  bg: '#0F172A', border: '#0F172A', text: '#fff',
+  bg: '#1E293B', border: '#1E293B', text: '#fff',
 }
 const ACTION_STYLES = {
-  'clean-full':    { bg: '#FEF2F2', border: '#FECACA', text: '#991B1B' },
-  'clean-bounces': { bg: '#FFF7ED', border: '#FED7AA', text: '#9A3412' },
-  'clean-frozen':  { bg: '#FFFBEB', border: '#FDE68A', text: '#92400E' },
-  'clean-sender':  { bg: '#FFF7ED', border: '#FED7AA', text: '#9A3412' },
-  'clean-auth':    { bg: '#FEF2F2', border: '#FECACA', text: '#991B1B' },
-  'block-ip':      { bg: '#FEF2F2', border: '#FECACA', text: '#991B1B' },
-  'retry-queue':   { bg: '#F0F9FF', border: '#BAE6FD', text: '#0369A1' },
+  'clean-full':    { bg: 'var(--danger-bg)', border: 'var(--danger-border)', text: 'var(--danger)' },
+  'clean-bounces': { bg: 'var(--warn-bg)', border: 'var(--warn-border)', text: 'var(--warn)' },
+  'clean-frozen':  { bg: 'var(--warn-bg)', border: 'var(--warn-border)', text: 'var(--warn)' },
+  'clean-sender':  { bg: 'var(--warn-bg)', border: 'var(--warn-border)', text: 'var(--warn)' },
+  'clean-auth':    { bg: 'var(--danger-bg)', border: 'var(--danger-border)', text: 'var(--danger)' },
+  'block-ip':      { bg: 'var(--danger-bg)', border: 'var(--danger-border)', text: 'var(--danger)' },
+  'retry-queue':   { bg: 'var(--accent-bg)', border: 'var(--accent-border)', text: 'var(--accent-fg)' },
 }
 
 // Cores de fundo do painel por severidade
 const SEVERITY_BG = {
-  OK:       { bg: '#F0FDF4', border: '#BBF7D0', dot: '#16A34A' },
-  LOW:      { bg: '#F0FDF4', border: '#BBF7D0', dot: '#16A34A' },
-  MEDIUM:   { bg: '#FFFBEB', border: '#FDE68A', dot: '#D97706' },
-  HIGH:     { bg: '#FFF7ED', border: '#FED7AA', dot: '#EA580C' },
-  CRITICAL: { bg: '#FEF2F2', border: '#FECACA', dot: '#DC2626' },
+  OK:       { bg: 'var(--ok-bg)', border: 'var(--ok-border)', dot: 'var(--ok)' },
+  LOW:      { bg: 'var(--ok-bg)', border: 'var(--ok-border)', dot: 'var(--ok)' },
+  MEDIUM:   { bg: 'var(--warn-bg)', border: 'var(--warn-border)', dot: 'var(--warn)' },
+  HIGH:     { bg: 'var(--warn-bg)', border: 'var(--warn-border)', dot: '#EA580C' },
+  CRITICAL: { bg: 'var(--danger-bg)', border: 'var(--danger-border)', dot: 'var(--danger)' },
 }
 
 export default function DiagnosisPanel({ diagnosis, onAction }) {
@@ -86,7 +89,7 @@ export default function DiagnosisPanel({ diagnosis, onAction }) {
       className="card"
       style={{
         border: `1px solid ${colors.border}`,
-        background: collapsed ? '#fff' : colors.bg,
+        background: collapsed ? 'var(--card)' : colors.bg,
         transition: 'background 0.25s, border-color 0.25s',
         padding: 0,
         overflow: 'hidden',
@@ -116,7 +119,7 @@ export default function DiagnosisPanel({ diagnosis, onAction }) {
 
         <ChevronDown
           size={14}
-          color="#94A3B8"
+          color="var(--dim)"
           style={{
             transition: 'transform 0.2s',
             transform: collapsed ? 'rotate(0deg)' : 'rotate(180deg)',
@@ -130,7 +133,7 @@ export default function DiagnosisPanel({ diagnosis, onAction }) {
         <div style={{ padding: '0 16px 16px' }}>
           {/* Descrição */}
           {description && (
-            <p style={{ fontSize: 13, color: '#374151', marginBottom: 12, lineHeight: 1.5 }}>
+            <p style={{ fontSize: 13, color: 'var(--text)', marginBottom: 12, lineHeight: 1.5 }}>
               {description}
             </p>
           )}

@@ -7,9 +7,9 @@ export default function DeliveryRateCard({ delivered = 0, rejected = 0, deferred
   const rate  = total > 0 ? Math.round((delivered / total) * 100) : null
 
   // Sem dados: aparência neutra igual aos MetricCards
-  const color       = rate == null ? '#94A3B8' : rate >= 95 ? '#16A34A' : rate >= 80 ? '#D97706' : '#DC2626'
-  const bgColor     = rate == null ? '#fff'    : rate >= 95 ? '#F0FDF4' : rate >= 80 ? '#FFFBEB' : '#FEF2F2'
-  const borderColor = rate == null ? '#E2E8F0' : rate >= 95 ? '#BBF7D0' : rate >= 80 ? '#FDE68A' : '#FECACA'
+  const color       = rate == null ? 'var(--dim)' : rate >= 95 ? 'var(--ok)' : rate >= 80 ? 'var(--warn)' : 'var(--danger)'
+  const bgColor     = rate == null ? 'var(--card)' : rate >= 95 ? 'var(--ok-bg)' : rate >= 80 ? 'var(--warn-bg)' : 'var(--danger-bg)'
+  const borderColor = rate == null ? 'var(--border)' : rate >= 95 ? 'var(--ok-border)' : rate >= 80 ? 'var(--warn-border)' : 'var(--danger-border)'
 
   // Placeholder de ícone (espelho do MetricCard) quando sem dados
   const NoDataIcon = () => (
@@ -19,7 +19,7 @@ export default function DeliveryRateCard({ delivered = 0, rejected = 0, deferred
       border: '1px solid rgba(148,163,184,0.18)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
     }}>
-      <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="var(--dim)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
         <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
       </svg>
     </div>
@@ -34,7 +34,7 @@ export default function DeliveryRateCard({ delivered = 0, rejected = 0, deferred
           </p>
 
           {loading ? (
-            <div className="h-9 w-24 rounded-lg animate-pulse" style={{ background: '#E2E8F0' }} />
+            <div className="h-9 w-24 rounded-lg animate-pulse" style={{ background: 'var(--border)' }} />
           ) : (
             <p style={{
               fontSize: 28, fontWeight: 800,

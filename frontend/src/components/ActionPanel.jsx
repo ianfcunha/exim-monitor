@@ -29,13 +29,16 @@ const ACTIONS = [
   { id: 'clean-full',    label: 'Limpar toda a fila',  Icon: Trash2,         color: 'red',    confirm: true,  param: null },
 ]
 
+// Tons por categoria de ação — bg/border misturados com var(--card)/var(--border)
+// (não um hex sólido) e text misturado com var(--text), pra se adaptar ao tema
+// escuro automaticamente em vez de ficar pastel-claro fixo (ilegível no escuro).
 const COLOR_MAP = {
-  sky:    { bg: '#F0F9FF', border: '#BAE6FD', text: '#0369A1', hoverBg: '#E0F2FE' },
-  amber:  { bg: '#FFFBEB', border: '#FDE68A', text: '#92400E', hoverBg: '#FEF3C7' },
-  orange: { bg: '#FFF7ED', border: '#FED7AA', text: '#9A3412', hoverBg: '#FFEDD5' },
-  purple: { bg: '#FAF5FF', border: '#E9D5FF', text: '#6B21A8', hoverBg: '#F3E8FF' },
-  rose:   { bg: '#FFF1F2', border: '#FECDD3', text: '#9F1239', hoverBg: '#FFE4E6' },
-  red:    { bg: '#FEF2F2', border: '#FECACA', text: '#991B1B', hoverBg: '#FEE2E2' },
+  sky:    { bg: 'var(--accent-bg)', border: 'var(--accent-border)', text: 'var(--accent-fg)', hoverBg: 'color-mix(in srgb, var(--sky) 18%, var(--card))' },
+  amber:  { bg: 'var(--warn-bg)', border: 'var(--warn-border)', text: 'var(--warn)', hoverBg: 'color-mix(in srgb, var(--warn) 22%, var(--card))' },
+  orange: { bg: 'color-mix(in srgb, #EA580C 12%, var(--card))', border: 'color-mix(in srgb, #EA580C 35%, var(--border))', text: 'color-mix(in srgb, #EA580C 70%, var(--text))', hoverBg: 'color-mix(in srgb, #EA580C 22%, var(--card))' },
+  purple: { bg: 'color-mix(in srgb, #A855F7 12%, var(--card))', border: 'color-mix(in srgb, #A855F7 35%, var(--border))', text: 'color-mix(in srgb, #A855F7 70%, var(--text))', hoverBg: 'color-mix(in srgb, #A855F7 22%, var(--card))' },
+  rose:   { bg: 'color-mix(in srgb, #E11D48 12%, var(--card))', border: 'color-mix(in srgb, #E11D48 35%, var(--border))', text: 'color-mix(in srgb, #E11D48 70%, var(--text))', hoverBg: 'color-mix(in srgb, #E11D48 22%, var(--card))' },
+  red:    { bg: 'var(--danger-bg)', border: 'var(--danger-border)', text: 'var(--danger)', hoverBg: 'color-mix(in srgb, var(--danger) 22%, var(--card))' },
 }
 
 export default function ActionPanel({ onActionComplete, recommendedActions = [] }) {
@@ -120,7 +123,7 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
           <span style={{
             fontSize: 9, fontWeight: 700, letterSpacing: '0.08em',
             textTransform: 'uppercase', padding: '2px 7px', borderRadius: 999,
-            background: '#F0F9FF', border: '1px solid #BAE6FD', color: '#0369A1',
+            background: 'var(--accent-bg)', border: '1px solid var(--accent-border)', color: 'var(--accent-fg)',
           }}>
             {recommendedActions.length} sugerida{recommendedActions.length > 1 ? 's' : ''}
           </span>
@@ -141,18 +144,18 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6,
                   borderRadius: 8,
-                  border: isRecommended ? '2px solid #0EA5E9' : `1px solid ${c.border}`,
+                  border: isRecommended ? '2px solid var(--sky)' : `1px solid ${c.border}`,
                   padding: isRecommended ? '5px 11px' : '6px 12px',
                   fontSize: 11, fontWeight: isRecommended ? 600 : 500,
-                  color: isRecommended ? '#0369A1' : c.text,
-                  background: isRecommended ? '#EFF6FF' : c.bg,
+                  color: isRecommended ? 'var(--accent-fg)' : c.text,
+                  background: isRecommended ? 'var(--accent-bg)' : c.bg,
                   cursor: pending ? 'not-allowed' : 'pointer',
                   transition: 'background 0.15s, opacity 0.15s',
                   opacity: !!pending && !isRunning ? 0.45 : 1,
                   boxShadow: isRecommended ? '0 0 0 3px rgba(14,165,233,0.12)' : 'none',
                 }}
-                onMouseEnter={e => { if (!pending) e.currentTarget.style.background = isRecommended ? '#DBEAFE' : c.hoverBg }}
-                onMouseLeave={e => { e.currentTarget.style.background = isRecommended ? '#EFF6FF' : c.bg }}
+                onMouseEnter={e => { if (!pending) e.currentTarget.style.background = isRecommended ? 'color-mix(in srgb, var(--sky) 22%, var(--card))' : c.hoverBg }}
+                onMouseLeave={e => { e.currentTarget.style.background = isRecommended ? 'var(--accent-bg)' : c.bg }}
               >
                 <Icon size={12} style={{ animation: isRunning ? 'spin 1s linear infinite' : undefined }} />
                 {isRunning ? 'Executando…' : action.label}
@@ -162,7 +165,7 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
                   position: 'absolute', top: -7, right: -4,
                   fontSize: 8, fontWeight: 700, letterSpacing: '0.05em',
                   padding: '1px 5px', borderRadius: 999,
-                  background: '#0EA5E9', color: '#fff', pointerEvents: 'none',
+                  background: 'var(--sky)', color: '#fff', pointerEvents: 'none',
                 }}>
                   Sugerido
                 </span>
@@ -175,11 +178,11 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
       {confirmAction && (
         <div style={{
           borderRadius: 10, padding: '12px 14px',
-          background: '#FEF2F2', border: '1px solid #FECACA',
+          background: 'var(--danger-bg)', border: '1px solid var(--danger-border)',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-            <AlertTriangle size={13} color="#DC2626" />
-            <span style={{ fontSize: 12, color: '#991B1B' }}>
+            <AlertTriangle size={13} color="var(--danger)" />
+            <span style={{ fontSize: 12, color: 'var(--danger)' }}>
               Confirma: <strong>{confirmAction.label}</strong>?
             </span>
           </div>
@@ -196,25 +199,25 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
                 style={{
                   width: '100%', boxSizing: 'border-box',
                   borderRadius: 7,
-                  border: `1px solid ${paramError ? '#F87171' : '#FECACA'}`,
-                  padding: '6px 10px', fontSize: 12, color: '#1E293B',
-                  background: '#FFF', outline: 'none',
+                  border: `1px solid ${paramError ? 'var(--danger)' : 'var(--danger-border)'}`,
+                  padding: '6px 10px', fontSize: 12, color: 'var(--text)',
+                  background: 'var(--card)', outline: 'none',
                   boxShadow: paramError ? '0 0 0 2px rgba(248,113,113,0.25)' : 'none',
                   transition: 'border-color 0.15s, box-shadow 0.15s',
                 }}
                 onFocus={e => {
-                  e.target.style.borderColor = paramError ? '#F87171' : '#0EA5E9'
+                  e.target.style.borderColor = paramError ? 'var(--danger)' : 'var(--sky)'
                   e.target.style.boxShadow = paramError
                     ? '0 0 0 3px rgba(248,113,113,0.30)'
                     : '0 0 0 3px rgba(14,165,233,0.20)'
                 }}
                 onBlur={e => {
-                  e.target.style.borderColor = paramError ? '#F87171' : '#FECACA'
+                  e.target.style.borderColor = paramError ? 'var(--danger)' : 'var(--danger-border)'
                   e.target.style.boxShadow = paramError ? '0 0 0 2px rgba(248,113,113,0.25)' : 'none'
                 }}
               />
               {paramError && (
-                <span style={{ fontSize: 10, color: '#DC2626', marginTop: 3, display: 'block' }}>
+                <span style={{ fontSize: 10, color: 'var(--danger)', marginTop: 3, display: 'block' }}>
                   {paramError}
                 </span>
               )}
@@ -222,12 +225,12 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
           )}
 
           {SNAPSHOT_ACTIONS.has(confirmAction.id) && (
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, fontSize: 11, color: '#991B1B', cursor: 'pointer', userSelect: 'none' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, fontSize: 11, color: 'var(--danger)', cursor: 'pointer', userSelect: 'none' }}>
               <input
                 type="checkbox"
                 checked={snapshot}
                 onChange={e => setSnapshot(e.target.checked)}
-                style={{ width: 13, height: 13, accentColor: '#DC2626' }}
+                style={{ width: 13, height: 13, accentColor: 'var(--danger)' }}
               />
               Registrar o estado atual antes de executar (recomendado)
             </label>

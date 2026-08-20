@@ -3,11 +3,11 @@
  */
 
 const S = {
-  OK:       { border: '#BAE6FD', bg: '#F0F9FF', text: '#0369A1', dot: '#0EA5E9' },
-  LOW:      { border: '#A5F3FC', bg: '#ECFEFF', text: '#0E7490', dot: '#22D3EE' },
-  MEDIUM:   { border: '#FDE68A', bg: '#FFFBEB', text: '#92400E', dot: '#F59E0B' },
-  HIGH:     { border: '#FED7AA', bg: '#FFF7ED', text: '#9A3412', dot: '#F97316' },
-  CRITICAL: { border: '#FECACA', bg: '#FEF2F2', text: '#991B1B', dot: '#EF4444' },
+  OK:       { border: 'var(--accent-border)', bg: 'var(--accent-bg)', text: 'var(--accent-fg)', dot: 'var(--sky)' },
+  LOW:      { border: 'color-mix(in srgb, var(--cyan) 40%, var(--border))', bg: 'color-mix(in srgb, var(--cyan) 12%, var(--card))', text: 'color-mix(in srgb, var(--cyan) 70%, var(--text))', dot: 'var(--cyan)' },
+  MEDIUM:   { border: 'var(--warn-border)', bg: 'var(--warn-bg)', text: 'var(--warn)', dot: 'var(--warn)' },
+  HIGH:     { border: 'var(--warn-border)', bg: 'var(--warn-bg)', text: 'var(--warn)', dot: '#F97316' },
+  CRITICAL: { border: 'var(--danger-border)', bg: 'var(--danger-bg)', text: 'var(--danger)', dot: 'var(--danger)' },
 }
 
 export default function StatusBadge({ severity = 'OK', problem, description, large = false }) {

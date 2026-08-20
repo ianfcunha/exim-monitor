@@ -25,28 +25,28 @@ export default function PhpMailersCard({ phpMailers, loading }) {
         border: `1px solid ${hasSuspects ? 'rgba(220,38,38,0.18)' : 'rgba(22,163,74,0.18)'}`,
       }}>
         {hasSuspects
-          ? <Bug size={17} color="#DC2626" />
-          : <ShieldCheck size={17} color="#16A34A" />
+          ? <Bug size={17} color="var(--danger)" />
+          : <ShieldCheck size={17} color="var(--ok)" />
         }
       </div>
 
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span className="section-label" style={{ color: hasSuspects ? '#DC2626' : undefined }}>
+          <span className="section-label" style={{ color: hasSuspects ? 'var(--danger)' : undefined }}>
             Scripts PHP maliciosos
           </span>
-          {loading && <span style={{ fontSize: 10, color: '#94A3B8' }}>atualizando…</span>}
+          {loading && <span style={{ fontSize: 10, color: 'var(--dim)' }}>atualizando…</span>}
         </div>
 
         {hasSuspects ? (
-          <div style={{ marginTop: 4, fontSize: 12.5, color: '#0F172A' }}>
+          <div style={{ marginTop: 4, fontSize: 12.5, color: 'var(--text)' }}>
             <b>{suspicious}</b> arquivo{suspicious > 1 ? 's' : ''} com padrão de ofuscação/execução dinâmica
             {mailCalls > 0 && <> · {mailCalls} usando <code style={{ fontFamily: 'monospace', fontSize: 11 }}>mail()</code></>}
             {topSuspect && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div style={{
-                    marginTop: 4, fontSize: 11, color: '#991B1B', fontFamily: 'monospace',
+                    marginTop: 4, fontSize: 11, color: 'var(--danger)', fontFamily: 'monospace',
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 480,
                   }}>
                     {topSuspect}
@@ -57,7 +57,7 @@ export default function PhpMailersCard({ phpMailers, loading }) {
             )}
           </div>
         ) : (
-          <div style={{ marginTop: 4, fontSize: 12.5, color: '#64748B' }}>
+          <div style={{ marginTop: 4, fontSize: 12.5, color: 'var(--muted)' }}>
             Nenhum script suspeito encontrado em /srv, /var/www ou contas cPanel
             {mailCalls > 0 && <> · {mailCalls} arquivo{mailCalls > 1 ? 's' : ''} usando <code style={{ fontFamily: 'monospace', fontSize: 11 }}>mail()</code> (uso legítimo)</>}
           </div>

@@ -15,10 +15,10 @@ function formatTime(isoStr) {
 }
 
 const C = {
-  Fila:       '#0EA5E9',
+  Fila:       'var(--sky)',
   Entregues:  '#0891B2',
-  Rejeitados: '#EF4444',
-  Deferidos:  '#F59E0B',
+  Rejeitados: 'var(--danger)',
+  Deferidos:  'var(--warn)',
 }
 
 export default function HistoryChart() {
@@ -47,7 +47,7 @@ export default function HistoryChart() {
 
         <div style={{
           display: 'flex', gap: 2, padding: 3, borderRadius: 8,
-          background: '#F8FAFC', border: '1px solid #E2E8F0',
+          background: 'var(--surface)', border: '1px solid var(--border)',
         }}>
           {HOURS_OPTIONS.map(h => (
             <button
@@ -56,7 +56,7 @@ export default function HistoryChart() {
               style={{
                 borderRadius: 6, padding: '3px 10px',
                 fontSize: 11, fontWeight: 500,
-                background: hours === h ? '#0EA5E9' : 'transparent',
+                background: hours === h ? 'var(--sky)' : 'transparent',
                 color:      hours === h ? '#fff'    : 'var(--muted)',
                 border:     'none', cursor: 'pointer',
                 transition: 'all 0.15s',
@@ -69,7 +69,7 @@ export default function HistoryChart() {
       </div>
 
       {loading ? (
-        <div className="h-52 rounded-xl animate-pulse" style={{ background: '#F1F5F9' }} />
+        <div className="h-52 rounded-xl animate-pulse" style={{ background: 'var(--surface)' }} />
       ) : data.length === 0 ? (
         <p style={{ fontSize: 12, color: 'var(--dim)', textAlign: 'center', padding: '40px 0', fontStyle: 'italic' }}>
           Sem dados suficientes — aguarde alguns ciclos de coleta.
@@ -87,19 +87,19 @@ export default function HistoryChart() {
                 <stop offset="95%" stopColor={C.Entregues} stopOpacity={0}    />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 6" stroke="#E2E8F0" vertical={false} />
-            <XAxis dataKey="time" tick={{ fill: '#94A3B8', fontSize: 10 }} tickLine={false} axisLine={false} />
-            <YAxis tick={{ fill: '#94A3B8', fontSize: 10 }} tickLine={false} axisLine={false} />
+            <CartesianGrid strokeDasharray="3 6" stroke="var(--border)" vertical={false} />
+            <XAxis dataKey="time" tick={{ fill: 'var(--dim)', fontSize: 10 }} tickLine={false} axisLine={false} />
+            <YAxis tick={{ fill: 'var(--dim)', fontSize: 10 }} tickLine={false} axisLine={false} />
             <Tooltip
               contentStyle={{
-                background: '#fff', border: '1px solid #E2E8F0',
+                background: 'var(--card)', border: '1px solid var(--border)',
                 borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
               }}
-              labelStyle={{ color: '#64748B', fontSize: 11, marginBottom: 4 }}
-              itemStyle={{ fontSize: 11, color: '#0F172A' }}
-              cursor={{ stroke: '#E2E8F0', strokeWidth: 1 }}
+              labelStyle={{ color: 'var(--muted)', fontSize: 11, marginBottom: 4 }}
+              itemStyle={{ fontSize: 11, color: 'var(--text)' }}
+              cursor={{ stroke: 'var(--border)', strokeWidth: 1 }}
             />
-            <Legend wrapperStyle={{ fontSize: 11, color: '#94A3B8', paddingTop: 8 }} />
+            <Legend wrapperStyle={{ fontSize: 11, color: 'var(--dim)', paddingTop: 8 }} />
             <Area type="monotone" dataKey="Fila"       stroke={C.Fila}       fill="url(#gFila)"      strokeWidth={2}   dot={false} activeDot={{ r: 3 }} />
             <Area type="monotone" dataKey="Entregues"  stroke={C.Entregues}  fill="url(#gEntregues)" strokeWidth={2}   dot={false} activeDot={{ r: 3 }} />
             <Area type="monotone" dataKey="Rejeitados" stroke={C.Rejeitados} fill="none"             strokeWidth={1.5} dot={false} strokeDasharray="4 3" activeDot={{ r: 3 }} />

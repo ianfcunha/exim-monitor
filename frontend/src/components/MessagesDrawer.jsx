@@ -94,8 +94,8 @@ function CopyRowBtn({ row }) {
           }}
         >
           {copied
-            ? <Check size={12} color="#16A34A" strokeWidth={2.5} />
-            : <Copy size={12} color="#94A3B8" strokeWidth={2} />
+            ? <Check size={12} color="var(--ok)" strokeWidth={2.5} />
+            : <Copy size={12} color="var(--dim)" strokeWidth={2} />
           }
         </button>
       </TooltipTrigger>
@@ -112,9 +112,9 @@ function CellValue({ col, row }) {
     return (
       <span style={{
         fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 999,
-        background: val ? '#FEF2F2' : '#F0FDF4',
-        color: val ? '#991B1B' : '#15803D',
-        border: `1px solid ${val ? '#FECACA' : '#BBF7D0'}`,
+        background: val ? 'var(--danger-bg)' : 'var(--ok-bg)',
+        color: val ? 'var(--danger)' : 'var(--ok)',
+        border: `1px solid ${val ? 'var(--danger-border)' : 'var(--ok-border)'}`,
       }}>
         {val ? 'Frozen' : 'Normal'}
       </span>
@@ -126,14 +126,14 @@ function CellValue({ col, row }) {
       <span title={val.join(', ')}>
         {val[0] || '—'}
         {val.length > 1 && (
-          <span style={{ fontSize: 10, color: '#94A3B8', marginLeft: 4 }}>+{val.length - 1}</span>
+          <span style={{ fontSize: 10, color: 'var(--dim)', marginLeft: 4 }}>+{val.length - 1}</span>
         )}
       </span>
     )
   }
 
   const str = String(val ?? '—')
-  return <span title={str} style={{ color: str === '—' ? '#94A3B8' : undefined }}>{str || '—'}</span>
+  return <span title={str} style={{ color: str === '—' ? 'var(--dim)' : undefined }}>{str || '—'}</span>
 }
 
 // ── Componente principal ─────────────────────────────────────────────────────
@@ -186,16 +186,16 @@ export default function MessagesDrawer({ cardType, onClose }) {
       <SheetContent aria-describedby={undefined} style={{ width: 'min(640px, 100vw)' }}>
 
         {/* Header */}
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
           <div style={{ width: 34, height: 34, borderRadius: 9, flexShrink: 0, background: 'rgba(14,165,233,0.10)', border: '1px solid rgba(14,165,233,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <IconComp size={16} color="#0EA5E9" />
+            <IconComp size={16} color="var(--sky)" />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <SheetTitle asChild>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>{cfg.title}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{cfg.title}</div>
             </SheetTitle>
             {!loading && !error && (
-              <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }}>
+              <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 1 }}>
                 {filtered.length} {filter ? `de ${data.length}` : ''} {data.length === 1 ? 'mensagem' : 'mensagens'}
               </div>
             )}
@@ -215,8 +215,8 @@ export default function MessagesDrawer({ cardType, onClose }) {
           <Tooltip>
             <TooltipTrigger asChild>
               <button onClick={() => load(limit)} disabled={loading}
-                style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: loading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: loading ? 0.5 : 1, flexShrink: 0 }}>
-                <RefreshCw size={13} color="#64748B" style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} />
+                style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', cursor: loading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: loading ? 0.5 : 1, flexShrink: 0 }}>
+                <RefreshCw size={13} color="var(--muted)" style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} />
               </button>
             </TooltipTrigger>
             <TooltipContent>Atualizar</TooltipContent>
@@ -224,8 +224,8 @@ export default function MessagesDrawer({ cardType, onClose }) {
           <Tooltip>
             <TooltipTrigger asChild>
               <button onClick={onClose}
-                style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <X size={14} color="#64748B" />
+                style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <X size={14} color="var(--muted)" />
               </button>
             </TooltipTrigger>
             <TooltipContent>Fechar (Esc)</TooltipContent>
@@ -233,33 +233,33 @@ export default function MessagesDrawer({ cardType, onClose }) {
         </div>
 
         {/* Filtro */}
-        <div style={{ padding: '10px 20px', borderBottom: '1px solid #F1F5F9', flexShrink: 0 }}>
+        <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--surface)', flexShrink: 0 }}>
           <input
             type="text" placeholder="Filtrar por endereço, host, motivo…"
             value={filter} onChange={e => setFilter(e.target.value)}
-            style={{ width: '100%', borderRadius: 8, border: '1px solid #E2E8F0', background: '#F8FAFC', padding: '7px 12px', fontSize: 12, color: '#0F172A', outline: 'none', transition: 'border-color 0.15s', boxSizing: 'border-box' }}
-            onFocus={e  => { e.target.style.borderColor = '#0EA5E9' }}
-            onBlur={e   => { e.target.style.borderColor = '#E2E8F0' }}
+            style={{ width: '100%', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', padding: '7px 12px', fontSize: 12, color: 'var(--text)', outline: 'none', transition: 'border-color 0.15s', boxSizing: 'border-box' }}
+            onFocus={e  => { e.target.style.borderColor = 'var(--sky)' }}
+            onBlur={e   => { e.target.style.borderColor = 'var(--border)' }}
           />
         </div>
 
         {/* Conteúdo */}
         <div style={{ flex: 1, overflow: 'auto' }}>
           {loading && (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12, color: '#94A3B8' }}>
-              <RefreshCw size={22} style={{ animation: 'spin 1s linear infinite', color: '#0EA5E9' }} />
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12, color: 'var(--dim)' }}>
+              <RefreshCw size={22} style={{ animation: 'spin 1s linear infinite', color: 'var(--sky)' }} />
               <span style={{ fontSize: 12 }}>Buscando via SSH…</span>
             </div>
           )}
           {!loading && error && (
             <div style={{ padding: 20 }}>
-              <div style={{ borderRadius: 10, padding: '12px 14px', fontSize: 12, background: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B' }}>
+              <div style={{ borderRadius: 10, padding: '12px 14px', fontSize: 12, background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', color: 'var(--danger)' }}>
                 <strong>Erro:</strong> {error}
               </div>
             </div>
           )}
           {!loading && !error && filtered.length === 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 8, color: '#94A3B8' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 8, color: 'var(--dim)' }}>
               <IconComp size={28} strokeWidth={1.2} />
               <span style={{ fontSize: 12 }}>
                 {filter ? 'Nenhum resultado para este filtro.' : 'Nenhuma mensagem encontrada.'}
@@ -269,9 +269,9 @@ export default function MessagesDrawer({ cardType, onClose }) {
           {!loading && !error && filtered.length > 0 && (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
-                <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0', position: 'sticky', top: 0 }}>
+                <tr style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0 }}>
                   {cfg.columns.map(col => (
-                    <th key={col.key} style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94A3B8', width: col.flex ? undefined : col.width, whiteSpace: 'nowrap' }}>
+                    <th key={col.key} style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--dim)', width: col.flex ? undefined : col.width, whiteSpace: 'nowrap' }}>
                       {col.label}
                     </th>
                   ))}
@@ -285,10 +285,10 @@ export default function MessagesDrawer({ cardType, onClose }) {
                     key={i}
                     onMouseEnter={() => setHovRow(i)}
                     onMouseLeave={() => setHovRow(null)}
-                    style={{ borderBottom: '1px solid #F1F5F9', background: hovRow === i ? '#F8FAFC' : i % 2 === 0 ? '#fff' : '#FAFBFC', transition: 'background 0.1s' }}
+                    style={{ borderBottom: '1px solid var(--surface)', background: hovRow === i ? 'var(--surface)' : i % 2 === 0 ? '#fff' : '#FAFBFC', transition: 'background 0.1s' }}
                   >
                     {cfg.columns.map(col => (
-                      <td key={col.key} style={{ padding: '9px 12px', maxWidth: col.flex ? 200 : col.width, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#0F172A' }}>
+                      <td key={col.key} style={{ padding: '9px 12px', maxWidth: col.flex ? 200 : col.width, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)' }}>
                         <CellValue col={col} row={row} />
                       </td>
                     ))}
@@ -304,8 +304,8 @@ export default function MessagesDrawer({ cardType, onClose }) {
 
         {/* Footer hint */}
         {!loading && !error && filtered.length > 0 && (
-          <div style={{ padding: '6px 20px', borderTop: '1px solid #F1F5F9', fontSize: 10, color: '#CBD5E1', flexShrink: 0 }}>
-            Passe o mouse em uma linha para copiar · <kbd style={{ fontFamily: 'monospace', background: '#F1F5F9', padding: '1px 5px', borderRadius: 4, border: '1px solid #E2E8F0' }}>ESC</kbd> fechar
+          <div style={{ padding: '6px 20px', borderTop: '1px solid var(--surface)', fontSize: 10, color: 'var(--border)', flexShrink: 0 }}>
+            Passe o mouse em uma linha para copiar · <kbd style={{ fontFamily: 'monospace', background: 'var(--surface)', padding: '1px 5px', borderRadius: 4, border: '1px solid var(--border)' }}>ESC</kbd> fechar
           </div>
         )}
       </SheetContent>

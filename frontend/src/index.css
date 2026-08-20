@@ -38,9 +38,16 @@
   --radius:        0.6rem;
   --accent-bg:     #F0F9FF;
   --accent-fg:     #0369A1;
+  --accent-border: #BAE6FD;
   --danger:        #DC2626;
   --danger-bg:     #FEF2F2;
   --danger-border: #FECACA;
+  --ok:            #16A34A;
+  --ok-bg:         #F0FDF4;
+  --ok-border:     #BBF7D0;
+  --warn:          #B45309;
+  --warn-bg:       #FFFBEB;
+  --warn-border:   #FDE68A;
 }
 
 .dark {
@@ -57,9 +64,16 @@
 
   --accent-bg:     #0C2536;
   --accent-fg:     #7DD3FC;
+  --accent-border: #164E63;
   --danger:        #F87171;
   --danger-bg:     #2A1315;
   --danger-border: #7F1D1D;
+  --ok:            #4ADE80;
+  --ok-bg:         #0F2A1A;
+  --ok-border:     #14532D;
+  --warn:          #FBBF24;
+  --warn-bg:       #2E2308;
+  --warn-border:   #78350F;
 }
 
 @layer base {

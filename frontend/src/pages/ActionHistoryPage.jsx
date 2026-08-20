@@ -64,25 +64,25 @@ export default function ActionHistoryPage() {
   useEffect(() => { load() }, [serverId, limit]) // eslint-disable-line
 
   return (
-    <div style={{ minHeight: '100vh', background: '#F1F5F9' }}>
+    <div style={{ minHeight: '100vh', background: 'var(--surface)' }}>
       {/* Header */}
       <header style={{
         position: 'sticky', top: 0, zIndex: 10,
         padding: '0 24px', background: '#fff',
-        borderBottom: '1px solid #E2E8F0',
+        borderBottom: '1px solid var(--border)',
         boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
       }}>
         <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 56, gap: 14, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
             <button onClick={onBack}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#94A3B8', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-              onMouseEnter={e => e.currentTarget.style.color = '#0EA5E9'}
-              onMouseLeave={e => e.currentTarget.style.color = '#94A3B8'}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--dim)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+              onMouseEnter={e => e.currentTarget.style.color = 'var(--sky)'}
+              onMouseLeave={e => e.currentTarget.style.color = 'var(--dim)'}
             >
               <ArrowLeft size={14} /> Dashboard
             </button>
-            <span style={{ color: '#E2E8F0' }}>|</span>
-            <span style={{ fontSize: 10, letterSpacing: '0.28em', textTransform: 'uppercase', color: '#0EA5E9', fontWeight: 700 }}>
+            <span style={{ color: 'var(--border)' }}>|</span>
+            <span style={{ fontSize: 10, letterSpacing: '0.28em', textTransform: 'uppercase', color: 'var(--sky)', fontWeight: 700 }}>
               Histórico de Ações
             </span>
           </div>
@@ -114,7 +114,7 @@ export default function ActionHistoryPage() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <button onClick={load}
-                  style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748B' }}>
+                  style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)' }}>
                   <History size={13} style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} />
                 </button>
               </TooltipTrigger>
@@ -127,45 +127,45 @@ export default function ActionHistoryPage() {
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {error && (
-          <div style={{ padding: '10px 14px', borderRadius: 10, background: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B', fontSize: 12 }}>
+          <div style={{ padding: '10px 14px', borderRadius: 10, background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', color: 'var(--danger)', fontSize: 12 }}>
             {error}
           </div>
         )}
 
         <div style={{
-          background: '#fff', border: '1px solid #E2E8F0', borderRadius: 12,
+          background: '#fff', border: '1px solid var(--border)', borderRadius: 12,
           boxShadow: '0 1px 3px rgba(0,0,0,0.05)', overflow: 'hidden',
         }}>
           <div style={{
-            padding: '12px 20px', borderBottom: '1px solid #F1F5F9',
+            padding: '12px 20px', borderBottom: '1px solid var(--surface)',
             display: 'flex', alignItems: 'center', gap: 6,
           }}>
-            <History size={13} color="#94A3B8" />
-            <span style={{ fontSize: 11, color: '#94A3B8', fontWeight: 600 }}>
+            <History size={13} color="var(--dim)" />
+            <span style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 600 }}>
               {loading ? '…' : `${rows.length} ${rows.length === 1 ? 'ação' : 'ações'}`}
             </span>
           </div>
 
           {loading ? (
-            <div style={{ padding: '40px 0', textAlign: 'center', color: '#94A3B8', fontSize: 13 }}>
+            <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--dim)', fontSize: 13 }}>
               Carregando…
             </div>
           ) : rows.length === 0 ? (
-            <div style={{ padding: '40px 0', textAlign: 'center', color: '#94A3B8', fontSize: 13 }}>
+            <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--dim)', fontSize: 13 }}>
               Nenhuma ação registrada ainda.
             </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
-                  <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
+                  <tr style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
                     <th style={{ padding: '8px 4px', width: 28 }} aria-hidden="true" />
-                    <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94A3B8', whiteSpace: 'nowrap' }}>Quando</th>
-                    <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94A3B8', whiteSpace: 'nowrap' }}>Ator</th>
-                    <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94A3B8', whiteSpace: 'nowrap' }}>Ação</th>
-                    <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94A3B8' }}>Parâmetro</th>
-                    <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94A3B8', whiteSpace: 'nowrap' }}>Servidor</th>
-                    <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94A3B8', whiteSpace: 'nowrap' }}>Resultado</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--dim)', whiteSpace: 'nowrap' }}>Quando</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--dim)', whiteSpace: 'nowrap' }}>Ator</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--dim)', whiteSpace: 'nowrap' }}>Ação</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--dim)' }}>Parâmetro</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--dim)', whiteSpace: 'nowrap' }}>Servidor</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--dim)', whiteSpace: 'nowrap' }}>Resultado</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -175,62 +175,62 @@ export default function ActionHistoryPage() {
                     const isOpen = expanded.has(r.id)
                     return (
                       <Fragment key={r.id}>
-                        <tr style={{ borderBottom: isOpen ? 'none' : '1px solid #F1F5F9' }}>
+                        <tr style={{ borderBottom: isOpen ? 'none' : '1px solid var(--surface)' }}>
                           <td style={{ padding: '9px 4px', textAlign: 'center' }}>
                             {hasDetails && (
                               <button
                                 onClick={() => toggleExpanded(r.id)}
                                 aria-expanded={isOpen}
                                 aria-label={isOpen ? 'Ocultar detalhes' : 'Mostrar detalhes'}
-                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8', display: 'flex', padding: 2 }}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--dim)', display: 'flex', padding: 2 }}
                               >
                                 {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                               </button>
                             )}
                           </td>
-                          <td style={{ padding: '9px 12px', color: '#64748B', whiteSpace: 'nowrap', fontFamily: 'monospace', fontSize: 11 }}>
+                          <td style={{ padding: '9px 12px', color: 'var(--muted)', whiteSpace: 'nowrap', fontFamily: 'monospace', fontSize: 11 }}>
                             {fmt(r.executed_at)}
                           </td>
-                          <td style={{ padding: '9px 12px', color: '#0F172A', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                          <td style={{ padding: '9px 12px', color: 'var(--text)', fontWeight: 600, whiteSpace: 'nowrap' }}>
                             {r.actor}
                           </td>
-                          <td style={{ padding: '9px 12px', color: '#0F172A', whiteSpace: 'nowrap' }}>
+                          <td style={{ padding: '9px 12px', color: 'var(--text)', whiteSpace: 'nowrap' }}>
                             {r.action}
                           </td>
-                          <td style={{ padding: '9px 12px', color: '#64748B', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.param ?? ''}>
+                          <td style={{ padding: '9px 12px', color: 'var(--muted)', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.param ?? ''}>
                             {r.param ?? '—'}
                           </td>
-                          <td style={{ padding: '9px 12px', color: '#64748B', whiteSpace: 'nowrap' }}>
+                          <td style={{ padding: '9px 12px', color: 'var(--muted)', whiteSpace: 'nowrap' }}>
                             {serverName(r.server_id)}
                           </td>
                           <td style={{ padding: '9px 12px', whiteSpace: 'nowrap' }}>
                             {r.success ? (
-                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: '#F0FDF4', color: '#15803D', border: '1px solid #BBF7D0' }}>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: 'var(--ok-bg)', color: 'var(--ok)', border: '1px solid var(--ok-border)' }}>
                                 <CheckCircle size={10} /> Sucesso
                               </span>
                             ) : (
-                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: '#FEF2F2', color: '#991B1B', border: '1px solid #FECACA' }}>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: 'var(--danger-bg)', color: 'var(--danger)', border: '1px solid var(--danger-border)' }}>
                                 <XCircle size={10} /> Falha
                               </span>
                             )}
                           </td>
                         </tr>
                         {isOpen && hasDetails && (
-                          <tr style={{ borderBottom: '1px solid #F1F5F9' }}>
+                          <tr style={{ borderBottom: '1px solid var(--surface)' }}>
                             <td />
                             <td colSpan={6} style={{ padding: '0 12px 12px' }}>
-                              <div style={{ borderRadius: 8, background: '#F8FAFC', border: '1px solid #E2E8F0', padding: '10px 12px' }}>
+                              <div style={{ borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--border)', padding: '10px 12px' }}>
                                 {msgText && (
                                   <p style={{ margin: 0, fontSize: 12, color: '#334155', whiteSpace: 'pre-wrap' }}>{msgText}</p>
                                 )}
                                 {snapshot && (
                                   <div style={{ marginTop: msgText ? 8 : 0 }}>
-                                    <p style={{ margin: '0 0 4px', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94A3B8' }}>
+                                    <p style={{ margin: '0 0 4px', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--dim)' }}>
                                       Estado antes da ação
                                     </p>
                                     <pre style={{
-                                      margin: 0, fontSize: 11, fontFamily: 'monospace', color: '#0F172A',
-                                      background: '#fff', border: '1px solid #E2E8F0', borderRadius: 6,
+                                      margin: 0, fontSize: 11, fontFamily: 'monospace', color: 'var(--text)',
+                                      background: '#fff', border: '1px solid var(--border)', borderRadius: 6,
                                       padding: '8px 10px', overflowX: 'auto', whiteSpace: 'pre',
                                     }}>{snapshot}</pre>
                                   </div>
@@ -249,7 +249,7 @@ export default function ActionHistoryPage() {
         </div>
 
         {rows.length > 0 && (
-          <p style={{ fontSize: 11, color: '#CBD5E1', margin: 0 }}>
+          <p style={{ fontSize: 11, color: 'var(--border)', margin: 0 }}>
             Passe o mouse sobre o parâmetro pra ver o valor completo quando truncado.
           </p>
         )}

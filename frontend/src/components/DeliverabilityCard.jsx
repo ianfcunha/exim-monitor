@@ -16,17 +16,22 @@ function StatusDot({ ok }) {
   return (
     <span
       className="h-1.5 w-1.5 flex-shrink-0 rounded-full"
-      style={{ background: ok ? '#16A34A' : '#DC2626' }}
+      style={{ background: ok ? 'var(--ok)' : 'var(--danger)' }}
     />
   )
 }
 
+// fg é usado como PREENCHIMENTO sólido do círculo da nota (com texto
+// branco em cima) — precisa de um tom que funcione com texto branco nos
+// dois temas, então fica fixo (não var(--ok)/var(--warn)/var(--danger),
+// que clareiam no escuro pra continuarem legíveis como TEXTO, e ficariam
+// claros demais pra servir de fundo com texto branco).
 const GRADE_COLOR = {
-  A: { bg: '#F0FDF4', border: '#BBF7D0', fg: '#15803D' },
-  B: { bg: '#F0F9FF', border: '#BAE6FD', fg: '#0369A1' },
-  C: { bg: '#FFFBEB', border: '#FDE68A', fg: '#B45309' },
-  D: { bg: '#FFF7ED', border: '#FED7AA', fg: '#C2410C' },
-  F: { bg: '#FEF2F2', border: '#FECACA', fg: '#991B1B' },
+  A: { bg: 'var(--ok-bg)', border: 'var(--ok-border)', fg: '#15803D' },
+  B: { bg: 'var(--accent-bg)', border: 'var(--accent-border)', fg: '#0369A1' },
+  C: { bg: 'var(--warn-bg)', border: 'var(--warn-border)', fg: '#B45309' },
+  D: { bg: 'var(--warn-bg)', border: 'var(--warn-border)', fg: '#C2410C' },
+  F: { bg: 'var(--danger-bg)', border: 'var(--danger-border)', fg: '#DC2626' },
 }
 
 function TrustScoreBadge({ trustScore }) {
@@ -55,7 +60,7 @@ function TrustScoreBadge({ trustScore }) {
             <span key={key} style={{
               fontSize: 10, fontWeight: 600, padding: '1px 7px', borderRadius: 999,
               background: ok ? 'rgba(22,163,74,0.12)' : 'rgba(220,38,38,0.10)',
-              color: ok ? '#16A34A' : '#DC2626',
+              color: ok ? 'var(--ok)' : 'var(--danger)',
             }}>
               {ok ? '✔' : '✖'} {labels[key] || key}
             </span>
@@ -86,8 +91,8 @@ function CertRow({ cert, ok }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
       <StatusDot ok={!!ok} />
-      <span style={{ fontSize: 12, fontWeight: 600, color: '#0F172A', width: 52, flexShrink: 0 }}>TLS</span>
-      <span style={{ fontSize: 11, color: ok ? '#64748B' : '#DC2626' }}>{text}</span>
+      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', width: 52, flexShrink: 0 }}>TLS</span>
+      <span style={{ fontSize: 11, color: ok ? 'var(--muted)' : 'var(--danger)' }}>{text}</span>
     </div>
   )
 }
@@ -96,18 +101,18 @@ function AuthRow({ label, found, record }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
       <StatusDot ok={!!found} />
-      <span style={{ fontSize: 12, fontWeight: 600, color: '#0F172A', width: 52, flexShrink: 0 }}>{label}</span>
+      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', width: 52, flexShrink: 0 }}>{label}</span>
       {found && record ? (
         <Tooltip>
           <TooltipTrigger asChild>
-            <span style={{ fontSize: 11, color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
+            <span style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
               {record}
             </span>
           </TooltipTrigger>
           <TooltipContent className="max-w-[320px] whitespace-normal break-all">{record}</TooltipContent>
         </Tooltip>
       ) : (
-        <span style={{ fontSize: 11, color: found ? '#16A34A' : '#DC2626' }}>
+        <span style={{ fontSize: 11, color: found ? 'var(--ok)' : 'var(--danger)' }}>
           {found ? 'encontrado' : 'não encontrado'}
         </span>
       )}
@@ -149,12 +154,12 @@ export default function DeliverabilityCard() {
           onKeyDown={e => e.key === 'Enter' && !loading && check()}
           style={{
             flex: 1, minWidth: 0, boxSizing: 'border-box', borderRadius: 7,
-            border: '1px solid #E2E8F0', padding: '6px 10px', fontSize: 12,
-            color: '#0F172A', outline: 'none', background: '#F8FAFC',
+            border: '1px solid var(--border)', padding: '6px 10px', fontSize: 12,
+            color: 'var(--text)', outline: 'none', background: 'var(--surface)',
             transition: 'border-color 0.15s, box-shadow 0.15s',
           }}
-          onFocus={e => { e.target.style.borderColor = '#0EA5E9'; e.target.style.boxShadow = '0 0 0 3px rgba(14,165,233,0.15)' }}
-          onBlur={e => { e.target.style.borderColor = '#E2E8F0'; e.target.style.boxShadow = 'none' }}
+          onFocus={e => { e.target.style.borderColor = 'var(--sky)'; e.target.style.boxShadow = '0 0 0 3px rgba(14,165,233,0.15)' }}
+          onBlur={e => { e.target.style.borderColor = 'var(--border)'; e.target.style.boxShadow = 'none' }}
         />
         <Button variant="outline" size="sm" onClick={check} disabled={loading}>
           <RefreshCw size={12} style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} />
@@ -163,7 +168,7 @@ export default function DeliverabilityCard() {
       </div>
 
       {error && (
-        <div style={{ borderRadius: 8, padding: '8px 10px', fontSize: 11, background: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B' }}>
+        <div style={{ borderRadius: 8, padding: '8px 10px', fontSize: 11, background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', color: 'var(--danger)' }}>
           {error}
         </div>
       )}
@@ -173,11 +178,11 @@ export default function DeliverabilityCard() {
           <TrustScoreBadge trustScore={result.trust_score} />
 
           <div>
-            <div style={{ fontSize: 10, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
               Blocklists{result.ip ? ` — IP ${result.ip}` : ''}
             </div>
             {!result.ip ? (
-              <div style={{ fontSize: 11, color: '#DC2626' }}>
+              <div style={{ fontSize: 11, color: 'var(--danger)' }}>
                 {result.ip_error || 'Não foi possível determinar o IP público.'}
               </div>
             ) : (
@@ -186,9 +191,9 @@ export default function DeliverabilityCard() {
                   <span key={bl.list} style={{
                     display: 'inline-flex', alignItems: 'center', gap: 4,
                     fontSize: 10, fontWeight: 600, padding: '3px 8px', borderRadius: 999,
-                    background: bl.listed ? '#FEF2F2' : '#F0FDF4',
-                    color: bl.listed ? '#991B1B' : '#15803D',
-                    border: `1px solid ${bl.listed ? '#FECACA' : '#BBF7D0'}`,
+                    background: bl.listed ? 'var(--danger-bg)' : 'var(--ok-bg)',
+                    color: bl.listed ? 'var(--danger)' : 'var(--ok)',
+                    border: `1px solid ${bl.listed ? 'var(--danger-border)' : 'var(--ok-border)'}`,
                   }}>
                     <StatusDot ok={!bl.listed} />
                     {bl.list}
@@ -199,7 +204,7 @@ export default function DeliverabilityCard() {
           </div>
 
           <div>
-            <div style={{ fontSize: 10, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>
               Autenticação{result.domain ? ` — ${result.domain}` : ''}
             </div>
             <AuthRow label="SPF"   found={result.spf?.found}   record={result.spf?.record} />
@@ -211,7 +216,7 @@ export default function DeliverabilityCard() {
       )}
 
       {!result && !error && !loading && (
-        <p style={{ fontSize: 11, color: '#94A3B8', margin: 0 }}>
+        <p style={{ fontSize: 11, color: 'var(--dim)', margin: 0 }}>
           Verifica se o IP do servidor está em blocklists conhecidas e se SPF/DKIM/DMARC estão configurados.
         </p>
       )}

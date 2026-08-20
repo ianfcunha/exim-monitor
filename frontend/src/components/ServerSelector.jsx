@@ -11,10 +11,10 @@ import {
 import { useServer } from '../contexts/ServerContext'
 
 const STATUS_DOT = {
-  ok:      '#16A34A',
-  error:   '#DC2626',
-  timeout: '#D97706',
-  unknown: '#94A3B8',
+  ok:      'var(--ok)',
+  error:   'var(--danger)',
+  timeout: 'var(--warn)',
+  unknown: 'var(--dim)',
 }
 
 export default function ServerSelector() {
@@ -31,7 +31,7 @@ export default function ServerSelector() {
         >
           <span
             className="h-1.5 w-1.5 flex-shrink-0 rounded-full"
-            style={{ background: STATUS_DOT[activeServer.ssh_status] ?? '#94A3B8' }}
+            style={{ background: STATUS_DOT[activeServer.ssh_status] ?? 'var(--dim)' }}
           />
           <Server size={11} className="flex-shrink-0" />
           <span className="truncate">{activeServer.name}</span>
@@ -48,7 +48,7 @@ export default function ServerSelector() {
           >
             <span
               className="h-1.5 w-1.5 flex-shrink-0 rounded-full"
-              style={{ background: STATUS_DOT[s.ssh_status] ?? '#94A3B8' }}
+              style={{ background: STATUS_DOT[s.ssh_status] ?? 'var(--dim)' }}
             />
             <div className="min-w-0 flex-1">
               <div className="truncate font-semibold">{s.name}</div>
