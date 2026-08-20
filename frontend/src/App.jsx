@@ -7,10 +7,12 @@ import { ToastProvider } from './contexts/ToastContext'
 import { useDarkMode } from './hooks/useDarkMode'
 import ActionHistoryPage from './pages/ActionHistoryPage'
 import Dashboard from './pages/Dashboard'
+import GeneralSettings from './pages/GeneralSettings'
 import InviteAccept from './pages/InviteAccept'
 import Login from './pages/Login'
 import ServersPage from './pages/ServersPage'
 import Settings from './pages/Settings'
+import SettingsLayout from './pages/SettingsLayout'
 import UsersPage from './pages/UsersPage'
 
 // Convite via query param ?invite=TOKEN — funciona em qualquer proxy
@@ -47,11 +49,14 @@ export default function App() {
       <ServerProvider>
         <BrowserRouter>
           <Routes>
-            <Route path="/dashboard" element={<Dashboard onLogout={logout} isDark={isDark} onToggleTheme={toggleTheme} />} />
-            <Route path="/servers"   element={<ServersPage />} />
-            <Route path="/users"     element={<UsersPage />} />
-            <Route path="/settings"  element={<Settings />} />
-            <Route path="/history"   element={<ActionHistoryPage />} />
+            <Route path="/dashboard" element={<Dashboard onLogout={logout} />} />
+            <Route path="/settings" element={<SettingsLayout />}>
+              <Route index          element={<GeneralSettings isDark={isDark} onToggleTheme={toggleTheme} />} />
+              <Route path="alerts"  element={<Settings />} />
+              <Route path="servers" element={<ServersPage />} />
+              <Route path="users"   element={<UsersPage />} />
+              <Route path="history" element={<ActionHistoryPage />} />
+            </Route>
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </BrowserRouter>

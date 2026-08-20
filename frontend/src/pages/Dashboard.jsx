@@ -11,17 +11,13 @@
  *   - Atalhos de teclado: R=Refresh, L=Logs
  */
 import {
-  CheckCircle, ChevronDown, Clock, FileText, History, Inbox,
-  LogOut, MailOpen, Moon, RefreshCw, Server, Settings, Sun, Users, XCircle,
+  CheckCircle, Clock, FileText, History, Inbox,
+  LogOut, MailOpen, RefreshCw, Settings, XCircle,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { refreshStatus } from '../api/client'
 import { Button } from '@/components/ui/button'
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
-  DropdownMenuSeparator, DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import ActionPanel from '../components/ActionPanel'
@@ -57,18 +53,18 @@ function useStaleness(ts) {
   }, [])
   if (!ts) return null
   const diffS = Math.floor((Date.now() - new Date(ts).getTime()) / 1000)
-  if (diffS < 60)  return { color: '#0EA5E9', dot: '#0EA5E9', label: `${diffS}s atrás`,                         pulse: false }
-  if (diffS < 300) return { color: '#D97706', dot: '#F59E0B', label: `${Math.floor(diffS/60)}min atrás`,        pulse: false }
-  return               { color: '#DC2626', dot: '#EF4444', label: `${Math.floor(diffS/60)}min · desatualizado`, pulse: true  }
+  if (diffS < 60)  return { color: 'var(--sky)', dot: 'var(--sky)', label: `${diffS}s atrás`,                         pulse: false }
+  if (diffS < 300) return { color: 'var(--warn)', dot: 'var(--warn)', label: `${Math.floor(diffS/60)}min atrás`,        pulse: false }
+  return               { color: 'var(--danger)', dot: 'var(--danger)', label: `${Math.floor(diffS/60)}min · desatualizado`, pulse: true  }
 }
 
 // ── Logo SVG AVILI ───────────────────────────────────────────────────────────
 function LogoMark({ size = 20 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 60 60" fill="none" aria-hidden>
-      <path d="M10 46 L30 16 L50 46" fill="none" stroke="#0F172A" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
-      <path d="M18 36 L30 26 L42 36" fill="none" stroke="#0EA5E9" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
-      <circle cx="30" cy="16" r="2.5" fill="#22D3EE"/>
+      <path d="M10 46 L30 16 L50 46" fill="none" stroke="var(--text)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M18 36 L30 26 L42 36" fill="none" stroke="var(--sky)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+      <circle cx="30" cy="16" r="2.5" fill="var(--cyan)"/>
     </svg>
   )
 }
@@ -105,50 +101,23 @@ function StatusPill({ color, label, children }) {
   )
 }
 
-// ── Dropdown de configurações ────────────────────────────────────────────────
-function SettingsMenu({ onLogout, isAdmin, isDark, onToggleTheme }) {
+// ── Configurações + Sair ────────────────────────────────────────────────────
+// Antes era um dropdown com 4 destinos + tema + sair — agora que
+// /settings tem navegação própria (sidebar em SettingsLayout), o dropdown
+// só duplicava a mesma lista. Um botão simples leva pra lá; o tema mudou
+// pra Configurações → Geral.
+function SettingsControls({ onLogout }) {
   const navigate = useNavigate()
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" title="Configurações" className="group">
-          <Settings size={12} />
-          <span className="hidden sm:inline">Configurações</span>
-          <ChevronDown size={11} className="transition-transform group-data-[state=open]:rotate-180" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent>
-        {isAdmin && (
-          <DropdownMenuItem onSelect={() => navigate('/servers')}>
-            <Server size={13} /> Servidores
-          </DropdownMenuItem>
-        )}
-        {isAdmin && (
-          <DropdownMenuItem onSelect={() => navigate('/settings')}>
-            <Settings size={13} /> Alertas
-          </DropdownMenuItem>
-        )}
-        {isAdmin && (
-          <DropdownMenuItem onSelect={() => navigate('/users')}>
-            <Users size={13} /> Usuários
-          </DropdownMenuItem>
-        )}
-        {isAdmin && (
-          <DropdownMenuItem onSelect={() => navigate('/history')}>
-            <History size={13} /> Histórico de ações
-          </DropdownMenuItem>
-        )}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={(e) => { e.preventDefault(); onToggleTheme() }}>
-          {isDark ? <Sun size={13} /> : <Moon size={13} />}
-          {isDark ? 'Modo claro' : 'Modo escuro'}
-        </DropdownMenuItem>
-        {isAdmin && <DropdownMenuSeparator />}
-        <DropdownMenuItem destructive onSelect={onLogout}>
-          <LogOut size={13} /> Sair
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <>
+      <HBtn onClick={() => navigate('/settings')} title="Configurações">
+        <Settings size={12} />
+        <span className="hidden sm:inline">Configurações</span>
+      </HBtn>
+      <HBtn onClick={onLogout} title="Sair">
+        <LogOut size={12} />
+      </HBtn>
+    </>
   )
 }
 
@@ -162,7 +131,7 @@ const METRIC_TOOLTIPS = {
 }
 
 // ── Componente principal ─────────────────────────────────────────────────────
-export default function Dashboard({ onLogout, isDark, onToggleTheme }) {
+export default function Dashboard({ onLogout }) {
   const { isAdmin, username } = useAuth()
   const { activeServer }      = useServer()
   const quick                 = useQuickStatus()
@@ -277,17 +246,17 @@ export default function Dashboard({ onLogout, isDark, onToggleTheme }) {
 
   // ── Cor do badge de role ──────────────────────────────────────────────────
   const roleStyle = isAdmin
-    ? { bg: '#EFF6FF', border: '#BFDBFE', color: '#1D4ED8', label: 'Admin' }
-    : { bg: '#F8FAFC', border: '#E2E8F0', color: '#64748B', label: 'Viewer' }
+    ? { bg: 'var(--accent-bg)', border: 'var(--accent-border)', color: 'var(--accent-fg)', label: 'Admin' }
+    : { bg: 'var(--surface)', border: 'var(--border)', color: 'var(--muted)', label: 'Viewer' }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#F1F5F9' }}>
+    <div style={{ minHeight: '100vh', background: 'var(--surface)' }}>
 
       {/* ── Header ── */}
       <header style={{
         position: 'sticky', top: 0, zIndex: 10,
-        padding: '0 24px', background: '#fff',
-        borderBottom: '1px solid #E2E8F0',
+        padding: '0 24px', background: 'var(--card)',
+        borderBottom: '1px solid var(--border)',
         boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
       }}>
         <div style={{
@@ -301,20 +270,20 @@ export default function Dashboard({ onLogout, isDark, onToggleTheme }) {
 
             {/* Logo */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-              <div style={{ width: 34, height: 34, borderRadius: 9, background: '#F0F9FF', border: '1px solid #BAE6FD', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: 34, height: 34, borderRadius: 9, background: 'var(--accent-bg)', border: '1px solid var(--accent-border)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <LogoMark size={19} />
               </div>
               <div className="hidden sm:block" style={{ lineHeight: 1.2 }}>
                 <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: '-0.01em' }}>
-                  <span style={{ color: '#0F172A' }}>Mail </span><span style={{ color: '#0EA5E9' }}>IQ</span>
+                  <span style={{ color: 'var(--text)' }}>Mail </span><span style={{ color: 'var(--sky)' }}>IQ</span>
                 </div>
-                <div style={{ fontSize: 8.5, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 600, color: '#94A3B8' }}>
-                  by <span style={{ color: '#0EA5E9' }}>AVILI</span>
+                <div style={{ fontSize: 8.5, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 600, color: 'var(--dim)' }}>
+                  by <span style={{ color: 'var(--sky)' }}>AVILI</span>
                 </div>
               </div>
             </div>
 
-            <span style={{ width: 1, height: 18, background: '#E2E8F0', flexShrink: 0 }} />
+            <span style={{ width: 1, height: 18, background: 'var(--border)', flexShrink: 0 }} />
 
             <ServerSelector />
 
@@ -322,16 +291,16 @@ export default function Dashboard({ onLogout, isDark, onToggleTheme }) {
             {(() => {
               const sev   = diag.severity ?? 'OK'
               const ok    = sev === 'OK' || sev === 'LOW'
-              const color = ok ? '#16A34A' : sev === 'MEDIUM' || sev === 'HIGH' ? '#D97706' : '#DC2626'
+              const color = ok ? 'var(--ok)' : sev === 'MEDIUM' || sev === 'HIGH' ? 'var(--warn)' : 'var(--danger)'
               return (
                 <StatusPill color={color} label={ok ? 'EXIM' : sev}>
-                  <div style={{ fontWeight: 700, color: '#0F172A', marginBottom: 8 }}>Diagnóstico EXIM</div>
+                  <div style={{ fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>Diagnóstico EXIM</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />
                     <span style={{ color, fontWeight: 600 }}>{sev}</span>
                   </div>
                   {diag.problem && diag.problem !== 'NORMAL' && (
-                    <div style={{ color: '#64748B', fontSize: 11, marginTop: 4 }}>{diag.problem}</div>
+                    <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 4 }}>{diag.problem}</div>
                   )}
                 </StatusPill>
               )
@@ -340,10 +309,10 @@ export default function Dashboard({ onLogout, isDark, onToggleTheme }) {
             {/* Badge SSH */}
             {activeServer && (() => {
               const ok    = activeServer.ssh_status === 'ok'
-              const color = ok ? '#16A34A' : activeServer.ssh_status === 'unknown' ? '#94A3B8' : '#DC2626'
+              const color = ok ? 'var(--ok)' : activeServer.ssh_status === 'unknown' ? 'var(--dim)' : 'var(--danger)'
               return (
                 <StatusPill color={color} label="SSH">
-                  <div style={{ fontWeight: 700, color: '#0F172A', marginBottom: 8 }}>Conexão SSH</div>
+                  <div style={{ fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>Conexão SSH</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />
                     <span style={{ color, fontWeight: 600 }}>
@@ -351,12 +320,12 @@ export default function Dashboard({ onLogout, isDark, onToggleTheme }) {
                     </span>
                   </div>
                   {activeServer.ssh_error_msg && (
-                    <div style={{ color: '#DC2626', fontSize: 11, marginTop: 4, wordBreak: 'break-word' }}>
+                    <div style={{ color: 'var(--danger)', fontSize: 11, marginTop: 4, wordBreak: 'break-word' }}>
                       {activeServer.ssh_error_msg}
                     </div>
                   )}
                   {activeServer.last_connected_at && (
-                    <div style={{ color: '#94A3B8', fontSize: 11, marginTop: 4 }}>
+                    <div style={{ color: 'var(--dim)', fontSize: 11, marginTop: 4 }}>
                       Último contato: {new Date(activeServer.last_connected_at).toLocaleString('pt-BR')}
                     </div>
                   )}
@@ -405,7 +374,7 @@ export default function Dashboard({ onLogout, isDark, onToggleTheme }) {
               <TooltipTrigger asChild>
                 <span
                   className="hidden lg:inline"
-                  style={{ fontSize: 9, color: '#CBD5E1', userSelect: 'none', letterSpacing: '0.05em' }}
+                  style={{ fontSize: 9, color: 'var(--border)', userSelect: 'none', letterSpacing: '0.05em' }}
                 >
                   [R] refresh · [L] logs
                 </span>
@@ -423,7 +392,7 @@ export default function Dashboard({ onLogout, isDark, onToggleTheme }) {
               <span className="hidden sm:inline">Logs</span>
             </HBtn>
 
-            <SettingsMenu onLogout={onLogout} isAdmin={isAdmin} isDark={isDark} onToggleTheme={onToggleTheme} />
+            <SettingsControls onLogout={onLogout} />
           </div>
         </div>
       </header>
@@ -433,7 +402,7 @@ export default function Dashboard({ onLogout, isDark, onToggleTheme }) {
         <div style={{ maxWidth: 1280, margin: '0 auto', padding: '12px 24px 0' }}>
           <div style={{
             borderRadius: 10, padding: '10px 14px', fontSize: 12,
-            background: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B',
+            background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', color: 'var(--danger)',
           }}>
             <strong>Erro de conexão:</strong> {quick.error || full.error}
           </div>
