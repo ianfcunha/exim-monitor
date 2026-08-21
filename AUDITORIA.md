@@ -246,7 +246,8 @@ escrita em `/etc/firewall.d/03_custom` + `systemctl restart firewall.service`,
 > a cada teste de conexão, usado pelo `ActionPanel.jsx` pra desabilitar
 > botão com o motivo visível em vez de deixar a ação falhar calada. A
 > criação de fato do usuário `mailiq` + escrita do sudoers num servidor
-> real fica pro `mailiq-bootstrap.sh` — Tarefa 7, ainda pendente.
+> real ficou pro `mailiq-bootstrap.sh` — **feito na Tarefa 7**, ver detalhe
+> no item 3 do resumo abaixo.
 
 ## 6. O que acontece hoje se o parsing do log falhar ou retornar zero linhas?
 
@@ -337,6 +338,38 @@ mecanismo de "não consegui ler este log":
    script manualmente (ou confiar no `deploy_script()` via SFTP do backend, que
    também exige que a chave já tenha acesso). Sem bootstrap, terceiro nenhum
    consegue delegar acesso sem primeiro dar SSH root.
+   > **Status: corrigido** (Sessão 1, Tarefa 7) — `install.sh` agora só instala
+   > o painel (nenhuma pergunta/lógica sobre servidor EXIM sobrou nele — nem
+   > `SSH_HOST`/`SSH_USER`, nem geração/cópia de chave, nem deploy de
+   > `diag-exim.sh`). Novo `mailiq-bootstrap.sh`, standalone e auditável de
+   > ponta a ponta, roda uma única vez como root **no servidor monitorado**
+   > (nunca na máquina do painel): cria o usuário `mailiq` (shell `/bin/bash`,
+   > não `nologin` — achado ao vivo: `nologin` recusa o `exec_command()` que o
+   > backend usa, quebrando SSH de execução de comando), instala a chave
+   > pública, escreve `/etc/sudoers.d/mailiq` detectando os binários reais do
+   > servidor (só inclui regras de CSF/firewalld/Imunify360 se estiverem
+   > presentes), e roda a mesma sondagem de capacidade da Tarefa 4. Novo
+   > backend `POST /servers/{id}/generate-key` (Ed25519 via `cryptography` —
+   > paramiko não sabe *gerar* essa curva, só carregar) fecha o círculo: o
+   > painel gera o par, mostra só a pública pro `--pubkey` do bootstrap, e
+   > guarda a privada cifrada como qualquer `ssh_secret`.
+   >
+   > **Gap real achado testando o fluxo inteiro ao vivo**: o deploy do
+   > script por SFTP só acontecia em `POST /servers` (cadastro) — nesse
+   > momento a chave ainda não existia no servidor (o bootstrap roda
+   > DEPOIS), então o SFTP falhava silenciosamente e "Testar conexão"
+   > ficava preso pra sempre em "script não encontrado", mesmo com o SSH
+   > funcionando perfeitamente. `POST /servers/{id}/test` agora tenta
+   > reimplantar por SFTP (melhor esforço) sempre que `--check` falhar por
+   > script ausente, antes de desistir — sem isso, o fluxo recomendado desta
+   > própria tarefa não funcionava fim a fim.
+   >
+   > Validado ao vivo, do zero, neste host: `generate-key` → `mailiq-
+   > bootstrap.sh --pubkey` → `POST /test` (SSH ok, script reimplantado
+   > sozinho, as 4 capacidades `true`) → diagnóstico real visível — sem
+   > nenhuma senha de root passar pelo painel em nenhum momento. Automatizado
+   > em `tests/test_bootstrap_e2e.sh` (cria e remove seu próprio usuário de
+   > sistema de teste).
 4. **Ações destrutivas sem preview/confirmação de duas fases** — `clean-full`
    dispara e já apaga; não há `plan()`/`apply()` (Tarefa 2).
    > **Status: corrigido** (Sessão 1, Tarefa 3) — ver detalhamento abaixo.

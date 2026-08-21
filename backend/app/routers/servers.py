@@ -7,6 +7,7 @@ GET    /api/servers/{id}         → detalhe do servidor
 PUT    /api/servers/{id}         → edita servidor (admin only)
 DELETE /api/servers/{id}         → remove servidor (admin only)
 POST   /api/servers/{id}/test    → testa conexão SSH (admin only)
+POST   /api/servers/{id}/generate-key → gera par de chaves dedicado (admin only)
 GET    /api/servers/{id}/ssh-status → status SSH atual do servidor
 """
 from typing import Optional
@@ -234,7 +235,7 @@ def test_server(
     current_user: User = Depends(require_admin),
 ):
     from datetime import datetime
-    from ..ssh import HostKeyMismatchError, SSHError, run_check, test_connection
+    from ..ssh import HostKeyMismatchError, SSHError, deploy_script, run_check, test_connection
 
     server = get_server_owned_by(db, server_id, current_user)
     if not server:
@@ -272,23 +273,38 @@ def test_server(
         # não derruba o teste de conexão: fica registrada separadamente,
         # para a UI distinguir "SSH ok, script ausente/desatualizado" de
         # um erro genérico de conexão.
+        #
+        # T7 (Sessão 1, pós-auditoria): gap real achado testando o fluxo
+        # de bootstrap de ponta a ponta — o deploy por SFTP só acontecia
+        # em POST /servers (create_server), e naquele momento a chave
+        # ainda não tinha sido instalada no servidor (mailiq-bootstrap.sh
+        # roda DEPOIS que o admin já cadastrou/gerou a chave). Resultado:
+        # SSH conectava, mas o script nunca chegava lá, e "Testar conexão"
+        # ficava preso em "script não encontrado" pra sempre. Se --check
+        # falhar por script ausente, tenta reimplantar por SFTP uma vez
+        # (melhor esforço, mesmo padrão do cadastro) e roda --check de novo.
         checks = None
         check_error = None
         try:
             check_data = run_check(cfg)
             checks = check_data.get("checks")
-            # T4 (Sessão 1, pós-auditoria): persiste a sondagem de
-            # capacidade (checks cap_*) no servidor — o painel usa isso
-            # pra desabilitar botão de ação com o motivo visível, sem
-            # esperar a ação falhar de verdade pra descobrir que faltava
-            # permissão ("falha silenciosa" que a Tarefa 4 pediu pra
-            # eliminar).
-            if checks:
-                server.capabilities = {
-                    c["check"]: c["ok"] for c in checks if c.get("check", "").startswith("cap_")
-                }
         except SSHError as exc:
-            check_error = str(exc)[:500]
+            try:
+                deploy_script(cfg)
+                check_data = run_check(cfg)
+                checks = check_data.get("checks")
+            except SSHError as retry_exc:
+                check_error = str(retry_exc)[:500]
+
+        # T4 (Sessão 1, pós-auditoria): persiste a sondagem de capacidade
+        # (checks cap_*) no servidor — o painel usa isso pra desabilitar
+        # botão de ação com o motivo visível, sem esperar a ação falhar
+        # de verdade pra descobrir que faltava permissão ("falha
+        # silenciosa" que a Tarefa 4 pediu pra eliminar).
+        if checks:
+            server.capabilities = {
+                c["check"]: c["ok"] for c in checks if c.get("check", "").startswith("cap_")
+            }
 
         db.commit()
         return {
@@ -311,6 +327,55 @@ def test_server(
         server.ssh_error_msg = str(exc)[:500]
         db.commit()
         return {"ok": False, "status": "error", "error": str(exc)}
+
+
+@router.post("/{server_id}/generate-key", summary="Gera um par de chaves SSH dedicado (admin only)")
+def generate_key(
+    server_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Tarefa 7 (Sessão 1, pós-auditoria) — fluxo de bootstrap sem senha de
+    root: o painel gera um par de chaves Ed25519 dedicado a este
+    servidor, guarda a privada cifrada (mesmo lugar de sempre,
+    ssh_secret) e devolve a pública em texto puro pra colar no
+    comando `mailiq-bootstrap.sh --pubkey '...'` — rodado pelo cliente
+    no servidor monitorado, nunca pelo painel.
+
+    Sobrescreve qualquer ssh_secret já salvo para este servidor —
+    intencional (gerar uma chave nova invalida a anterior), por isso é
+    uma ação explícita do admin, não algo automático no cadastro.
+    """
+    from ..crypto import generate_ed25519_keypair
+
+    server = get_server_owned_by(db, server_id, current_user)
+    if not server:
+        raise HTTPException(404, "Servidor não encontrado.")
+
+    comment = f"mailiq@{server.name}".replace(" ", "-")
+    private_pem, public_line = generate_ed25519_keypair(comment)
+
+    server.ssh_secret    = encrypt_secret(private_pem)
+    server.ssh_auth_type = "key"
+    server.ssh_user      = "mailiq"
+    db.commit()
+
+    return {
+        "public_key": public_line,
+        "bootstrap_command": f"bash mailiq-bootstrap.sh --pubkey '{public_line}'",
+        "instructions": (
+            "1. Copie mailiq-bootstrap.sh para o servidor EXIM (ele já está na raiz "
+            "deste repositório, no mesmo lugar de onde você rodou o install.sh).\n"
+            "2. No servidor EXIM, como root (uma única vez, localmente — nunca entregue "
+            "essa senha ao painel): rode o comando 'bootstrap_command' acima.\n"
+            "3. Leia o script inteiro antes de rodar — ele cria o usuário mailiq, "
+            "instala esta chave pública, escreve /etc/sudoers.d/mailiq (allowlist "
+            "documentada em docs/seguranca.md) e imprime uma sondagem do que a conexão "
+            "consegue fazer.\n"
+            "4. Volte aqui e clique em \"Testar conexão\"."
+        ),
+    }
 
 
 @router.get("/{server_id}/ssh-status", summary="Status SSH atual do servidor")

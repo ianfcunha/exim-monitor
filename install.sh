@@ -1,8 +1,20 @@
 #!/usr/bin/env bash
 # =============================================================================
-# EXIM Monitor — Script de instalacao em 5 minutos
+# Mail IQ — Instalacao do PAINEL em 5 minutos
 # Suporta: instalacao padrao, HTTPS (Caddy), e ambientes gerenciados
 # (Cloudez, Configr, cPanel, Plesk) com nginx reverse proxy
+#
+# T7 (Sessao 1, pos-auditoria): este script SO instala o painel (docker
+# compose, banco, credenciais admin). Ele nao mexe em nenhum servidor
+# EXIM monitorado, nao gera nem instala chave SSH em authorized_keys de
+# ninguem, e nao pede senha de root de servidor nenhum alem deste onde o
+# painel vai rodar.
+#
+# Para conectar um servidor EXIM (o seu ou de um cliente): depois que o
+# painel estiver no ar, va em Servidores -> Adicionar e siga o fluxo de
+# mailiq-bootstrap.sh (rodado NO SERVIDOR MONITORADO, nao aqui) — ver
+# docs/seguranca.md. Esse e o caminho recomendado: usuario dedicado
+# mailiq, sem root, com sudoers minimo e auditavel antes de instalar.
 # =============================================================================
 set -euo pipefail
 
@@ -16,8 +28,10 @@ err()  { echo -e "${RED}  ✗ $*${NC}"; exit 1; }
 ask()  { echo -e "${BOLD}$*${NC}"; }
 
 echo -e "\n${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BOLD}  EXIM Monitor — Instalacao${NC}"
+echo -e "${BOLD}  Mail IQ — Instalacao do painel${NC}"
 echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+info "Este script instala SO o painel (docker compose + banco)."
+info "Para conectar um servidor EXIM, use mailiq-bootstrap.sh depois — ver docs/seguranca.md."
 
 # ── Verifica dependencias ──────────────────────────────────────────────────
 info "Verificando dependencias..."
@@ -36,10 +50,6 @@ ok "Docker e Compose disponiveis"
 # ── Variaveis de ambiente (defaults) ──────────────────────────────────────
 USE_SSL="n"
 REVERSE_PROXY="n"
-DETECTED_SSH_PORT="22"
-DOCKER_BRIDGE="172.17.0.1"
-FIREWALL_SVC=""
-FIREWALL_CUSTOM=""
 NGINX_CONFD=""
 
 # ── Coleta informacoes ─────────────────────────────────────────────────────
@@ -59,29 +69,6 @@ if [[ "$DOMAIN" != "localhost" ]]; then
   if [[ "$RP_ANSWER" =~ ^[Ss]$ ]]; then
     REVERSE_PROXY="y"
 
-    # ── Analisa ambiente do servidor automaticamente ──────────────────────
-    echo ""
-    info "Analisando ambiente do servidor..."
-
-    # Porta SSH
-    DETECTED_SSH_PORT=$(ss -tlnp 2>/dev/null | grep sshd | grep -oP '(?<=:)\d+' | head -1)
-    DETECTED_SSH_PORT="${DETECTED_SSH_PORT:-22}"
-
-    # Docker bridge IP
-    DOCKER_BRIDGE=$(ip addr show docker0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d/ -f1)
-    DOCKER_BRIDGE="${DOCKER_BRIDGE:-172.17.0.1}"
-
-    # Servico de firewall e arquivo de regras customizadas
-    if systemctl is-active --quiet firewall.service 2>/dev/null; then
-      FIREWALL_SVC="firewall.service"
-      [[ -d "/etc/firewall.d" ]] && FIREWALL_CUSTOM="/etc/firewall.d/03_custom"
-    elif systemctl is-active --quiet iptables 2>/dev/null; then
-      FIREWALL_SVC="iptables"
-      FIREWALL_CUSTOM="/etc/iptables/rules.v4"
-    elif command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active"; then
-      FIREWALL_SVC="ufw"
-    fi
-
     # Nginx conf.d do dominio (padrao Cloudez/Configr: /srv/<dominio>/etc/nginx/conf.d)
     if [[ -d "/srv/${DOMAIN}/etc/nginx/conf.d" ]]; then
       NGINX_CONFD="/srv/${DOMAIN}/etc/nginx/conf.d"
@@ -92,14 +79,10 @@ if [[ "$DOMAIN" != "localhost" ]]; then
       done
     fi
 
-    ok "Ambiente detectado:"
-    echo -e "     Porta SSH:      ${BOLD}${DETECTED_SSH_PORT}${NC}"
-    echo -e "     Docker bridge:  ${BOLD}${DOCKER_BRIDGE}${NC}"
-    echo -e "     Firewall:       ${BOLD}${FIREWALL_SVC:-nao detectado}${NC}"
     if [[ -n "$NGINX_CONFD" ]]; then
-      echo -e "     Nginx conf.d:   ${BOLD}${NGINX_CONFD}${NC}"
+      ok "Nginx conf.d detectado: ${BOLD}${NGINX_CONFD}${NC}"
     else
-      echo -e "     Nginx conf.d:   ${YELLOW}nao encontrado (configure manualmente apos a instalacao)${NC}"
+      warn "Nginx conf.d nao encontrado (configure manualmente apos a instalacao)"
     fi
 
   else
@@ -117,54 +100,9 @@ if [[ "$DOMAIN" != "localhost" ]]; then
   fi
 fi
 
-# ── EXIM: mesmo servidor ou remoto? ───────────────────────────────────────
-echo ""
-ask "2. O EXIM esta no mesmo servidor que o dashboard?"
-read -rp "   Mesmo servidor? [S/n]: " SAME_SERVER
-SAME_SERVER="${SAME_SERVER:-s}"
-
-if [[ "$SAME_SERVER" =~ ^[Ss]$ ]]; then
-  SSH_HOST="$DOCKER_BRIDGE"
-  SSH_PORT="$DETECTED_SSH_PORT"
-  echo ""
-  info "SSH apontara para o proprio servidor via Docker bridge: ${BOLD}${SSH_HOST}:${SSH_PORT}${NC}"
-  echo ""
-  ask "2b. Usuario SSH (recomendado: usuario nao-root com sudo)"
-  read -rp "    Usuario SSH: " SSH_USER
-  SSH_USER="${SSH_USER:-root}"
-else
-  echo ""
-  ask "2. Servidor EXIM — conexao SSH"
-  read -rp "   Host/IP do servidor EXIM: " SSH_HOST
-  read -rp "   Usuario SSH (default: root): " SSH_USER
-  SSH_USER="${SSH_USER:-root}"
-  read -rp "   Porta SSH (default: 22): " SSH_PORT
-  SSH_PORT="${SSH_PORT:-22}"
-fi
-
-# ── Chave SSH ─────────────────────────────────────────────────────────────
-echo ""
-GENERATED_KEY="${HOME}/.ssh/exim_backend_key"
-if [[ "$REVERSE_PROXY" == "y" ]] || [[ "$SAME_SERVER" =~ ^[Ss]$ ]]; then
-  # Ambiente gerenciado ou mesmo servidor: gera chave Ed25519 dedicada
-  if [[ ! -f "$GENERATED_KEY" ]]; then
-    info "Gerando chave SSH Ed25519 dedicada para o backend..."
-    mkdir -p "${HOME}/.ssh" && chmod 700 "${HOME}/.ssh"
-    ssh-keygen -t ed25519 -f "$GENERATED_KEY" -N "" -C "exim-monitor-backend"
-    ok "Chave gerada em $GENERATED_KEY"
-  else
-    ok "Reutilizando chave existente: $GENERATED_KEY"
-  fi
-  SSH_KEY="$GENERATED_KEY"
-else
-  ask "3. Caminho da chave SSH privada no servidor"
-  read -rp "   (default: ~/.ssh/id_rsa): " SSH_KEY
-  SSH_KEY="${SSH_KEY:-~/.ssh/id_rsa}"
-fi
-
 # ── Credenciais do painel ─────────────────────────────────────────────────
 echo ""
-ask "4. Credenciais do painel web"
+ask "2. Credenciais do painel web"
 read -rp "   Usuario admin (default: admin): " ADMIN_USER
 ADMIN_USER="${ADMIN_USER:-admin}"
 while true; do
@@ -176,7 +114,7 @@ done
 
 # ── Senha do banco ────────────────────────────────────────────────────────
 echo ""
-ask "5. Senha do banco de dados PostgreSQL"
+ask "3. Senha do banco de dados PostgreSQL"
 read -rsp "   Senha PostgreSQL (default: gerada automaticamente): " PG_PASS; echo
 if [[ -z "$PG_PASS" ]]; then
   PG_PASS=$(openssl rand -base64 24 | tr -d '=+/' | head -c 24)
@@ -200,20 +138,9 @@ elif [[ "$REVERSE_PROXY" == "y" ]]; then
 else
   echo -e "  Acesso:         ${BOLD}HTTP porta 5173${NC}"
 fi
-echo -e "  EXIM SSH:       ${BOLD}$SSH_USER@$SSH_HOST:$SSH_PORT${NC}"
-echo -e "  Chave SSH:      ${BOLD}$SSH_KEY${NC}"
 echo -e "  Admin:          ${BOLD}$ADMIN_USER${NC}"
-if [[ "$REVERSE_PROXY" == "y" ]] || [[ "$SAME_SERVER" =~ ^[Ss]$ ]]; then
-  echo ""
-  echo -e "  Acoes automaticas:"
-  echo -e "  ${GREEN}✓${NC} Chave Ed25519 gerada/reutilizada"
-  echo -e "  ${GREEN}✓${NC} Chave publica adicionada em authorized_keys do usuario ${BOLD}$SSH_USER${NC}"
-  echo -e "  ${GREEN}✓${NC} diag-exim.sh implantado no servidor"
-  [[ -n "$FIREWALL_SVC" ]] && \
-    echo -e "  ${GREEN}✓${NC} Regra de firewall Docker adicionada (${FIREWALL_SVC})"
-  [[ -n "$NGINX_CONFD" ]] && \
-    echo -e "  ${GREEN}✓${NC} nginx conf.d configurado em ${NGINX_CONFD}"
-fi
+echo ""
+echo -e "  Nenhum servidor EXIM sera tocado por este script."
 echo ""
 read -rp "  Confirmar instalacao? [S/n]: " CONFIRM
 CONFIRM="${CONFIRM:-s}"
@@ -241,59 +168,15 @@ fi
 
 cd "$INSTALL_DIR"
 
-# ── Define caminho destino do script de diagnostico ───────────────────────
-if [[ "$SSH_USER" == "root" ]]; then
-  SCRIPT_DEST="/root/diag-exim.sh"
-else
-  SCRIPT_DEST="/home/$SSH_USER/diag-exim.sh"
-fi
-
-# ── Adiciona chave publica aos authorized_keys ────────────────────────────
-PUB_KEY_FILE="${SSH_KEY}.pub"
-if [[ -f "$PUB_KEY_FILE" ]]; then
-  if [[ "$SSH_USER" == "root" ]]; then
-    AUTH_KEYS="/root/.ssh/authorized_keys"
-  else
-    AUTH_KEYS="/home/$SSH_USER/.ssh/authorized_keys"
-    mkdir -p "/home/$SSH_USER/.ssh"
-    chmod 700 "/home/$SSH_USER/.ssh"
-    chown "$SSH_USER:$SSH_USER" "/home/$SSH_USER/.ssh" 2>/dev/null || true
-  fi
-  PUB_KEY=$(cat "$PUB_KEY_FILE")
-  if ! grep -qF "$PUB_KEY" "$AUTH_KEYS" 2>/dev/null; then
-    echo "$PUB_KEY" >> "$AUTH_KEYS"
-    chmod 600 "$AUTH_KEYS"
-    [[ "$SSH_USER" != "root" ]] && chown "$SSH_USER:$SSH_USER" "$AUTH_KEYS" 2>/dev/null || true
-    ok "Chave publica adicionada a $AUTH_KEYS"
-  else
-    ok "Chave publica ja presente em $AUTH_KEYS"
-  fi
-fi
-
-# ── Implanta diag-exim.sh ─────────────────────────────────────────────────
-if [[ -f "$INSTALL_DIR/diag-exim.sh" ]]; then
-  [[ "$SSH_USER" != "root" ]] && mkdir -p "/home/$SSH_USER"
-  cp "$INSTALL_DIR/diag-exim.sh" "$SCRIPT_DEST"
-  chmod +x "$SCRIPT_DEST"
-  [[ "$SSH_USER" != "root" ]] && chown "$SSH_USER:$SSH_USER" "$SCRIPT_DEST" 2>/dev/null || true
-  ok "diag-exim.sh implantado em $SCRIPT_DEST"
-else
-  warn "diag-exim.sh nao encontrado no repositorio"
-  warn "Coloque o script em $SCRIPT_DEST e ajuste SCRIPT_PATH em backend/.env"
-fi
-
 # ── Gera backend/.env ─────────────────────────────────────────────────────
+# Sem SSH_HOST/SSH_USER/SSH_KEY_PATH aqui de proposito — o painel nao
+# assume mais um unico servidor EXIM "padrao" configurado por .env.
+# Servidores sao cadastrados pela UI depois que o painel estiver de pe
+# (Servidores -> Adicionar), cada um com sua propria credencial.
 mkdir -p backend
 cat > backend/.env << ENV
-# EXIM Monitor — Configuracoes geradas pelo install.sh em $(date)
+# Mail IQ — Configuracoes geradas pelo install.sh em $(date)
 ENVIRONMENT=production
-
-SSH_HOST=$SSH_HOST
-SSH_PORT=$SSH_PORT
-SSH_USER=$SSH_USER
-SSH_KEY_PATH=$SSH_KEY
-
-SCRIPT_PATH=$SCRIPT_DEST
 
 ADMIN_USERNAME=$ADMIN_USER
 ADMIN_PASSWORD=$ADMIN_PASS
@@ -317,34 +200,6 @@ DOMAIN=$DOMAIN
 POSTGRES_PASSWORD=$PG_PASS
 ENV
 ok ".env raiz criado"
-
-# ── Configura regra de firewall para rede Docker ──────────────────────────
-if [[ "$REVERSE_PROXY" == "y" && -n "$FIREWALL_SVC" ]]; then
-  echo ""
-  info "Configurando regra de firewall para rede Docker (${DOCKER_BRIDGE%.*}.0/16 → porta $DETECTED_SSH_PORT)..."
-  DOCKER_SUBNET="${DOCKER_BRIDGE%.*}.0/16"
-
-  if [[ -n "$FIREWALL_CUSTOM" ]]; then
-    FIREWALL_RULE="-A INPUT -s $DOCKER_SUBNET -p tcp --dport $DETECTED_SSH_PORT -j ACCEPT"
-    if ! grep -qF "$FIREWALL_RULE" "$FIREWALL_CUSTOM" 2>/dev/null; then
-      echo "$FIREWALL_RULE" >> "$FIREWALL_CUSTOM"
-      ok "Regra adicionada a $FIREWALL_CUSTOM"
-    else
-      ok "Regra ja existente em $FIREWALL_CUSTOM"
-    fi
-    systemctl restart "$FIREWALL_SVC" && ok "$FIREWALL_SVC reiniciado" || warn "Falha ao reiniciar $FIREWALL_SVC"
-    sleep 2
-    info "Reiniciando Docker para reconstruir regras de rede apos restart do firewall..."
-    systemctl restart docker && ok "Docker reiniciado" || warn "Falha ao reiniciar Docker"
-    sleep 3
-  elif [[ "$FIREWALL_SVC" == "ufw" ]]; then
-    ufw allow from "${DOCKER_BRIDGE%.*}.0/16" to any port "$DETECTED_SSH_PORT" proto tcp 2>/dev/null && \
-      ok "Regra UFW adicionada" || warn "Nao foi possivel adicionar regra UFW"
-  else
-    iptables -I INPUT -s "$DOCKER_SUBNET" -p tcp --dport "$DETECTED_SSH_PORT" -j ACCEPT 2>/dev/null && \
-      ok "Regra iptables adicionada" || warn "Adicione manualmente: iptables -I INPUT -s $DOCKER_SUBNET -p tcp --dport $DETECTED_SSH_PORT -j ACCEPT"
-  fi
-fi
 
 # ── Sobe os containers ────────────────────────────────────────────────────
 echo ""
@@ -435,7 +290,7 @@ done
 # ── Resumo final ──────────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}${BOLD}  Instalacao concluida!${NC}"
+echo -e "${GREEN}${BOLD}  Painel instalado!${NC}"
 echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
@@ -461,6 +316,17 @@ echo ""
 echo -e "  Logs:       ${YELLOW}$COMPOSE_CMD logs -f backend${NC}"
 echo -e "  Parar:      ${YELLOW}$COMPOSE_CMD down${NC}"
 echo -e "  Atualizar:  ${YELLOW}git pull && $COMPOSE_CMD up -d --build${NC}"
+echo ""
+echo -e "${BOLD}  Proximo passo — conectar um servidor EXIM:${NC}"
+echo -e "  1. Entre no painel e va em Servidores → Adicionar"
+echo -e "  2. Clique em \"Gerar chave\" — o painel cria um par de chaves e"
+echo -e "     mostra a chave publica"
+echo -e "  3. No servidor EXIM (nao aqui), rode:"
+echo -e "     ${YELLOW}bash mailiq-bootstrap.sh --pubkey 'ssh-ed25519 AAAA...'${NC}"
+echo -e "     (leia o script inteiro antes — ele so precisa da SUA senha de"
+echo -e "     root local naquele servidor, uma vez, nunca do painel)"
+echo -e "  4. Volte aqui e clique em \"Testar conexao\""
+echo -e "  Detalhes e o sudoers de referência: ${YELLOW}docs/seguranca.md${NC}"
 echo ""
 
 if [[ "$USE_SSL" == "y" ]]; then
