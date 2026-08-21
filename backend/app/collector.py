@@ -18,6 +18,7 @@ from .baseline import record_cycle_samples
 from .config import settings
 from .crypto import SecretDecryptionError
 from .database import Server, SessionLocal, Snapshot, build_server_cfg
+from .incident_engine import run_incident_cycle
 from .ssh import SSHError, expire_blocks, expire_quarantine, run_full, run_quick
 
 logger = logging.getLogger(__name__)
@@ -174,15 +175,17 @@ async def _collect_server(server_cfg: Dict[str, Any], mode: str) -> None:
                 server_id   = server_id,
             )
 
-            # Sessão 2, Tarefa 3: amostragem de baseline — precisa de um
-            # server_id real (não o fallback .env, server_id=None, que
-            # não tem linha em `servers` para a FK de baseline_metrics).
+            # Sessão 2, Tarefa 3/5: amostragem de baseline + motor de
+            # incidentes — precisam de um server_id real (não o fallback
+            # .env, server_id=None, sem linha em `servers` para as FKs).
             if server_id is not None:
                 db = SessionLocal()
                 try:
                     record_cycle_samples(db, server_id, data)
                 finally:
                     db.close()
+
+                await asyncio.to_thread(run_incident_cycle, SessionLocal, server_id, data, cfg)
 
         if mode == "quick":
             # T2/T3 (Sessão 1, pós-auditoria): "TTL de 4h"/"retenção de

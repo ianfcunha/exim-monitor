@@ -173,15 +173,18 @@ def detect_reputation(deliverability: Optional[Dict[str, Any]], data: Dict[str, 
     top_sender_count = int(data.get("top_sender_count") or 0)
 
     # ── Blocklist (DNSBL) ──────────────────────────────────────────
+    # diag-exim.sh (check_blacklists_json) usa a chave "list" pro nome
+    # da DNSBL, não "blocklist" — confirmado ao vivo contra o JSON real
+    # (bateu "?" na descrição antes desta correção).
     blocklists = deliverability.get("blocklists") or []
     listed = [b for b in blocklists if b.get("listed")]
     if listed and ip:
-        names = ", ".join(b.get("blocklist", "?") for b in listed)
+        names = ", ".join(b.get("list", "?") for b in listed)
         out.append(Candidate(
             type="reputation",
             entity=f"ip:{ip}",
             severity="critico",
-            metrics={"blocklists_listed": [b.get("blocklist") for b in listed], "ip": ip},
+            metrics={"blocklists_listed": [b.get("list") for b in listed], "ip": ip},
             suggested_fix={
                 "description": (
                     f"O IP de saída {ip} está listado em {len(listed)} blocklist(s) "
@@ -240,6 +243,9 @@ def detect_reputation(deliverability: Optional[Dict[str, Any]], data: Dict[str, 
                     "válido, entregas via TLS obrigatório passam a falhar. Renovar o "
                     "certificado (ex.: certbot renew) — fora do alcance deste painel."
                 ) if not cert.get("valid") else (
+                    f"Certificado TLS expirado há {abs(days_remaining)} dia(s) — entregas "
+                    f"com TLS obrigatório já devem estar falhando. Renovar o certificado."
+                ) if days_remaining is not None and days_remaining < 0 else (
                     f"Certificado TLS expira em {days_remaining} dia(s) — renovar antes "
                     f"que expire para não quebrar entregas com TLS obrigatório."
                 ),
