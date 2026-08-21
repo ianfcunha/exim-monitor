@@ -49,6 +49,21 @@
 #        --snapshot=0    desativa o before_snapshot das ações destrutivas
 #                          acima (ligado por padrão — ver Changelog v5.7)
 # ============================================================
+# Changelog v5.15:
+#   - Novo (T6, pós-auditoria): analyze_log() calcula log.lines_total/
+#     lines_recognized/recognition_pct — abaixo de 80%
+#     (EXIM_LOG_MIN_RECOGNITION_PCT) classify() marca DEGRADED/
+#     LOG_NAO_RECONHECIDO e para antes de qualquer outro diagnóstico
+#     baseado em contadores de log (todos seriam lixo sob um formato não
+#     reconhecido). classify() agora começa em UNKNOWN, não em NORMAL —
+#     só vira NORMAL depois de confirmar reconhecimento suficiente.
+#     Bug real pego testando ao vivo: exigir message-id pra contar como
+#     "reconhecida" dava falso positivo em servidor pouco movimentado —
+#     "Start/End queue run" (100% normal, sem message-id) dominava a
+#     amostra e derrubava o reconhecimento pra 67% num log perfeitamente
+#     legível. Critério final é só o timestamp no formato do Exim, sem
+#     exigir message-id — ver docs/compatibilidade.md.
+# ============================================================
 # Changelog v5.14:
 #   - Fix (T5, pós-auditoria): as 5 funções de remoção do menu interativo
 #     (clean_full/clean_frozen/clean_bounces/clean_by_sender/
@@ -327,7 +342,7 @@
 # exiqgrep etc. costumam morar) sejam encontrados mesmo assim.
 export PATH="$PATH:/usr/sbin:/sbin:/usr/local/sbin"
 
-VERSION="5.14"
+VERSION="5.15"
 LOG_PATH="/var/log/exim4/mainlog"
 # Lista única de candidatos a mainlog — consumida por collect() (quick e
 # completo) e run_check(). Debian/exim4, Debian/exim genérico, cPanel/WHM
@@ -910,6 +925,35 @@ analyze_log() {
     RECENT_SENDS=$(echo "$LOG_SAMPLE"     | grep -c ' <= ')
     DNS_ERRORS=$(echo "$LOG_SAMPLE"       | grep -cE 'DNS|lookup|NXDOMAIN')
 
+    # ── Taxa de reconhecimento (T6, Sessão 1, pós-auditoria) ──────────
+    # AUDITORIA.md item 6: se o formato do log não bate com o que este
+    # script entende, DELIVERED_COUNT/REJECT_COUNT/etc acima dão 0 sem
+    # distinguir "0 porque não tem nada acontecendo" de "0 porque não
+    # entendi o formato" — e classify() caía direto em NORMAL/OK.
+    #
+    # A princípio LOG_LINES_RECOGNIZED só contava linha com message-id
+    # (timestamp + "<hash>-<hash>-<hash>"), igual _parse_log_line()
+    # (backend/app/ssh.py) espera — mas testando ao vivo neste host
+    # (idle, queue runner rodando a cada 30min sem tráfego real) isso
+    # deu falso positivo: "Start queue run: pid=..."/"End queue run:
+    # pid=..." são linhas administrativas 100% normais do Exim, sem
+    # message-id nenhum, e dominavam a amostra só por o servidor estar
+    # ocioso — reconhecimento caiu pra 67% num log perfeitamente
+    # entendível. Reconhecido = "linha começa com o timestamp no
+    # formato que o Exim usa por padrão" (${4}-${2}-${2} ${2}:${2}:${2}),
+    # não "linha tem message-id" — isso ainda distingue um formato
+    # realmente diferente (ex.: syslog, "Aug 20 00:20:10 host exim[123]:
+    # ...", que não bate com esse prefixo de jeito nenhum) sem penalizar
+    # linhas administrativas legítimas.
+    LOG_LINES_TOTAL=$(printf '%s\n' "$LOG_SAMPLE" | grep -c .)
+    LOG_LINES_RECOGNIZED=$(printf '%s\n' "$LOG_SAMPLE" \
+        | grep -cE '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}')
+    if [ "$LOG_LINES_TOTAL" -gt 0 ]; then
+        LOG_RECOGNITION_PCT=$(( LOG_LINES_RECOGNIZED * 100 / LOG_LINES_TOTAL ))
+    else
+        LOG_RECOGNITION_PCT=0
+    fi
+
     TOP_REJECTED_DOMAINS=$(echo "$LOG_SAMPLE" | grep -E ' rejected | 5[0-9]{2} ' | \
         grep -oP '@\K[a-zA-Z0-9.-]+' | sort | uniq -c | sort -rn | head -8)
 
@@ -1185,8 +1229,32 @@ analyze_age() {
 # CLASSIFICAÇÃO
 # ============================================================
 classify() {
-    PROBLEM="NORMAL"; SEVERITY="OK"; PROBLEM_DESC="Fila operando normalmente"
+    # T6 (Sessão 1, pós-auditoria): começa em UNKNOWN, não em NORMAL —
+    # "NORMAL" é uma afirmação de saúde que só pode ser feita depois de
+    # confirmar que o log foi lido e entendido. Um servidor que nunca
+    # respondeu, ou cujo log não bate com nenhum formato conhecido, não
+    # é um servidor saudável — é um servidor sobre o qual não sabemos
+    # nada ainda.
+    PROBLEM="UNKNOWN"; SEVERITY="UNKNOWN"; PROBLEM_DESC="Diagnóstico ainda não confirmado"
     ACTIONS_RECOMMENDED=()
+
+    # AUDITORIA.md item 6: abaixo do mínimo de reconhecimento, TODO
+    # diagnóstico baseado em contadores de log (REJECT_COUNT,
+    # TOP_SENDER, RELAY_SUSPECT etc.) é potencialmente lixo — todos
+    # ficariam artificialmente zerados por um log que o script não sabe
+    # ler, não por ausência real de problema. Reporta DEGRADED e para
+    # aqui, em vez de arriscar classificar como NORMAL (ou qualquer
+    # outra coisa) em cima de dado que não é confiável.
+    local _log_min_recognition_pct="${EXIM_LOG_MIN_RECOGNITION_PCT:-80}"
+    if [ "${LOG_LINES_TOTAL:-0}" -eq 0 ]; then
+        PROBLEM="LOG_NAO_RECONHECIDO"; SEVERITY="DEGRADED"
+        PROBLEM_DESC="Não foi possível ler nenhuma linha do mainlog neste servidor — verifique o caminho do log e as permissões, não assuma fila normal"
+        return
+    elif [ "${LOG_RECOGNITION_PCT:-0}" -lt "$_log_min_recognition_pct" ]; then
+        PROBLEM="LOG_NAO_RECONHECIDO"; SEVERITY="DEGRADED"
+        PROBLEM_DESC="Só ${LOG_RECOGNITION_PCT}% das ${LOG_LINES_TOTAL} linhas do mainlog foram reconhecidas (mínimo ${_log_min_recognition_pct}%) — formato de log não suportado; métricas de entrega/rejeição abaixo não são confiáveis"
+        return
+    fi
 
     # EXIM_CPU_TOTAL/EXIM_MEM_TOTAL são floats (soma de %CPU/%MEM de todos
     # os processos exim) — test -gt exige inteiro, então trunca na parte
@@ -1295,6 +1363,11 @@ classify() {
         PROBLEM="FILA_ALTA"; SEVERITY="LOW"
         PROBLEM_DESC="Fila elevada sem causa óbvia — investigar"
         ACTIONS_RECOMMENDED=("retry-queue")
+
+    else
+        # T6: só chega em NORMAL depois de confirmar (acima) que o log
+        # foi lido e reconhecido o suficiente — nunca por omissão.
+        PROBLEM="NORMAL"; SEVERITY="OK"; PROBLEM_DESC="Fila operando normalmente"
     fi
 }
 
@@ -1572,6 +1645,7 @@ output_json() {
         printf '  "log": {\n'
         printf '    "delivered": %s, "rejected": %s, "deferred": %s,\n'             "${DELIVERED_COUNT:-0}" "${REJECT_COUNT:-0}" "${DEFER_COUNT:-0}"
         printf '    "recent_sends": %s, "dns_errors": %s,\n'             "${RECENT_SENDS:-0}" "${DNS_ERRORS:-0}"
+        printf '    "lines_total": %s, "lines_recognized": %s, "recognition_pct": %s,\n'             "${LOG_LINES_TOTAL:-0}" "${LOG_LINES_RECOGNIZED:-0}" "${LOG_RECOGNITION_PCT:-0}"
         printf '    "mainlog_size_mb": %s\n' "${MAINLOG_SIZE_MB:-0}"
         printf '  },\n'
         printf '  "hourly_stats": [%s],\n' "$_hs_json"
@@ -1615,6 +1689,7 @@ output_json() {
     printf '  "log": {\n'
     printf '    "delivered": %s, "rejected": %s, "deferred": %s,\n'         "${DELIVERED_COUNT:-0}" "${REJECT_COUNT:-0}" "${DEFER_COUNT:-0}"
     printf '    "recent_sends": %s, "dns_errors": %s,\n'         "${RECENT_SENDS:-0}" "${DNS_ERRORS:-0}"
+    printf '    "lines_total": %s, "lines_recognized": %s, "recognition_pct": %s,\n'         "${LOG_LINES_TOTAL:-0}" "${LOG_LINES_RECOGNIZED:-0}" "${LOG_RECOGNITION_PCT:-0}"
     printf '    "mainlog_size_mb": %s\n' "${MAINLOG_SIZE_MB:-0}"
     printf '  },\n'
     printf '  "top_sender": "%s", "top_sender_count": %s,\n'         "$TOP_SENDER" "${TOP_SENDER_COUNT:-0}"
@@ -2350,6 +2425,11 @@ print_status() {
         MEDIUM)   badge_warn "$PROBLEM — $PROBLEM_DESC" ;;
         LOW)      badge_warn "$PROBLEM — $PROBLEM_DESC" ;;
         OK)       badge_ok   "$PROBLEM — $PROBLEM_DESC" ;;
+        # T6: DEGRADED/UNKNOWN nunca podem cair no default silencioso —
+        # é exatamente o estado que precisa ficar visível.
+        DEGRADED) badge_crit "$PROBLEM — $PROBLEM_DESC" ;;
+        UNKNOWN)  badge_warn "$PROBLEM — $PROBLEM_DESC" ;;
+        *)        badge_warn "$PROBLEM — $PROBLEM_DESC" ;;
     esac
     echo
     printf "  %-22s "; bar "$QUEUE"          10000; echo "  Fila total"

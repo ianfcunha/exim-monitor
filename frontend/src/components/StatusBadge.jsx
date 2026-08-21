@@ -8,11 +8,20 @@ const S = {
   MEDIUM:   { border: 'var(--warn-border)', bg: 'var(--warn-bg)', text: 'var(--warn)', dot: 'var(--warn)' },
   HIGH:     { border: 'var(--warn-border)', bg: 'var(--warn-bg)', text: 'var(--warn)', dot: '#F97316' },
   CRITICAL: { border: 'var(--danger-border)', bg: 'var(--danger-bg)', text: 'var(--danger)', dot: 'var(--danger)' },
+  // T6 (Sessão 1, pós-auditoria): DEGRADED (log não reconhecido — as
+  // métricas não são confiáveis) e UNKNOWN (servidor que nunca
+  // respondeu de verdade) precisam de entrada própria — sem isso,
+  // `S[severity] ?? S.OK` caía pro verde de "tudo bem", exatamente o
+  // bug que esta tarefa existe pra eliminar (era assim no script,
+  // depois no backend, e essa terceira camada no frontend tinha o
+  // mesmo problema).
+  DEGRADED: { border: 'var(--danger-border)', bg: 'var(--danger-bg)', text: 'var(--danger)', dot: 'var(--danger)' },
+  UNKNOWN:  { border: 'var(--border)', bg: 'var(--surface)', text: 'var(--dim)', dot: 'var(--dim)' },
 }
 
-export default function StatusBadge({ severity = 'OK', problem, description, large = false }) {
-  const s = S[severity] ?? S.OK
-  const isCritical = severity === 'CRITICAL'
+export default function StatusBadge({ severity = 'UNKNOWN', problem, description, large = false }) {
+  const s = S[severity] ?? S.UNKNOWN
+  const isCritical = severity === 'CRITICAL' || severity === 'DEGRADED'
 
   const dotStyle = {
     width: large ? 9 : 6,

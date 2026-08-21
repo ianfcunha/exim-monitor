@@ -179,10 +179,14 @@ export default function Dashboard({ onLogout }) {
 
   // ── Título dinâmico da aba ────────────────────────────────────────────────
   useEffect(() => {
-    const sev   = diag.severity ?? 'OK'
-    const icons = { MEDIUM: '⚠️', HIGH: '🚨', CRITICAL: '🔴' }
+    // T6 (Sessão 1, pós-auditoria): default era 'OK' — antes do primeiro
+    // dado chegar (ou se vier sem severity), a aba mostrava "tudo bem"
+    // sem ter confirmado nada ainda. UNKNOWN não ganha ícone de alerta
+    // (é "ainda não sei", não "algo está errado"), só não finge OK.
+    const sev   = diag.severity ?? 'UNKNOWN'
+    const icons = { MEDIUM: '⚠️', HIGH: '🚨', CRITICAL: '🔴', DEGRADED: '🔴' }
     const icon  = icons[sev] ?? ''
-    document.title = (sev === 'OK' || sev === 'LOW')
+    document.title = (sev === 'OK' || sev === 'LOW' || sev === 'UNKNOWN')
       ? 'Mail IQ — AVILI'
       : `${icon} ${sev} — Mail IQ`
     return () => { document.title = 'Mail IQ — AVILI' }
@@ -289,9 +293,18 @@ export default function Dashboard({ onLogout }) {
 
             {/* Badge EXIM */}
             {(() => {
-              const sev   = diag.severity ?? 'OK'
+              // T6 (Sessão 1, pós-auditoria): default era 'OK' — antes do
+              // primeiro dado chegar, o pill mostrava verde "EXIM" como se
+              // já tivesse confirmado saúde. UNKNOWN fica neutro (--dim),
+              // nunca verde; DEGRADED (log não reconhecido) fica vermelho
+              // igual CRITICAL — as métricas não são confiáveis, não é só
+              // um "não sei ainda".
+              const sev   = diag.severity ?? 'UNKNOWN'
               const ok    = sev === 'OK' || sev === 'LOW'
-              const color = ok ? 'var(--ok)' : sev === 'MEDIUM' || sev === 'HIGH' ? 'var(--warn)' : 'var(--danger)'
+              const color = ok ? 'var(--ok)'
+                : sev === 'UNKNOWN' ? 'var(--dim)'
+                : (sev === 'MEDIUM' || sev === 'HIGH') ? 'var(--warn)'
+                : 'var(--danger)'
               return (
                 <StatusPill color={color} label={ok ? 'EXIM' : sev}>
                   <div style={{ fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>Diagnóstico EXIM</div>

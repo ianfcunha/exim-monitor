@@ -16,8 +16,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_user, require_admin
-from ..crypto import decrypt_secret, encrypt_secret
-from ..database import Server, User, get_db, get_server_owned_by, get_servers_for_user, to_utc_iso
+from ..crypto import SecretDecryptionError, encrypt_secret
+from ..database import (
+    Server, User, build_server_cfg, get_db, get_server_owned_by,
+    get_servers_for_user, to_utc_iso,
+)
 from ..limiter import limiter
 
 router = APIRouter(prefix="/api/servers", tags=["servers"])
@@ -82,18 +85,6 @@ def _to_response(s: Server, include_secret: bool = False) -> dict:
     }
 
 
-def _build_server_cfg(s: Server) -> dict:
-    """Monta dict de configuração SSH para passar ao ssh.py."""
-    return {
-        "host":                 s.host,
-        "port":                 s.port,
-        "ssh_user":             s.ssh_user,
-        "ssh_auth_type":        s.ssh_auth_type,
-        "ssh_secret":           decrypt_secret(s.ssh_secret),
-        "script_path":          s.script_path,
-        "host_key_fingerprint": s.ssh_host_key_fingerprint,
-    }
-
 
 # ── Endpoints ──────────────────────────────────────────────────────────────
 
@@ -150,9 +141,14 @@ def create_server(
     script_deployed = False
     script_deploy_error = None
     try:
-        deploy_script(_build_server_cfg(server))
+        deploy_script(build_server_cfg(server))
         script_deployed = True
     except SSHError as exc:
+        script_deploy_error = str(exc)[:500]
+    except SecretDecryptionError as exc:
+        # Praticamente impossível logo após encrypt_secret() com a
+        # mesma chave em memória, mas não custa não deixar isso virar
+        # um 500 cru se acontecer.
         script_deploy_error = str(exc)[:500]
 
     response = _to_response(server)
@@ -244,7 +240,19 @@ def test_server(
     if not server:
         raise HTTPException(404, "Servidor não encontrado.")
 
-    cfg = _build_server_cfg(server)
+    # T6 (Sessão 1, pós-auditoria): build_server_cfg() pode levantar
+    # SecretDecryptionError agora (decrypt_secret() não engole mais o
+    # erro) — tratado ANTES do try de conexão, com um status próprio
+    # ("credential_error"), pra o operador saber que o problema é a
+    # chave de criptografia, não a rede (AUDITORIA.md item 1).
+    try:
+        cfg = build_server_cfg(server)
+    except SecretDecryptionError as exc:
+        server.ssh_status    = "credential_error"
+        server.ssh_error_msg = str(exc)[:500]
+        db.commit()
+        return {"ok": False, "status": "credential_error", "error": str(exc)}
+
     try:
         result = test_connection(cfg)
         server.ssh_status       = "ok"

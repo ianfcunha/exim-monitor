@@ -62,17 +62,23 @@ const SEVERITY_BG = {
   MEDIUM:   { bg: 'var(--warn-bg)', border: 'var(--warn-border)', dot: 'var(--warn)' },
   HIGH:     { bg: 'var(--warn-bg)', border: 'var(--warn-border)', dot: '#EA580C' },
   CRITICAL: { bg: 'var(--danger-bg)', border: 'var(--danger-border)', dot: 'var(--danger)' },
+  // T6 (Sessão 1, pós-auditoria): sem entrada própria, um servidor
+  // DEGRADED (log não reconhecido) ou UNKNOWN (nunca respondeu de
+  // verdade) caía no fallback ?? SEVERITY_BG.OK — colapsado, verde,
+  // como se estivesse tudo bem. Mesmo bug de StatusBadge.jsx.
+  DEGRADED: { bg: 'var(--danger-bg)', border: 'var(--danger-border)', dot: 'var(--danger)' },
+  UNKNOWN:  { bg: 'var(--surface)', border: 'var(--border)', dot: 'var(--dim)' },
 }
 
 export default function DiagnosisPanel({ diagnosis, onAction }) {
   const prevSeverity = useRef(null)
   const [collapsed, setCollapsed] = useState(true)
 
-  const { problem = 'NORMAL', severity = 'OK', description = '' } = diagnosis ?? {}
+  const { problem = 'UNKNOWN', severity = 'UNKNOWN', description = '' } = diagnosis ?? {}
   const isOk            = severity === 'OK' || severity === 'LOW'
-  const isCritical      = severity === 'CRITICAL' || severity === 'HIGH'
+  const isCritical      = severity === 'CRITICAL' || severity === 'HIGH' || severity === 'DEGRADED'
   const recommendedActions = ACTIONS_BY_PROBLEM[problem] ?? []
-  const colors          = SEVERITY_BG[severity] ?? SEVERITY_BG.OK
+  const colors          = SEVERITY_BG[severity] ?? SEVERITY_BG.UNKNOWN
 
   // Auto-expande quando status piora; auto-colapsa quando volta a OK
   useEffect(() => {

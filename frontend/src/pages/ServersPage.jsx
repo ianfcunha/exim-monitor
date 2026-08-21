@@ -14,6 +14,10 @@ const SSH_STATUS = {
   error:   { color: 'var(--danger)', bg: 'var(--danger-bg)', label: 'Erro SSH',    icon: XCircle     },
   timeout: { color: 'var(--warn)', bg: 'var(--warn-bg)', label: 'Timeout',     icon: WifiOff     },
   unknown: { color: 'var(--dim)', bg: 'var(--surface)', label: 'Desconhecido',icon: Server      },
+  // T6 (Sessão 1, pós-auditoria): distinto de "Erro SSH" de propósito —
+  // o problema é a SSH_ENCRYPTION_KEY, não a rede/credencial SSH em si
+  // (ver AUDITORIA.md item 1, decrypt_secret() agora falha alto).
+  credential_error: { color: 'var(--danger)', bg: 'var(--danger-bg)', label: 'Erro de credencial', icon: XCircle },
 }
 
 const CHECK_LABELS = {

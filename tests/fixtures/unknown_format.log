@@ -1,0 +1,5 @@
+Aug 21 21:08:11 mailhost exim[482910]: 2026-08-21T21:08:11.442Z <= spammer@example-abuse.test H=mail-relay.example-abuse.test [203.0.113.44] P=esmtp S=1980
+Aug 21 21:08:11 mailhost exim[482910]: 2026-08-21T21:08:11.503Z ** victim@destino-invalido.example.com R=lookuphost T=remote_smtp: SMTP error
+Aug 21 21:08:12 mailhost exim[482912]: 2026-08-21T21:08:12.019Z == destinatario@dominio-lento.example.com R=lookuphost T=remote_smtp defer
+Aug 21 21:08:12 mailhost exim[482913]: 2026-08-21T21:08:12.331Z Start queue run
+Aug 21 21:08:12 mailhost exim[482913]: 2026-08-21T21:08:12.402Z End queue run

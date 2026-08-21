@@ -1,0 +1,24 @@
+2026-08-18 00:19:45 Start queue run: pid=2622626
+2026-08-18 00:19:45 End queue run: pid=2622626
+2026-08-18 00:49:46 Start queue run: pid=2645498
+2026-08-18 00:49:46 End queue run: pid=2645498
+2026-08-21 21:06:26 1wxWRW-00B5Kn-1G Completed
+2026-08-21 21:06:26 1wxWRW-00B5LD-2m <= mailiq-capprobe-test@server-1776124519 U=mailiq-capprobe-test P=local S=644
+2026-08-21 21:06:26 1wxWRW-00B5L1-27 => /var/mail/mail <root@server-1776124519> R=mail4root T=address_file
+2026-08-21 21:06:26 1wxWRW-00B5L1-27 Completed
+2026-08-21 21:06:26 1wxWRW-00B5L8-2O => /var/mail/mail <root@server-1776124519> R=mail4root T=address_file
+2026-08-21 21:06:26 1wxWRW-00B5L8-2O Completed
+2026-08-21 21:06:26 1wxWRW-00B5LD-2m => /var/mail/mail <root@server-1776124519> R=mail4root T=address_file
+2026-08-21 21:06:26 1wxWRW-00B5LD-2m Completed
+2026-08-21 21:06:26 1wxWRW-00B5M5-DX <= mailiq-capprobe-test@server-1776124519 U=mailiq-capprobe-test P=local S=634
+2026-08-21 21:06:26 1wxWRW-00B5M5-DX => /var/mail/mail <root@server-1776124519> R=mail4root T=address_file
+2026-08-21 21:06:26 1wxWRW-00B5M5-DX Completed
+2026-08-21 21:06:28 1wxWRY-00B5Pg-IW <= test-inject@exim-monitor.local U=root P=local S=708
+2026-08-21 21:06:28 1wxWRY-00B5Pj-Jz <= test-inject@exim-monitor.local U=root P=local S=708
+2026-08-21 21:07:04 1wxWRY-00B5Pj-Jz removed by root
+2026-08-21 21:07:04 1wxWRY-00B5Pj-Jz Completed
+2026-08-21 21:07:04 1wxWRY-00B5Pg-IW removed by root
+2026-08-21 21:07:04 1wxWRY-00B5Pg-IW Completed
+2026-08-21 21:08:11 1wxWSZ-00B6Aa-1X <= spammer@example-abuse.test H=mail-relay.example-abuse.test [203.0.113.44] P=esmtp S=1980
+2026-08-21 21:08:11 1wxWSZ-00B6Aa-1X ** victim@destino-invalido.example.com R=lookuphost T=remote_smtp: SMTP error from remote mail server after RCPT TO:<victim@destino-invalido.example.com>: host mx.destino-invalido.example.com [198.51.100.7]: 550 5.1.1 <victim@destino-invalido.example.com>: Recipient address rejected: User unknown
+2026-08-21 21:08:12 1wxWSZ-00B6Ab-1Y == destinatario@dominio-lento.example.com R=lookuphost T=remote_smtp defer (-44): SMTP error from remote mail server after RCPT TO:<destinatario@dominio-lento.example.com>: host mx.dominio-lento.example.com [198.51.100.8]: 450 4.2.1 <destinatario@dominio-lento.example.com>: Recipient address rejected: Greylisted, please try again later

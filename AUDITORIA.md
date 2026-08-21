@@ -277,6 +277,36 @@ mecanismo de "não consegui ler este log":
   contadores ficam em 0, classifica como NORMAL — o operador não tem como
   distinguir "servidor sem problema" de "não achei o mainlog nesse servidor".
 
+> **Status: corrigido** (Sessão 1, Tarefa 6) — `analyze_log()` agora calcula
+> `log.lines_total`/`lines_recognized`/`recognition_pct` (linhas que começam
+> com o timestamp no formato do Exim); abaixo de 80%
+> (`EXIM_LOG_MIN_RECOGNITION_PCT`), `classify()` marca
+> `DEGRADED`/`LOG_NAO_RECONHECIDO` e para antes de qualquer diagnóstico
+> baseado em contadores de log. `classify()` começa em `UNKNOWN`, só vira
+> `NORMAL` depois de confirmar reconhecimento suficiente — mesmo default
+> corrigido em `collector.py` (`.get("severity","UNKNOWN")`) e no `Snapshot`
+> model. **Terceira camada encontrada e corrigida durante esta correção**:
+> o frontend (`StatusBadge.jsx`, `DiagnosisPanel.jsx`, `Dashboard.jsx`) tinha
+> o mesmo bug — `S[severity] ?? S.OK` fazia qualquer severidade não
+> reconhecida (incluindo as novas `DEGRADED`/`UNKNOWN`) cair no badge verde
+> de "tudo bem". **Bug real pego testando ao vivo**: o primeiro critério de
+> reconhecimento (exigir message-id) deu falso positivo neste próprio host —
+> linhas administrativas normais (`Start/End queue run`, sem message-id)
+> dominavam a amostra num servidor pouco movimentado e derrubaram o
+> reconhecimento pra 67% num log perfeitamente legível; corrigido para
+> exigir só o timestamp no formato certo. Ver `docs/compatibilidade.md`
+> (matriz de formatos validados vs. inferidos) e
+> `tests/fixtures/*.log` + `tests/test_log_recognition.sh`.
+>
+> De quebra, `decrypt_secret()` (AUDITORIA.md item 1) também parou de
+> engolir erro — agora lança `SecretDecryptionError`, e `POST /servers/
+> {id}/test` reporta `status="credential_error"` (persistido em
+> `ssh_status`) em vez de deixar a conexão SSH falhar com um erro de rede
+> genérico. `collector.py` isola essa falha por servidor — um segredo
+> ilegível não derruba a coleta dos outros. Testado ao vivo corrompendo o
+> `ssh_secret` de um servidor de teste direto no banco; ver
+> `tests/test_credential_failure_api.sh`.
+
 ---
 
 ## Resumo do que bloqueia hoje um host de terceiro

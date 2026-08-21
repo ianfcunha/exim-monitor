@@ -16,8 +16,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..auth import require_admin
-from ..crypto import decrypt_secret
-from ..database import User, get_db, get_server_owned_by, record_action_history
+from ..crypto import SecretDecryptionError
+from ..database import User, build_server_cfg, get_db, get_server_owned_by, record_action_history
 from ..limiter import limiter
 from ..ssh import SSHError, UNBLOCK_TOOLS, check_ip_status, list_blocks, unblock_ip
 
@@ -28,15 +28,15 @@ def _server_cfg(db: Session, server_id: int, current_user: User) -> dict:
     server = get_server_owned_by(db, server_id, current_user)
     if not server:
         raise HTTPException(404, f"Servidor {server_id} não encontrado.")
-    return {
-        "host":                 server.host,
-        "port":                 server.port,
-        "ssh_user":             server.ssh_user,
-        "ssh_auth_type":        server.ssh_auth_type,
-        "ssh_secret":           decrypt_secret(server.ssh_secret),
-        "script_path":          server.script_path,
-        "host_key_fingerprint": server.ssh_host_key_fingerprint,
-    }
+    try:
+        return build_server_cfg(server)
+    except SecretDecryptionError as exc:
+        # T6 (Sessão 1, pós-auditoria) — ver mesmo tratamento em
+        # routers/actions.py._resolve_server_cfg.
+        server.ssh_status    = "credential_error"
+        server.ssh_error_msg = str(exc)[:500]
+        db.commit()
+        raise HTTPException(503, str(exc)) from exc
 
 
 class UnblockRequest(BaseModel):

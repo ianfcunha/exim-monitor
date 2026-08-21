@@ -17,6 +17,7 @@ from sqlalchemy.orm import DeclarativeBase, relationship, sessionmaker
 from sqlalchemy.pool import QueuePool
 
 from .config import settings
+from .crypto import decrypt_secret
 
 engine = create_engine(
     settings.database_url,
@@ -125,8 +126,12 @@ class Snapshot(Base):
     timestamp     = Column(DateTime, default=datetime.utcnow, nullable=False)
     mode          = Column(String(10), default="full", nullable=False)
     queue_total   = Column(Integer,    default=0,        nullable=False)
-    severity      = Column(String(20), default="OK",     nullable=False)
-    problem       = Column(String(40), default="NORMAL", nullable=False)
+    # T6 (Sessão 1, pós-auditoria): mesma correção do default em
+    # collector.py — nível de coluna é só rede de segurança pra um
+    # INSERT fora do caminho normal (que sempre passa severity/problem
+    # explícitos); mesmo assim não pode assumir "tudo bem" por padrão.
+    severity      = Column(String(20), default="UNKNOWN", nullable=False)
+    problem       = Column(String(40), default="UNKNOWN", nullable=False)
     delivered     = Column(Integer,    default=0,        nullable=False)
     rejected      = Column(Integer,    default=0,        nullable=False)
     deferred      = Column(Integer,    default=0,        nullable=False)
@@ -337,6 +342,30 @@ def get_server_owned_by(db, server_id: int, user: User):
     """Retorna o servidor se o usuário tem acesso a ele, None caso contrário."""
     owner_id = user.id if user.role == "admin" else user.invited_by
     return db.query(Server).filter(Server.id == server_id, Server.owner_id == owner_id).first()
+
+
+def build_server_cfg(s: Server) -> dict:
+    """
+    Monta o dict de configuração SSH para passar ao ssh.py — fonte única
+    (T6, Sessão 1, pós-auditoria: antes cada router — servers.py,
+    security.py — e collector.py duplicavam essa mesma construção,
+    cada um com sua própria chamada a decrypt_secret()).
+
+    Levanta SecretDecryptionError (ver crypto.py) se o segredo salvo não
+    puder ser decriptografado — não retorna um cfg com senha vazia
+    silenciosamente. Quem chama decide como reportar isso (servers.py
+    marca ssh_status="credential_error"; collector.py pula o servidor
+    sem derrubar a coleta dos outros).
+    """
+    return {
+        "host":                 s.host,
+        "port":                 s.port,
+        "ssh_user":             s.ssh_user,
+        "ssh_auth_type":        s.ssh_auth_type,
+        "ssh_secret":           decrypt_secret(s.ssh_secret),
+        "script_path":          s.script_path,
+        "host_key_fingerprint": s.ssh_host_key_fingerprint,
+    }
 
 
 def get_alert_settings(db, server_id: Optional[int] = None) -> AlertSettings:

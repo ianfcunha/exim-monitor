@@ -15,8 +15,8 @@ from typing import Any, Dict, List, Optional
 
 from .alerts import check_and_alert
 from .config import settings
-from .crypto import decrypt_secret
-from .database import Server, SessionLocal, Snapshot
+from .crypto import SecretDecryptionError
+from .database import Server, SessionLocal, Snapshot, build_server_cfg
 from .ssh import SSHError, expire_blocks, expire_quarantine, run_full, run_quick
 
 logger = logging.getLogger(__name__)
@@ -45,22 +45,33 @@ def _cache_valid(server_id: Optional[int], key: str, max_age: int) -> bool:
 
 
 def _get_active_servers() -> List[Dict[str, Any]]:
-    """Retorna lista de configs de servidores ativos do banco."""
+    """Retorna lista de configs de servidores ativos do banco.
+
+    T6 (Sessão 1, pós-auditoria): build_server_cfg() pode levantar
+    SecretDecryptionError agora — capturado POR SERVIDOR aqui, porque
+    isto roda no loop do coletor de background: um segredo ilegível
+    num servidor não pode derrubar a coleta dos outros. O servidor
+    afetado fica marcado como credential_error e some da lista até
+    alguém corrigir a chave/segredo.
+    """
     db = SessionLocal()
     try:
         servers = db.query(Server).filter(Server.is_enabled == True).all()
         result = []
         for s in servers:
-            result.append({
-                "server_id":            s.id,
-                "host":                 s.host,
-                "port":                 s.port,
-                "ssh_user":             s.ssh_user,
-                "ssh_auth_type":        s.ssh_auth_type,
-                "ssh_secret":           decrypt_secret(s.ssh_secret),
-                "script_path":          s.script_path,
-                "host_key_fingerprint": s.ssh_host_key_fingerprint,
-            })
+            try:
+                cfg = build_server_cfg(s)
+            except SecretDecryptionError as exc:
+                logger.error(
+                    "Segredo SSH ilegível para server_id=%s — pulando coleta: %s",
+                    s.id, exc,
+                )
+                s.ssh_status    = "credential_error"
+                s.ssh_error_msg = str(exc)[:500]
+                db.commit()
+                continue
+            cfg["server_id"] = s.id
+            result.append(cfg)
         return result
     finally:
         db.close()
@@ -77,8 +88,14 @@ def _save_snapshot(data: Dict[str, Any], mode: str, server_id: Optional[int]) ->
             timestamp    = datetime.utcnow(),
             mode         = mode,
             queue_total  = queue.get("total", 0),
-            severity     = diag.get("severity", "OK"),
-            problem      = diag.get("problem", "NORMAL"),
+            # T6 (Sessão 1, pós-auditoria): "OK"/"NORMAL" como default
+            # aqui era a mesma mentira silenciosa do script (AUDITORIA.md
+            # item 6) numa segunda camada — se o JSON um dia vier sem
+            # "diagnosis" (coleta quebrada de verdade), o backend não pode
+            # inventar que está tudo bem. Um servidor que nunca respondeu
+            # direito não é um servidor saudável.
+            severity     = diag.get("severity", "UNKNOWN"),
+            problem      = diag.get("problem", "UNKNOWN"),
             delivered    = log_data.get("delivered", 0),
             rejected     = log_data.get("rejected", 0),
             deferred     = log_data.get("deferred", 0),
@@ -150,8 +167,8 @@ async def _collect_server(server_cfg: Dict[str, Any], mode: str) -> None:
             diag  = data.get("diagnosis", {})
             queue = data.get("queue", {})
             await check_and_alert(
-                severity    = diag.get("severity", "OK"),
-                problem     = diag.get("problem", "NORMAL"),
+                severity    = diag.get("severity", "UNKNOWN"),
+                problem     = diag.get("problem", "UNKNOWN"),
                 queue_total = queue.get("total", 0),
                 server_id   = server_id,
             )
