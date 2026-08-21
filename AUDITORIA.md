@@ -93,6 +93,19 @@ ou consulta de fila (`exim -bp`, que só lista).
 `$SUDO systemctl restart firewall.service` para aplicar — reinicia o serviço de
 firewall inteiro do host a cada bloqueio de IP.
 
+> **Status: corrigido** (Sessão 1, Tarefa 2) — `_block_ip_persist()` foi
+> substituída por `_apply_ip_block()`: nunca mais chama `systemctl restart`.
+> Cascata de ferramenta nativa — CSF (`-td`, TTL nativo) → firewalld
+> (`--timeout`, TTL nativo) → iptables cru só como último recurso, com TTL
+> via bookkeeping próprio (`ip_blocks.tsv` + `--action=expire-blocks`/
+> `list-blocks`, chamado periodicamente pelo `collector.py` a cada tick do
+> heartbeat). `unblock-ip --tool=imunify360` também corrigido: tentava só
+> whitelist, agora tenta remover da blacklist de verdade primeiro. Validado
+> ao vivo neste host (sem CSF/firewalld, só iptables): 20 ciclos de
+> bloqueio/desbloqueio sem nenhum restart e sem perder a regra; expiração
+> automática confirmada com TTL curto. Coberto por
+> `tests/test_ip_block.sh`.
+
 Existe uma segunda cópia dessas mesmas ações no **menu interativo** (não usado
 pela API, mas presente no mesmo script — roda se alguém rodar `diag-exim.sh` sem
 flags direto no servidor): `clean_full()`, `clean_frozen()`, `clean_bounces()`

@@ -326,7 +326,7 @@ def run_check(server_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
 # ── Bloqueio de IP em CSF / Imunify360 ──────────────────────────────────────
 
 _UNSAFE_IP_CHARS = re.compile(r"[^0-9a-fA-F:.]+")
-UNBLOCK_TOOLS = ("csf", "imunify360")
+UNBLOCK_TOOLS = ("csf", "imunify360", "iptables")
 
 
 def _sanitize_ip(ip: str) -> str:
@@ -364,6 +364,27 @@ def unblock_ip(ip: str, tool: str, server_cfg: Optional[Dict[str, Any]] = None,
         if safe_actor:
             args += f" --actor={safe_actor}"
     return _run(args, server_cfg)
+
+
+def list_blocks(server_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Bloqueios de IP ativos aplicados via fallback iptables cru do
+    próprio script (diag-exim.sh --action=list-blocks) — CSF/firewalld
+    já expõem os próprios bloqueios temporários via check_ip_status().
+    Só leitura, não altera nada.
+    """
+    return _run("--action=list-blocks", server_cfg)
+
+
+def expire_blocks(server_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Remove bloqueios iptables cujo TTL já venceu (diag-exim.sh
+    --action=expire-blocks) — CSF/firewalld expiram sozinhos, isto só
+    cobre o fallback sem TTL nativo. Chamado periodicamente pelo
+    coletor (ver collector.py) para que "TTL padrão de 4h" vire
+    expiração de verdade, não só um número que ninguém aplica.
+    """
+    return _run("--action=expire-blocks", server_cfg)
 
 
 # ── Mensagens: fila e log ──────────────────────────────────────────────────

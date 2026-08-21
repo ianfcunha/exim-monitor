@@ -17,7 +17,7 @@ from .alerts import check_and_alert
 from .config import settings
 from .crypto import decrypt_secret
 from .database import Server, SessionLocal, Snapshot
-from .ssh import SSHError, run_full, run_quick
+from .ssh import SSHError, expire_blocks, run_full, run_quick
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +155,18 @@ async def _collect_server(server_cfg: Dict[str, Any], mode: str) -> None:
                 queue_total = queue.get("total", 0),
                 server_id   = server_id,
             )
+
+        if mode == "quick":
+            # T2 (Sessão 1, pós-auditoria): "TTL padrão de 4h com
+            # expiração automática" só é automática se alguém chamar
+            # expire-blocks periodicamente — aqui, a cada tick do
+            # heartbeat (quick_interval, ~30s por padrão). Best-effort:
+            # uma falha aqui não pode derrubar a coleta normal do
+            # servidor, por isso o try/except separado.
+            try:
+                await asyncio.to_thread(expire_blocks, cfg)
+            except SSHError as exc:
+                logger.debug("expire-blocks falhou (server_id=%s): %s", server_id, exc)
 
     except SSHError as exc:
         logger.warning("Coleta SSH falhou (server_id=%s): %s", server_id, exc)

@@ -19,7 +19,7 @@ from ..auth import require_admin
 from ..crypto import decrypt_secret
 from ..database import User, get_db, get_server_owned_by, record_action_history
 from ..limiter import limiter
-from ..ssh import SSHError, UNBLOCK_TOOLS, check_ip_status, unblock_ip
+from ..ssh import SSHError, UNBLOCK_TOOLS, check_ip_status, list_blocks, unblock_ip
 
 router = APIRouter(prefix="/api/servers", tags=["security"])
 
@@ -42,6 +42,29 @@ def _server_cfg(db: Session, server_id: int, current_user: User) -> dict:
 class UnblockRequest(BaseModel):
     ip: str
     tool: str
+
+
+@router.get(
+    "/{server_id}/security/ip-blocks",
+    summary="Bloqueios de IP ativos aplicados via fallback iptables (admin only)",
+)
+def get_ip_blocks(
+    server_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Tabela de bloqueios ativos pedida na Tarefa 2 — só cobre o fallback
+    iptables cru do próprio script (TTL sem ferramenta nativa por trás).
+    CSF/firewalld já expõem os próprios bloqueios temporários via
+    GET /security/ip-status.
+    """
+    server_cfg = _server_cfg(db, server_id, current_user)
+    try:
+        result = list_blocks(server_cfg=server_cfg)
+    except SSHError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return result.get("blocks", [])
 
 
 @router.get(

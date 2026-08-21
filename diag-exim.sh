@@ -26,9 +26,33 @@
 #                          (STARTTLS na porta 25), sem alterar nada
 #                          check-ip-status --ip=<ip> — status em CSF/
 #                          Imunify360/MagicSpam (monitoramento)
-#                          unblock-ip --ip=<ip> --tool=csf|imunify360
+#                          unblock-ip --ip=<ip> --tool=csf|imunify360|iptables
+#                          list-blocks — bloqueios ativos aplicados via
+#                          fallback iptables (CSF/firewalld já expõem os
+#                          próprios via check-ip-status), sem alterar nada
+#                          expire-blocks — remove bloqueios iptables cujo
+#                          TTL venceu (chamado periodicamente pelo backend)
+#        --ttl=N         TTL em segundos pra block-ip (padrão 14400 = 4h);
+#                          CSF/firewalld usam TTL nativo, iptables cru usa
+#                          bookkeeping próprio (ver expire-blocks)
 #        --snapshot=0    desativa o before_snapshot das ações destrutivas
 #                          acima (ligado por padrão — ver Changelog v5.7)
+# ============================================================
+# Changelog v5.11:
+#   - Fix (T2, pós-auditoria): _apply_ip_block() substitui
+#           _block_ip_persist() — nunca mais reinicia firewall.service.
+#           Cascata de ferramenta nativa: CSF (-td, TTL nativo) > firewalld
+#           (--timeout, TTL nativo) > iptables cru (só então, com TTL
+#           via bookkeeping próprio em ip_blocks.tsv + --action=
+#           expire-blocks/list-blocks). block_ip_firewall_d() (menu) e o
+#           case block-ip de execute_action() agora chamam a mesma função.
+#   - Fix: unblock-ip --tool=imunify360 tentava só adicionar o IP na
+#           whitelist, nunca removia da blacklist de fato — agora tenta
+#           "delete --purpose black" primeiro, com a whitelist como
+#           fallback explícito se a sintaxe não for suportada na
+#           instalação do cliente.
+#   - Novo: unblock-ip --tool=iptables — desfaz um bloqueio criado pelo
+#           fallback iptables cru do próprio script.
 # ============================================================
 # Changelog v5.10:
 #   - Limpeza: removida block_ip_iptables() — função morta (nunca mais
@@ -254,7 +278,7 @@
 # exiqgrep etc. costumam morar) sejam encontrados mesmo assim.
 export PATH="$PATH:/usr/sbin:/sbin:/usr/local/sbin"
 
-VERSION="5.10"
+VERSION="5.11"
 LOG_PATH="/var/log/exim4/mainlog"
 # Lista única de candidatos a mainlog — consumida por collect() (quick e
 # completo) e run_check(). Debian/exim4, Debian/exim genérico, cPanel/WHM
@@ -332,8 +356,9 @@ ACTION_CMD=""; ACTION_PARAM=""
 ACTOR_NAME=""          # T3-3: usuário que disparou a ação (--actor=)
 PROFILE="standard"     # T3-4: perfil de coleta (light|standard|full)
 IP_PARAM=""            # --action=check-ip-status/unblock-ip: --ip=<ip>
-TOOL_PARAM=""           # --action=unblock-ip: --tool=csf|imunify360
+TOOL_PARAM=""           # --action=unblock-ip: --tool=csf|imunify360|iptables
 SNAPSHOT_MODE=1         # --action=<destrutiva>: captura before_snapshot por padrao; --snapshot=0 desativa
+IPBLOCK_TTL=14400      # --action=block-ip: TTL em segundos (--ttl=); padrao 4h
 for arg in "$@"; do
     case "$arg" in
         --auto)        AUTO_MODE=1 ;;
@@ -354,6 +379,7 @@ for arg in "$@"; do
         --ip=*)        IP_PARAM="${arg#--ip=}" ;;
         --tool=*)      TOOL_PARAM="${arg#--tool=}" ;;
         --snapshot=*)  SNAPSHOT_MODE="${arg#--snapshot=}" ;;
+        --ttl=*)       IPBLOCK_TTL="${arg#--ttl=}" ;;
     esac
 done
 
@@ -1745,36 +1771,69 @@ execute_action() {
                     "Endereço IP inválido: '$param' (esperado IPv4 ou IPv6)"
                 exit 1
             fi
-            local _result_msgs=""
-            # T3-1: Bloquear via iptables imediatamente — só a ação via
-            # API faz isso; o menu interativo confia no restart do
-            # firewall.service dentro de _block_ip_persist pra aplicar.
-            # >/dev/null (não só 2>/dev/null): algumas builds de iptables
-            # imprimem a regra encontrada em stdout mesmo em -C (check),
-            # o que contaminaria o JSON de saída com uma linha extra
-            local _already_iptables=0
-            $SUDO iptables -C INPUT -s "$param" -j DROP >/dev/null 2>&1 && _already_iptables=1
-            local _already_persisted=0
-            [ -f /etc/firewall.d/03_custom ] && grep -qF "$param" /etc/firewall.d/03_custom 2>/dev/null && _already_persisted=1
             local _before=""
             if [ "$SNAPSHOT_MODE" = "1" ]; then
-                _before="\"before_snapshot\": {\"already_blocked_iptables\": $([ "$_already_iptables" -eq 1 ] && printf true || printf false), \"already_persisted\": $([ "$_already_persisted" -eq 1 ] && printf true || printf false)}"
+                local _already_iptables=0
+                $SUDO iptables -C INPUT -s "$param" -j DROP >/dev/null 2>&1 && _already_iptables=1
+                _before="\"before_snapshot\": {\"already_blocked_iptables\": $([ "$_already_iptables" -eq 1 ] && printf true || printf false), \"ttl_seconds\": ${IPBLOCK_TTL}}"
             fi
-            if [ "$_already_iptables" -eq 1 ]; then
-                _result_msgs="iptables: já bloqueado"
+            # T2 (Sessão 1, pós-auditoria): _apply_ip_block prefere CSF/
+            # firewalld (TTL nativo, sem restart, sem persistência
+            # caseira) e só cai pra iptables cru quando não há
+            # alternativa — nunca reinicia nenhum serviço.
+            local _result
+            _result=$(_apply_ip_block "$param" "$IPBLOCK_TTL" "Bloqueado via Mail IQ (actor=${ACTOR_NAME:-system})")
+            if [ "${_result%%:*}" = "none" ]; then
+                output_action_json "false" "$cmd" \
+                    "Não foi possível bloquear $param — sem CSF, firewalld nem permissão de iptables neste servidor" "$_before"
             else
-                if $SUDO iptables -I INPUT -s "$param" -j DROP >/dev/null 2>&1; then
-                    _result_msgs="iptables: bloqueado"
-                else
-                    _result_msgs="iptables: sem permissão"
-                fi
+                output_action_json "true" "$cmd" \
+                    "IP $param bloqueado por ${IPBLOCK_TTL}s (${_result})" "$_before"
             fi
-            # Persistir em /etc/firewall.d/03_custom — lógica
-            # compartilhada com o menu interativo (block_ip_firewall_d)
-            local _persist_msg
-            _persist_msg=$(_block_ip_persist "$param" "# Bloqueado via API em $DATE")
+            ;;
+
+        list-blocks)
+            # Bloqueios ativos aplicados via fallback iptables cru (CSF/
+            # firewalld já expõem os próprios bloqueios temporários por
+            # conta própria — ver check-ip-status). Poda expirados antes
+            # de listar, mesma lógica de expire-blocks.
+            local _now; _now=$(date +%s)
+            local _blocks_json="[" _first=1
+            if [ -f "$_IPBLOCK_STATE_FILE" ]; then
+                while IFS=$'\t' read -r _bip _bexp _breason; do
+                    [ -z "$_bip" ] && continue
+                    [ "$_bexp" -le "$_now" ] 2>/dev/null && continue
+                    [ "$_first" -eq 1 ] || _blocks_json="${_blocks_json},"
+                    local _reason_esc; _reason_esc=$(printf '%s' "$_breason" | sed 's/"/\\"/g')
+                    _blocks_json="${_blocks_json}{\"ip\": \"${_bip}\", \"tool\": \"iptables\", \"expires_at\": ${_bexp}, \"ttl_seconds_remaining\": $((_bexp - _now)), \"reason\": \"${_reason_esc}\"}"
+                    _first=0
+                done < "$_IPBLOCK_STATE_FILE"
+            fi
+            _blocks_json="${_blocks_json}]"
+            output_action_json "true" "$cmd" "Bloqueios ativos (iptables)" "\"blocks\": ${_blocks_json}"
+            ;;
+
+        expire-blocks)
+            # Chamado periodicamente pelo backend (mesmo ciclo do
+            # coletor) — remove bloqueios iptables cujo TTL venceu.
+            # CSF/firewalld não passam por aqui: eles expiram sozinhos.
+            local _now; _now=$(date +%s)
+            local _expired_json="[" _first=1 _expired_count=0
+            if [ -f "$_IPBLOCK_STATE_FILE" ]; then
+                while IFS=$'\t' read -r _bip _bexp _breason; do
+                    [ -z "$_bip" ] && continue
+                    if [ "$_bexp" -le "$_now" ] 2>/dev/null; then
+                        _remove_iptables_block "$_bip"
+                        [ "$_first" -eq 1 ] || _expired_json="${_expired_json},"
+                        _expired_json="${_expired_json}\"${_bip}\""
+                        _first=0
+                        _expired_count=$((_expired_count + 1))
+                    fi
+                done < "$_IPBLOCK_STATE_FILE"
+            fi
+            _expired_json="${_expired_json}]"
             output_action_json "true" "$cmd" \
-                "IP $param processado — ${_result_msgs}; ${_persist_msg}" "$_before"
+                "${_expired_count} bloqueio(s) expirado(s) removido(s)" "\"expired_ips\": ${_expired_json}"
             ;;
 
         check-ip-status)
@@ -1840,18 +1899,45 @@ execute_action() {
                             "Imunify360 não encontrado no PATH (binário: $EXIM_IMUNIFY_BIN — ajuste via EXIM_IMUNIFY_BIN se o caminho for outro)"
                         exit 1
                     fi
-                    # Desbloqueio via whitelist (não remove da blacklist —
-                    # confirmado como suficiente pelo cliente na call de demo)
-                    local _imun_out
-                    _imun_out=$($SUDO "$EXIM_IMUNIFY_BIN" ip-list local add --purpose white "$IP_PARAM" \
-                        --comment "desbloqueado via Mail IQ" 2>&1)
+                    # T2 (Sessão 1, pós-auditoria): a versão anterior só
+                    # adicionava o IP na whitelist — ele continuava listado
+                    # na blacklist por baixo, só "sobrescrito". O operador
+                    # pediu remoção de verdade da blacklist, que é outra
+                    # coisa. Sintaxe exata de "delete" não confirmada contra
+                    # uma instalação real (mesma ressalva de EXIM_CSF_BIN/
+                    # EXIM_IMUNIFY_BIN acima) — tenta remover da blacklist
+                    # primeiro; se a instalação do cliente não aceitar essa
+                    # sintaxe, cai pra whitelist (comportamento anterior)
+                    # como rede de segurança, deixando isso explícito na
+                    # mensagem em vez de fingir que a blacklist foi limpa.
+                    local _imun_out _imun_removed=0
+                    if _imun_out=$($SUDO "$EXIM_IMUNIFY_BIN" ip-list local delete --purpose black "$IP_PARAM" 2>&1); then
+                        _imun_removed=1
+                    fi
+                    if [ "$_imun_removed" -eq 0 ]; then
+                        _imun_out=$($SUDO "$EXIM_IMUNIFY_BIN" ip-list local add --purpose white "$IP_PARAM" \
+                            --comment "desbloqueado via Mail IQ (fallback: delete da blacklist falhou/nao suportado)" 2>&1)
+                    fi
                     _imun_out=$(printf '%s' "$_imun_out" | tr '\n' ' ' | sed 's/"/\\"/g')
+                    if [ "$_imun_removed" -eq 1 ]; then
+                        output_action_json "true" "$cmd" \
+                            "Imunify360: $IP_PARAM removido da blacklist — ${_imun_out}"
+                    else
+                        output_action_json "true" "$cmd" \
+                            "Imunify360: não foi possível remover $IP_PARAM da blacklist nesta instalação — adicionado à whitelist como fallback (${_imun_out})"
+                    fi
+                    ;;
+                iptables)
+                    # Único caso de unblock que não fala com uma ferramenta
+                    # externa — desfaz o bloqueio criado pelo fallback
+                    # iptables cru do próprio Mail IQ (ver _apply_ip_block).
+                    _remove_iptables_block "$IP_PARAM"
                     output_action_json "true" "$cmd" \
-                        "Imunify360: $IP_PARAM desbloqueado (whitelist) — ${_imun_out}"
+                        "iptables: $IP_PARAM desbloqueado (regra e persistência removidas)"
                     ;;
                 *)
                     output_action_json "false" "$cmd" \
-                        "Tool desconhecida: '$TOOL_PARAM'. Opções: csf, imunify360"
+                        "Tool desconhecida: '$TOOL_PARAM'. Opções: csf, imunify360, iptables"
                     exit 1
                     ;;
             esac
@@ -1917,7 +2003,7 @@ execute_action() {
 
         *)
             output_action_json "false" "$cmd" \
-                "Ação desconhecida: '$cmd'. Opções: clean-full, clean-frozen, clean-bounces, clean-sender:<addr>, clean-auth:<user>, block-ip:<ip>, block-sender:<email>, retry-queue, check-deliverability[:dominio], check-ip-status --ip=<ip>, unblock-ip --ip=<ip> --tool=csf|imunify360"
+                "Ação desconhecida: '$cmd'. Opções: clean-full, clean-frozen, clean-bounces, clean-sender:<addr>, clean-auth:<user>, block-ip:<ip>, block-sender:<email>, retry-queue, check-deliverability[:dominio], check-ip-status --ip=<ip>, unblock-ip --ip=<ip> --tool=csf|imunify360|iptables, list-blocks, expire-blocks"
             exit 1
             ;;
     esac
@@ -2424,83 +2510,145 @@ clean_by_auth_user() {
     QUEUE_CLEANED=1
 }
 # ============================================================
-# BLOQUEIO DE IP — PERSISTÊNCIA COMPARTILHADA
-# Escreve a regra em /etc/firewall.d/03_custom, checa duplicata e
-# reinicia firewall.service — usada tanto pela ação via API
-# (execute_action → block-ip, sem prompt, bloqueia via iptables
-# imediatamente ANTES de chamar esta função) quanto pelo menu
-# interativo (block_ip_firewall_d, pede ticket, confia só no restart
-# do serviço pra aplicar). Uma correção futura aqui (ex.: adaptação
-# pra CSF) vale pros dois chamadores de uma vez.
+# BLOQUEIO DE IP — CASCATA DE FERRAMENTA NATIVA (Tarefa 2, Sessão 1)
+# AUDITORIA.md item 2 / Tarefa 2: reiniciar firewall.service inteiro
+# por causa de UM ip é gerador de incidente num host de hospedagem em
+# produção, não mitigação. Daqui pra frente: nunca reinicia serviço
+# nenhum. Preferência de ferramenta, na ordem:
+#   1) CSF (csf -td) — já sabe expirar sozinho, sem bookkeeping nosso
+#   2) firewalld (--timeout) — idem, expira sozinho, sem persistência
+#      caseira nem restart
+#   3) iptables cru — só quando não há alternativa. iptables não tem
+#      TTL nativo, então o bloqueio é registrado em
+#      $_IPBLOCK_STATE_FILE (ip / expira_em / motivo) pra
+#      --action=expire-blocks (chamado periodicamente pelo backend)
+#      remover a regra sozinho depois. Também persiste em
+#      /etc/firewall.d/03_custom pra sobreviver a um reboot — mas
+#      nunca reinicia o serviço pra "aplicar": a regra já foi aplicada
+#      ao vivo com -I logo acima, o arquivo é só pra sobreviver reboot.
 #
-# $1 = ip, $2 = linha de comentário pra regra (ticket ou timestamp).
-# Imprime uma mensagem de status em stdout. Retorno: 0 = regra
-# adicionada (com ou sem restart bem-sucedido), 1 = duplicata
-# (nenhuma alteração), 2 = falha ao preparar o diretório/arquivo.
+# $1 = ip, $2 = TTL em segundos (default $IPBLOCK_TTL), $3 = motivo.
+# Imprime "<tool>:<resultado>" em stdout. Retorna 0 em sucesso.
 # ============================================================
-_block_ip_persist() {
-    local ip="$1" comment_line="$2"
+_IPBLOCK_STATE_DIR="/var/log/exim-monitor"
+_IPBLOCK_STATE_FILE="$_IPBLOCK_STATE_DIR/ip_blocks.tsv"
+
+_apply_ip_block() {
+    local ip="$1" ttl="${2:-$IPBLOCK_TTL}" reason="${3:-Bloqueado via Mail IQ}"
+
+    if command -v "$EXIM_CSF_BIN" &>/dev/null; then
+        if $SUDO "$EXIM_CSF_BIN" -td "$ip" "$ttl" -d "$reason" >/dev/null 2>&1; then
+            printf 'csf:temp_block'
+            return 0
+        fi
+    fi
+
+    if command -v firewall-cmd &>/dev/null && $SUDO firewall-cmd --state >/dev/null 2>&1; then
+        if $SUDO firewall-cmd \
+            --add-rich-rule="rule family=\"ipv4\" source address=\"$ip\" drop" \
+            --timeout="$ttl" >/dev/null 2>&1; then
+            printf 'firewalld:temp_block'
+            return 0
+        fi
+    fi
+
+    if $SUDO iptables -C INPUT -s "$ip" -j DROP >/dev/null 2>&1; then
+        _record_iptables_block "$ip" "$ttl" "$reason"
+        printf 'iptables:already_blocked'
+        return 0
+    fi
+    if $SUDO iptables -I INPUT -s "$ip" -j DROP >/dev/null 2>&1; then
+        _record_iptables_block "$ip" "$ttl" "$reason"
+        _persist_iptables_block_file "$ip" "$reason"
+        printf 'iptables:blocked'
+        return 0
+    fi
+
+    printf 'none:sem_permissao'
+    return 1
+}
+
+# Registra (ou renova) o TTL de um bloqueio iptables cru — única fonte
+# de verdade pra --action=list-blocks e --action=expire-blocks.
+_record_iptables_block() {
+    local ip="$1" ttl="$2" reason="$3"
+    local expires_at=$(( $(date +%s) + ttl ))
+    [ -d "$_IPBLOCK_STATE_DIR" ] || {
+        $SUDO mkdir -p "$_IPBLOCK_STATE_DIR" 2>/dev/null
+        $SUDO chmod 750 "$_IPBLOCK_STATE_DIR" 2>/dev/null
+    }
+    if [ -f "$_IPBLOCK_STATE_FILE" ]; then
+        awk -F'\t' -v ip="$ip" 'BEGIN{OFS="\t"} $1 != ip' "$_IPBLOCK_STATE_FILE" \
+            | $SUDO tee "$_IPBLOCK_STATE_FILE.tmp" >/dev/null 2>&1
+        $SUDO mv "$_IPBLOCK_STATE_FILE.tmp" "$_IPBLOCK_STATE_FILE" 2>/dev/null
+    fi
+    printf '%s\t%s\t%s\n' "$ip" "$expires_at" "$reason" \
+        | $SUDO tee -a "$_IPBLOCK_STATE_FILE" >/dev/null 2>&1
+}
+
+# Persistência em disco só pro fallback iptables — CSF/firewalld já
+# persistem/expiram por conta própria. Não reinicia nada: a regra já
+# está ativa via -I logo acima, isto é só pra sobreviver reboot.
+_persist_iptables_block_file() {
+    local ip="$1" comment="$2"
     local fw_file="/etc/firewall.d/03_custom"
     local fw_dir="/etc/firewall.d"
 
-    if [ ! -d "$fw_dir" ] && ! $SUDO mkdir -p "$fw_dir" 2>/dev/null; then
-        printf 'firewall.d: %s não encontrado e não foi possível criar' "$fw_dir"
-        return 2
-    fi
+    [ -d "$fw_dir" ] || $SUDO mkdir -p "$fw_dir" 2>/dev/null
+    [ -d "$fw_dir" ] || return 2
 
     if [ -f "$fw_file" ] && grep -qF "$ip" "$fw_file" 2>/dev/null; then
-        printf 'firewall.d: %s já está presente em %s' "$ip" "$fw_file"
         return 1
     fi
-
     if [ ! -f "$fw_file" ]; then
         printf '#!/bin/sh\n# Regras customizadas — gerado por diag-exim.sh\n' \
             | $SUDO tee "$fw_file" >/dev/null 2>&1
         $SUDO chmod 640 "$fw_file" 2>/dev/null
     fi
-
-    printf '\n%s\n$IPTABLES -I INPUT -s %s -j DROP\n' "$comment_line" "$ip" \
+    printf '\n# %s — %s\n$IPTABLES -I INPUT -s %s -j DROP\n' "$comment" "$DATE" "$ip" \
         | $SUDO tee -a "$fw_file" >/dev/null 2>&1
-
-    if $SUDO systemctl restart firewall.service 2>/dev/null; then
-        printf 'firewall.d: regra adicionada em %s e firewall.service reiniciado' "$fw_file"
-    else
-        printf 'firewall.d: regra adicionada em %s (falha ao reiniciar firewall.service)' "$fw_file"
-    fi
     return 0
 }
 
-# Menu interativo — pede número do ticket antes de gravar (diferença de
-# UX proposital vs a ação via API, que não tem operador humano do outro
-# lado). Mantém a checagem de duplicata "prévia" aqui (com preview das
-# linhas já existentes) só pra decidir se vale incomodar o operador com
-# o prompt de ticket — a checagem "de verdade" é a de dentro de
-# _block_ip_persist, que roda de qualquer forma.
+# Remove um bloqueio iptables cru: regra ao vivo + linha persistida +
+# entrada no state file. Usado por --action=unblock-ip --tool=iptables
+# e por --action=expire-blocks quando o TTL vence.
+_remove_iptables_block() {
+    local ip="$1"
+    $SUDO iptables -D INPUT -s "$ip" -j DROP >/dev/null 2>&1
+    local fw_file="/etc/firewall.d/03_custom"
+    if [ -f "$fw_file" ] && grep -qF "$ip" "$fw_file" 2>/dev/null; then
+        grep -vF "$ip" "$fw_file" | $SUDO tee "$fw_file.tmp" >/dev/null 2>&1
+        $SUDO mv "$fw_file.tmp" "$fw_file" 2>/dev/null
+    fi
+    if [ -f "$_IPBLOCK_STATE_FILE" ]; then
+        awk -F'\t' -v ip="$ip" 'BEGIN{OFS="\t"} $1 != ip' "$_IPBLOCK_STATE_FILE" \
+            | $SUDO tee "$_IPBLOCK_STATE_FILE.tmp" >/dev/null 2>&1
+        $SUDO mv "$_IPBLOCK_STATE_FILE.tmp" "$_IPBLOCK_STATE_FILE" 2>/dev/null
+    fi
+}
+
+# Menu interativo — pede número do ticket antes de bloquear (diferença
+# de UX proposital vs a ação via API, que não tem operador humano do
+# outro lado). Roteia pra _apply_ip_block, a mesma cascata de
+# ferramenta nativa usada pela API — sem isso o menu ficava sem
+# aplicar nada de verdade (dependia só do restart que este commit
+# removeu).
 block_ip_firewall_d() {
     local ip="$1"
-    local fw_file="/etc/firewall.d/03_custom"
-
-    if [ -f "$fw_file" ] && grep -qF "$ip" "$fw_file" 2>/dev/null; then
-        echo -e "  ${YELLOW}⚠ ${ip} já está presente em ${fw_file}:${RESET}"
-        grep -n "$ip" "$fw_file" | while read -r line; do
-            echo -e "  ${DIM}  ${line}${RESET}"
-        done
-        echo -e "  ${DIM}Nenhuma alteração realizada.${RESET}"
-        return 0
-    fi
 
     echo
     echo -e "  ${BOLD}${WHITE}Qual o número do ticket para esta regra de bloqueio?${RESET}"
     read -rp "  Ticket: " ticket_num
     [ -z "$ticket_num" ] && ticket_num="s/n"
 
-    local _msg _status
-    _msg=$(_block_ip_persist "$ip" "#Ticket $ticket_num"); _status=$?
-    if [ "$_status" -eq 0 ]; then
-        echo -e "  ${GREEN}✔ ${_msg}${RESET}"
+    local _result
+    _result=$(_apply_ip_block "$ip" "$IPBLOCK_TTL" "Ticket $ticket_num")
+    if [ "${_result%%:*}" != "none" ]; then
+        echo -e "  ${GREEN}✔ ${ip} bloqueado — ${_result}${RESET}"
     else
-        echo -e "  ${RED}✖ ${_msg}${RESET}"
-        echo -e "  ${DIM}Este servidor pode não usar firewall.d — verifique a configuração.${RESET}"
+        echo -e "  ${RED}✖ Não foi possível bloquear ${ip} (${_result})${RESET}"
+        echo -e "  ${DIM}Sem CSF, firewalld nem permissão de iptables neste servidor.${RESET}"
     fi
 }
 retry_queue() {
