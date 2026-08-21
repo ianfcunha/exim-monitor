@@ -201,6 +201,23 @@ class AlertSettings(Base):
     # Se preenchido, assina o payload em HMAC-SHA256 (header X-EximMonitor-Signature)
     webhook_secret = Column(String(500), default="", nullable=False)
 
+    # ── Notificação de incidentes (Sessão 2, Tarefa 4) ────────────────────
+    # Reaproveita os MESMOS canais acima (telegram/email/webhook) — isto
+    # aqui só liga/desliga e ajusta ruído, não duplica configuração de
+    # canal. "Configuração de threshold por tipo em formulário simples" —
+    # não uma aba "Regras" dedicada.
+    incident_notify_critical = Column(Boolean, default=True, nullable=False)
+    incident_notify_atencao  = Column(Boolean, default=True, nullable=False)
+    # ["auth_abuse", "reputation", ...] — tipos silenciados neste servidor,
+    # nenhuma mensagem (nem abertura) sai para eles.
+    muted_incident_types = Column(JSONB, default=list, nullable=False)
+    # "HH:MM" ou "" (desabilitado) — só se aplica a severidade "atencao";
+    # crítico notifica a qualquer hora. Comparação em UTC (sem timezone
+    # por servidor no schema hoje — limitação conhecida, documentada em
+    # incident_notify.py).
+    night_silence_start = Column(String(5), default="", nullable=False)
+    night_silence_end   = Column(String(5), default="", nullable=False)
+
 
 class AlertHistory(Base):
     """

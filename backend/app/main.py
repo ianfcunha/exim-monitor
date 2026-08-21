@@ -32,7 +32,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Versão atual do schema — atualizar junto com cada nova migration
-_SCHEMA_VERSION = "015"
+_SCHEMA_VERSION = "016"
 
 _DDL_ALEMBIC_VERSION = """
     CREATE TABLE IF NOT EXISTS alembic_version (
@@ -523,6 +523,36 @@ def run_migrations() -> None:
                 {"v": "015"},
             )
             logger.info("Migration 015 aplicada com sucesso")
+            current = {"015"}
+
+        if "015" in current and "016" not in current:
+            logger.info("Aplicando migration 015 → 016 (notificação de incidentes — anti-ruído, Sessão 2 T4)...")
+            conn.execute(text("""
+                ALTER TABLE alert_settings
+                    ADD COLUMN IF NOT EXISTS incident_notify_critical BOOLEAN NOT NULL DEFAULT TRUE
+            """))
+            conn.execute(text("""
+                ALTER TABLE alert_settings
+                    ADD COLUMN IF NOT EXISTS incident_notify_atencao BOOLEAN NOT NULL DEFAULT TRUE
+            """))
+            conn.execute(text("""
+                ALTER TABLE alert_settings
+                    ADD COLUMN IF NOT EXISTS muted_incident_types JSONB NOT NULL DEFAULT '[]'::jsonb
+            """))
+            conn.execute(text("""
+                ALTER TABLE alert_settings
+                    ADD COLUMN IF NOT EXISTS night_silence_start VARCHAR(5) NOT NULL DEFAULT ''
+            """))
+            conn.execute(text("""
+                ALTER TABLE alert_settings
+                    ADD COLUMN IF NOT EXISTS night_silence_end VARCHAR(5) NOT NULL DEFAULT ''
+            """))
+            conn.execute(text("DELETE FROM alembic_version"))
+            conn.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
+                {"v": "016"},
+            )
+            logger.info("Migration 016 aplicada com sucesso")
 
         logger.info("Banco de dados pronto (schema %s)", _SCHEMA_VERSION)
 
