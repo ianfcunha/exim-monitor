@@ -21,18 +21,20 @@ default true — captura o estado antes de ações destrutivas; ver
 before_snapshot no JSON de resposta e em GET /history)
 Viewer não pode executar ações.
 """
+import csv
+import io
 import json
 import time
 import uuid
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from ..auth import require_admin
+from ..auth import get_current_user, require_admin
 from ..crypto import SecretDecryptionError
 from ..database import (
     ActionHistory, ActionPlan, User, build_server_cfg, get_db,
@@ -172,6 +174,29 @@ def _compute_trust_score(result: dict) -> dict:
     return {"score": score, "grade": grade, "breakdown": breakdown}
 
 
+def _require_admin_logged(db: Session, current_user: User, action: str, server_id: Optional[int]) -> None:
+    """
+    T8 (Sessão 1, pós-auditoria): "tentativas negadas" fazem parte da
+    auditoria pedida — um viewer tentando uma ação destrutiva não pode
+    simplesmente sumir num 403 sem deixar rastro. plan_action() e
+    execute_action() usam isto no lugar de Depends(require_admin) puro
+    (que rejeitaria ANTES do corpo da função rodar, sem chance de
+    logar) — a dependency vira Depends(get_current_user) e esta função
+    faz a mesma checagem, só que loga antes de recusar.
+    """
+    if current_user.role == "admin":
+        return
+    record_action_history(
+        db, server_id=server_id, actor=current_user.username, action=action,
+        param=None, success=False,
+        message="Tentativa negada — usuário não é admin.",
+    )
+    raise HTTPException(
+        status_code=403,
+        detail="Apenas administradores podem executar esta ação.",
+    )
+
+
 def _resolve_server_cfg(db: Session, server_id: Optional[int], current_user: User) -> Optional[dict]:
     if server_id is None:
         return None
@@ -201,7 +226,7 @@ def plan_action(
     server_id: Optional[int] = Query(None),
     body: ActionRequest = ActionRequest(),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Fase plan() da Tarefa 3: roda a mesma consulta que apply() usaria
@@ -210,6 +235,8 @@ def plan_action(
     POST /{action} (apply) exige esse plan_id pra qualquer ação fora
     de PLAN_EXEMPT_ACTIONS.
     """
+    _require_admin_logged(db, current_user, action, server_id)
+
     if action not in ALLOWED_ACTIONS:
         raise HTTPException(
             status_code=400,
@@ -288,8 +315,10 @@ def execute_action(
     server_id: Optional[int] = Query(None),
     body: ActionRequest = ActionRequest(),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(get_current_user),
 ):
+    _require_admin_logged(db, current_user, action, server_id)
+
     if action not in ALLOWED_ACTIONS:
         raise HTTPException(
             status_code=400,
@@ -308,33 +337,41 @@ def execute_action(
     # T3: rate limit por servidor-alvo — além do @limiter.limit por IP
     # de origem acima, que sozinho não impede um único actor de bater
     # repetidamente no MESMO servidor de vários IPs/tokens.
-    _check_server_rate_limit(server_id)
+    try:
+        _check_server_rate_limit(server_id)
+    except HTTPException:
+        # T8: rate limit também é uma tentativa negada — auditável.
+        record_action_history(
+            db, server_id=server_id, actor=current_user.username, action=action,
+            param=body.param, success=False,
+            message="Tentativa negada — limite de ações por servidor excedido.",
+        )
+        raise
 
     # T3: plan()/apply() — toda ação fora de PLAN_EXEMPT_ACTIONS exige
     # um plan_id gerado nos últimos PLAN_MAX_AGE_SECONDS, correspondente
     # exatamente a esta ação/servidor/parâmetro, e ainda não consumido.
     if action not in PLAN_EXEMPT_ACTIONS:
-        if not body.plan_id:
-            raise HTTPException(
-                status_code=422,
-                detail=f"A ação '{action}' requer um plan_id — gere um plano primeiro em POST /api/actions/{action}/plan.",
+        def _deny_plan(status_code: int, detail: str):
+            record_action_history(
+                db, server_id=server_id, actor=current_user.username, action=action,
+                param=body.param, success=False, message=f"Tentativa negada — {detail}",
+                plan_id=body.plan_id,
             )
+            raise HTTPException(status_code, detail)
+
+        if not body.plan_id:
+            _deny_plan(422, f"A ação '{action}' requer um plan_id — gere um plano primeiro em POST /api/actions/{action}/plan.")
         plan = db.get(ActionPlan, body.plan_id)
         if not plan:
-            raise HTTPException(404, f"Plano '{body.plan_id}' não encontrado.")
+            _deny_plan(404, f"Plano '{body.plan_id}' não encontrado.")
         if plan.consumed_at is not None:
-            raise HTTPException(409, "Este plano já foi aplicado — gere um novo.")
+            _deny_plan(409, "Este plano já foi aplicado — gere um novo.")
         if plan.action != action or plan.server_id != server_id or (plan.param or None) != (body.param or None):
-            raise HTTPException(
-                409,
-                "O plano não corresponde exatamente a esta ação/servidor/parâmetro — gere um novo plano.",
-            )
+            _deny_plan(409, "O plano não corresponde exatamente a esta ação/servidor/parâmetro — gere um novo plano.")
         age_seconds = (datetime.utcnow() - plan.created_at).total_seconds()
         if age_seconds > PLAN_MAX_AGE_SECONDS:
-            raise HTTPException(
-                409,
-                f"Plano expirado ({int(age_seconds)}s atrás, máximo {PLAN_MAX_AGE_SECONDS}s) — gere um novo.",
-            )
+            _deny_plan(409, f"Plano expirado ({int(age_seconds)}s atrás, máximo {PLAN_MAX_AGE_SECONDS}s) — gere um novo.")
         plan.consumed_at = datetime.utcnow()
         db.commit()
 
@@ -348,7 +385,7 @@ def execute_action(
     except SSHError as exc:
         record_action_history(
             db, server_id=server_id, actor=current_user.username, action=action,
-            param=body.param, success=False, message=str(exc),
+            param=body.param, success=False, message=str(exc), plan_id=body.plan_id,
         )
         raise HTTPException(status_code=503, detail=str(exc))
 
@@ -369,10 +406,23 @@ def execute_action(
             f"{json.dumps(before_snapshot, ensure_ascii=False, indent=2)}"
         )
 
+    # T8 (Sessão 1, pós-auditoria): "como reverter" — dica curta e
+    # estruturada, não só o before_snapshot em texto livre. Ações
+    # quarentenadas (clean-*) apontam pro próprio incidente de restore;
+    # block-ip aponta pro unblock; block-sender ainda não tem reversão
+    # de um clique (Tarefa 2 não cobriu isso), fica documentado como tal.
+    revert_hint = None
+    if result.get("quarantine_incident"):
+        revert_hint = f"restore-quarantine:{result['quarantine_incident']}"
+    elif action == "block-ip" and body.param:
+        revert_hint = f"unblock-ip:{body.param}"
+    elif action == "block-sender" and body.param:
+        revert_hint = "sem reversão de um clique — editar /etc/exim4/spammer_sender manualmente"
+
     record_action_history(
         db, server_id=server_id, actor=current_user.username, action=action,
         param=body.param, success=result.get("success", False),
-        message=history_message,
+        message=history_message, plan_id=body.plan_id, revert_hint=revert_hint,
     )
 
     if not result.get("success", False):
@@ -387,15 +437,27 @@ def execute_action(
 @router.get("/history", summary="Histórico de ações executadas (admin only)")
 def get_action_history(
     server_id: Optional[int] = Query(None),
+    start: Optional[date] = Query(None, description="Data inicial (YYYY-MM-DD), inclusive"),
+    end: Optional[date] = Query(None, description="Data final (YYYY-MM-DD), inclusive"),
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
     """
-    Fonte central de auditoria — actor, ação, parâmetro, servidor, sucesso
-    e timestamp de cada ação já executada, sem precisar SSH de volta no
-    servidor pra ler actions.log em texto.
+    Fonte central de auditoria — quem, quando, o plano usado, o resultado
+    real e como reverter (T8, Sessão 1, pós-auditoria) — sem precisar SSH
+    de volta no servidor pra ler actions.log em texto. Inclui tentativas
+    negadas (permissão insuficiente, rate limit, plano inválido) e falhas
+    de conexão, não só execuções bem-sucedidas.
     """
+    rows = _query_action_history(db, current_user, server_id, start, end).limit(limit).all()
+    return [_history_row_to_dict(r) for r in rows]
+
+
+def _query_action_history(
+    db: Session, current_user: User, server_id: Optional[int],
+    start: Optional[date], end: Optional[date],
+):
     if server_id is not None:
         server = get_server_owned_by(db, server_id, current_user)
         if not server:
@@ -408,19 +470,71 @@ def get_action_history(
         visible_ids = [s.id for s in get_servers_for_user(db, current_user)]
 
     query = db.query(ActionHistory).filter(ActionHistory.server_id.in_(visible_ids))
+    if start is not None:
+        query = query.filter(ActionHistory.executed_at >= datetime.combine(start, datetime.min.time()))
+    if end is not None:
+        query = query.filter(ActionHistory.executed_at < datetime.combine(end, datetime.min.time()) + timedelta(days=1))
+    return query.order_by(ActionHistory.executed_at.desc())
 
-    rows = query.order_by(ActionHistory.executed_at.desc()).limit(limit).all()
 
-    return [
-        {
-            "id":          r.id,
-            "executed_at": to_utc_iso(r.executed_at),
-            "server_id":   r.server_id,
-            "actor":       r.actor,
-            "action":      r.action,
-            "param":       r.param,
-            "success":     r.success,
-            "message":     r.message,
-        }
-        for r in rows
-    ]
+def _history_row_to_dict(r: ActionHistory) -> dict:
+    return {
+        "id":          r.id,
+        "executed_at": to_utc_iso(r.executed_at),
+        "server_id":   r.server_id,
+        "actor":       r.actor,
+        "action":      r.action,
+        "param":       r.param,
+        "success":     r.success,
+        "message":     r.message,
+        "plan_id":     r.plan_id,
+        "revert_hint": r.revert_hint,
+    }
+
+
+@router.get("/history/export", summary="Exporta o histórico de ações (CSV ou JSON, admin only)")
+def export_action_history(
+    server_id: Optional[int] = Query(None),
+    start: Optional[date] = Query(None, description="Data inicial (YYYY-MM-DD), inclusive"),
+    end: Optional[date] = Query(None, description="Data final (YYYY-MM-DD), inclusive"),
+    format: str = Query("csv", pattern="^(csv|json)$"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    T8 (Sessão 1, pós-auditoria): exportação por período e por servidor —
+    sem hash encadeado nesta fase (decisão explícita: nenhum piloto pediu
+    prova de inviolabilidade ainda; volta se um cliente pedir).
+    """
+    rows = _query_action_history(db, current_user, server_id, start, end).limit(10_000).all()
+    entries = [_history_row_to_dict(r) for r in rows]
+
+    period = f"_{start.isoformat()}_{end.isoformat()}" if (start or end) else ""
+    server_part = f"_server{server_id}" if server_id is not None else ""
+    filename_base = f"mailiq-action-history{server_part}{period}"
+
+    if format == "json":
+        body = json.dumps(entries, ensure_ascii=False, indent=2)
+        media_type = "application/json"
+        filename = f"{filename_base}.json"
+    else:
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([
+            "id", "executed_at", "server_id", "actor", "action", "param",
+            "success", "plan_id", "revert_hint", "message",
+        ])
+        for e in entries:
+            writer.writerow([
+                e["id"], e["executed_at"], e["server_id"], e["actor"], e["action"],
+                e["param"], e["success"], e["plan_id"], e["revert_hint"], e["message"],
+            ])
+        body = buf.getvalue()
+        media_type = "text/csv"
+        filename = f"{filename_base}.csv"
+
+    return Response(
+        content=body,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

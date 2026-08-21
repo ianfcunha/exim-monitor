@@ -4,10 +4,10 @@
  * precisar SSH de volta no servidor pra ler actions.log em texto.
  * Apenas admins acessam esta página.
  */
-import { ArrowLeft, CheckCircle, ChevronDown, ChevronRight, History, XCircle } from 'lucide-react'
+import { ArrowLeft, CheckCircle, ChevronDown, ChevronRight, Download, History, XCircle } from 'lucide-react'
 import { Fragment, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { fetchActionHistory } from '../api/client'
+import { exportActionHistory, fetchActionHistory } from '../api/client'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useServer } from '../contexts/ServerContext'
@@ -41,6 +41,7 @@ export default function ActionHistoryPage() {
   const [serverId, setServerId] = useState('all')
   const [limit, setLimit]       = useState(100)
   const [expanded, setExpanded] = useState(() => new Set())
+  const [exporting, setExporting] = useState(false)
 
   const serverName = (id) => servers.find(s => s.id === id)?.name ?? (id ? `#${id}` : '—')
 
@@ -62,6 +63,30 @@ export default function ActionHistoryPage() {
   }
 
   useEffect(() => { load() }, [serverId, limit]) // eslint-disable-line
+
+  // T8 (Sessão 1, pós-auditoria): exportação por período/servidor —
+  // aqui, "por servidor" via o mesmo filtro já selecionado na tela.
+  const handleExport = async (format) => {
+    setExporting(true)
+    try {
+      const res = await exportActionHistory({ format }, serverId === 'all' ? null : Number(serverId))
+      const cd = res.headers?.['content-disposition'] ?? ''
+      const match = cd.match(/filename="?([^"]+)"?/)
+      const filename = match?.[1] ?? `mailiq-action-history.${format}`
+      const url = window.URL.createObjectURL(res.data)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (e) {
+      setError(e?.response?.data?.detail ?? e.message ?? 'Erro ao exportar histórico.')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--surface)' }}>
@@ -111,6 +136,24 @@ export default function ActionHistoryPage() {
                 ))}
               </SelectContent>
             </Select>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button onClick={() => handleExport('csv')} disabled={exporting}
+                  style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', cursor: exporting ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', opacity: exporting ? 0.5 : 1 }}>
+                  <Download size={13} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Exportar CSV</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button onClick={() => handleExport('json')} disabled={exporting}
+                  style={{ padding: '0 10px', height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', cursor: exporting ? 'not-allowed' : 'pointer', fontSize: 11, fontWeight: 600, color: 'var(--muted)', opacity: exporting ? 0.5 : 1 }}>
+                  JSON
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Exportar JSON</TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button onClick={load}
@@ -171,7 +214,7 @@ export default function ActionHistoryPage() {
                 <tbody>
                   {rows.map(r => {
                     const { text: msgText, snapshot } = splitMessage(r.message)
-                    const hasDetails = !!(msgText || snapshot)
+                    const hasDetails = !!(msgText || snapshot || r.revert_hint)
                     const isOpen = expanded.has(r.id)
                     return (
                       <Fragment key={r.id}>
@@ -233,6 +276,16 @@ export default function ActionHistoryPage() {
                                       background: '#fff', border: '1px solid var(--border)', borderRadius: 6,
                                       padding: '8px 10px', overflowX: 'auto', whiteSpace: 'pre',
                                     }}>{snapshot}</pre>
+                                  </div>
+                                )}
+                                {r.revert_hint && (
+                                  <div style={{ marginTop: (msgText || snapshot) ? 8 : 0 }}>
+                                    <p style={{ margin: '0 0 4px', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--dim)' }}>
+                                      Como reverter
+                                    </p>
+                                    <p style={{ margin: 0, fontSize: 12, fontFamily: 'monospace', color: 'var(--accent-fg)' }}>
+                                      {r.revert_hint}
+                                    </p>
                                   </div>
                                 )}
                               </div>

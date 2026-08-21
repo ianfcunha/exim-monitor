@@ -386,8 +386,47 @@ mecanismo de "não consegui ler este log":
 7. **Sem quarentena/restore, sem TTL de bloqueio, sem auditoria à prova de
    adulteração** — Tarefas 2 e 3.
    > **Status: bloqueio de IP com TTL corrigido (Tarefa 2); quarentena/
-   > restore de mensagens corrigido (Tarefa 3); auditoria à prova de
-   > adulteração (hash encadeado) segue pendente — Tarefa 8.**
+   > restore de mensagens corrigido (Tarefa 3); auditoria (quem/quando/
+   > plano/resultado/como reverter + tentativas negadas + exportação)
+   > corrigida na Tarefa 8, ver detalhe abaixo. Hash encadeado
+   > deliberadamente **não** implementado nesta fase — decisão explícita do
+   > cliente: nenhum piloto pediu prova de inviolabilidade ainda, e o custo
+   > era melhor gasto nas tarefas acima. Volta se um cliente pedir.**
+
+## Tarefa 8 — Auditoria de ações, versão simples (Sessão 1, corrigido)
+
+- **Tentativas negadas passam a ficar registradas.** Antes, `Depends(require_admin)`
+  rejeitava com 403 **antes** do corpo do endpoint rodar — um viewer tentando
+  `clean-full` simplesmente recebia um erro e nada ficava gravado. `POST
+  /actions/{action}` e `POST /actions/{action}/plan` trocaram
+  `Depends(require_admin)` por `Depends(get_current_user)` + `_require_admin_logged()`,
+  que grava `success=false, message="Tentativa negada — usuário não é admin."`
+  antes de levantar o mesmo 403 de sempre — comportamento externo idêntico,
+  só que agora com rastro. Rate limit por servidor-alvo (Tarefa 3) e toda
+  rejeição de `plan_id` (ausente/inexistente/consumido/mismatch/expirado)
+  também passaram a gravar uma linha "Tentativa negada — …" antes de
+  recusar. Falhas de conexão (`SSHError`) já eram gravadas antes desta
+  tarefa — continuam.
+- **"O plano" e "como reverter" viraram colunas próprias** —
+  `action_history.plan_id`/`revert_hint` (migration 012), não só texto
+  livre dentro de `message`. `revert_hint` é computado por ação: ações
+  quarentenadas apontam pro próprio incidente
+  (`restore-quarantine:<incidente>`), `block-ip` aponta pro `unblock-ip`
+  correspondente, `block-sender` deixa explícito que não tem reversão de
+  um clique ainda (Tarefa 2 não cobriu isso).
+- **Exportação por período e por servidor**: novo `GET
+  /actions/history/export?format=csv|json&server_id=&start=&end=`, mais um
+  botão de exportar em `ActionHistoryPage.jsx` (CSV/JSON, respeitando o
+  filtro de servidor já selecionado na tela) — o `revert_hint` agora
+  também aparece no detalhe expandido de cada linha do histórico, ao lado
+  do `before_snapshot` que já existia.
+- **Sem hash encadeado** — decisão explícita do cliente para esta fase.
+- Validado ao vivo: plan→apply real grava `plan_id`/`revert_hint`
+  corretos; exportação CSV/JSON testada contra a API real; tentativa
+  negada testada chamando `_require_admin_logged()` com um `User`
+  sintético `role="viewer"` dentro do container (sem conta viewer real
+  disponível neste ambiente) — confirma o 403 **e** a linha gravada.
+  `tests/test_audit_trail_api.sh`.
 8. **"Tudo normal" quando o log não é reconhecido** — Tarefa 4.
 
 ## Tarefa 3 — plan()/apply() e quarentena (Sessão 1, corrigido)

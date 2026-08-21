@@ -93,6 +93,13 @@ export const restoreQuarantine = (incident, serverId = null) =>
 export const fetchActionHistory = (serverId = null, limit = 100) =>
   api.get('/actions/history', { params: { limit, ...(serverId ? { server_id: serverId } : {}) } }).then(r => r.data)
 
+// T8 (Sessão 1, pós-auditoria): exportação por período/servidor.
+export const exportActionHistory = (params, serverId = null) =>
+  api.get('/actions/history/export', {
+    params: { ...params, ...(serverId ? { server_id: serverId } : {}) },
+    responseType: 'blob',
+  })
+
 // ── Historico (com server_id) ──────────────────────────────────────────────
 export const fetchHistory = (hours = 24, mode = 'quick', serverId = null) =>
   api.get('/history', { params: { hours, mode, ...(serverId ? { server_id: serverId } : {}) } }).then(r => r.data)

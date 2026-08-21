@@ -267,6 +267,13 @@ class ActionHistory(Base):
     # destrutivas (amostra de IDs da fila afetada, estado de bloqueio
     # anterior etc.) é anexado aqui pelo router, e não cabia em 500 chars.
     message     = Column(Text, nullable=True)
+    # T8 (Sessão 1, pós-auditoria): "quem, quando, o plano, o resultado
+    # real e como reverter" — plan_id referencia o ActionPlan usado (T3);
+    # revert_hint é o comando/incidente pra desfazer esta ação específica
+    # (ex.: "restore-quarantine:<incidente>"), null quando a ação não
+    # altera nada (check-deliverability) ou não tem reversão de um clique.
+    plan_id     = Column(String(36),  nullable=True)
+    revert_hint = Column(String(300), nullable=True)
 
 
 def record_action_history(
@@ -278,14 +285,20 @@ def record_action_history(
     param: Optional[str],
     success: bool,
     message: Optional[str],
+    plan_id: Optional[str] = None,
+    revert_hint: Optional[str] = None,
 ) -> None:
-    """Persiste uma ação executada. Nunca levanta — falha de auditoria não
-    deve derrubar a resposta da ação em si (o resultado real já foi obtido
-    do servidor remoto antes desta chamada)."""
+    """Persiste uma ação executada — incluindo tentativas negadas (permissão
+    insuficiente, rate limit, plano inválido) e falhas de conexão, não só
+    execuções bem-sucedidas (T8, Sessão 1, pós-auditoria). Nunca levanta —
+    falha de auditoria não deve derrubar a resposta da ação em si (o
+    resultado real já foi obtido do servidor remoto antes desta chamada,
+    quando aplicável)."""
     try:
         db.add(ActionHistory(
             server_id=server_id, actor=actor, action=action,
             param=param, success=success, message=message,
+            plan_id=plan_id, revert_hint=revert_hint,
         ))
         db.commit()
     except Exception:
