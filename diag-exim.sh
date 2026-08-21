@@ -49,6 +49,17 @@
 #        --snapshot=0    desativa o before_snapshot das ações destrutivas
 #                          acima (ligado por padrão — ver Changelog v5.7)
 # ============================================================
+# Changelog v5.14:
+#   - Fix (T5, pós-auditoria): as 5 funções de remoção do menu interativo
+#     (clean_full/clean_frozen/clean_bounces/clean_by_sender/
+#     clean_by_auth_user) duplicavam a lógica de execute_action() sem
+#     $SUDO, sem $EXIM_BIN (literal "exim" — quebra em Debian/Ubuntu) e
+#     sem verificação/quarentena. Agora roteiam por
+#     _menu_removal_result() → _remove_ids_verified(), o mesmo núcleo
+#     verificado+quarentenado do resto do script — só a apresentação
+#     (texto colorido em vez de JSON) é diferente. retry_queue() (menu)
+#     também padronizado para $SUDO "$EXIM_BIN" -qff.
+# ============================================================
 # Changelog v5.13:
 #   - Novo (T4, pós-auditoria): --check ganha 4 novos checks
 #     (cap_remove_messages, cap_manage_firewall, cap_write_blacklist,
@@ -316,7 +327,7 @@
 # exiqgrep etc. costumam morar) sejam encontrados mesmo assim.
 export PATH="$PATH:/usr/sbin:/sbin:/usr/local/sbin"
 
-VERSION="5.13"
+VERSION="5.14"
 LOG_PATH="/var/log/exim4/mainlog"
 # Lista única de candidatos a mainlog — consumida por collect() (quick e
 # completo) e run_check(). Debian/exim4, Debian/exim genérico, cPanel/WHM
@@ -2787,37 +2798,62 @@ maybe_delete_script() {
     fi
 }
 
+# ============================================================
+# MENU INTERATIVO — remoção em massa (Tarefa 5, Sessão 1, pós-auditoria)
+# AUDITORIA.md: estas 5 funções duplicavam a lógica de execute_action()
+# sem $SUDO, sem $EXIM_BIN (literal "exim" — quebra em Debian/Ubuntu,
+# onde o binário é exim4), sem verificação de remoção e sem quarentena.
+# Como este script standalone é a superfície pública do open-core (é
+# ele que circula em fórum/GitHub — não pode conter um laço de
+# `exim -Mrm` sem guarda), agora roteiam pra _remove_ids_verified(), o
+# mesmo núcleo verificado+quarentenado que execute_action() usa — só a
+# apresentação (texto colorido no terminal em vez de JSON) é diferente.
+# ============================================================
+_menu_removal_result() {
+    local label="$1" ids="$2"
+    local _incident="menu-$(date +%s)-$$"
+    local _verify requested removed
+    _verify=$(_remove_ids_verified "$ids" "$QUARANTINE_ROOT/$_incident")
+    requested=$(printf '%s\n' "$_verify" | sed -n '1p')
+    removed=$(printf '%s\n' "$_verify" | sed -n '2p')
+
+    if [ "$requested" -eq "$removed" ]; then
+        echo -e "${GREEN}[OK] ${label} — ${removed} mensagem(ns) removida(s).${RESET}"
+        [ "$removed" -gt 0 ] && echo -e "  ${DIM}Quarentena: ${_incident} (restaurável por ${QUARANTINE_RETENTION_DAYS} dias — bash $0 --action=restore-quarantine:${_incident})${RESET}"
+        QUEUE_CLEANED=1
+    else
+        local _stuck=$((requested - removed))
+        echo -e "${RED}[FALHA] ${label} — permissão negada em ${_stuck} de ${requested} mensagem(ns); ${removed} removida(s), ${_stuck} continuam na fila.${RESET}"
+    fi
+}
+
 clean_full() {
     echo -e "${YELLOW}[AÇÃO] Limpando toda a fila...${RESET}"
-    exim -bp 2>/dev/null | awk '{print $3}' | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 exim -Mrm >/dev/null 2>&1
-    echo -e "${GREEN}[OK] Fila limpa.${RESET}"
-    QUEUE_CLEANED=1
+    local ids; ids=$($SUDO "$EXIM_BIN" -bp 2>/dev/null | awk '{print $3}' | grep -E '^[A-Za-z0-9-]{6,}$')
+    _menu_removal_result "Fila limpa" "$ids"
 }
 clean_frozen() {
     echo -e "${YELLOW}[AÇÃO] Removendo frozen...${RESET}"
-    exiqgrep -z -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 exim -Mrm >/dev/null 2>&1
-    echo -e "${GREEN}[OK] Frozen removidos.${RESET}"
-    QUEUE_CLEANED=1
+    local ids; ids=$($SUDO exiqgrep -z -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$')
+    _menu_removal_result "Frozen removidos" "$ids"
 }
 clean_bounces() {
     echo -e "${YELLOW}[AÇÃO] Removendo bounces (<>)...${RESET}"
-    exiqgrep -f '<>' -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 exim -Mrm >/dev/null 2>&1
-    echo -e "${GREEN}[OK] Bounces removidos.${RESET}"
-    QUEUE_CLEANED=1
+    local ids; ids=$($SUDO exiqgrep -f '<>' -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$')
+    _menu_removal_result "Bounces removidos" "$ids"
 }
 clean_by_sender() {
     echo -e "${YELLOW}[AÇÃO] Removendo fila de $1...${RESET}"
-    exiqgrep -f "$1" -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$' | xargs -r -P4 exim -Mrm >/dev/null 2>&1
-    echo -e "${GREEN}[OK]${RESET}"
-    QUEUE_CLEANED=1
+    local ids; ids=$($SUDO exiqgrep -f "$1" -i 2>/dev/null | grep -E '^[A-Za-z0-9-]{6,}$')
+    _menu_removal_result "Mensagens de '$1' removidas" "$ids"
 }
 clean_by_auth_user() {
     echo -e "${YELLOW}[AÇÃO] Removendo fila do usuário $1...${RESET}"
-    for mid in $(exiqgrep -f "" -i 2>/dev/null | head -200); do
-        exim -Mvh "$mid" 2>/dev/null | grep -q "auth_id.*$1" && exim -Mrm "$mid" >/dev/null 2>&1
+    local ids=""
+    for mid in $($SUDO exiqgrep -f "" -i 2>/dev/null | head -200); do
+        $SUDO "$EXIM_BIN" -Mvh "$mid" 2>/dev/null | grep -q "auth_id.*$1" && ids="${ids}${mid}"$'\n'
     done
-    echo -e "${GREEN}[OK]${RESET}"
-    QUEUE_CLEANED=1
+    _menu_removal_result "Mensagens do usuário '$1' removidas" "$ids"
 }
 # ============================================================
 # BLOQUEIO DE IP — CASCATA DE FERRAMENTA NATIVA (Tarefa 2, Sessão 1)
@@ -2963,7 +2999,7 @@ block_ip_firewall_d() {
 }
 retry_queue() {
     echo -e "${YELLOW}[AÇÃO] Forçando reprocessamento...${RESET}"
-    exim -qff 2>/dev/null
+    $SUDO "$EXIM_BIN" -qff 2>/dev/null
     echo -e "${GREEN}[OK]${RESET}"
 }
 # ============================================================

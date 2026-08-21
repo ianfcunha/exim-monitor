@@ -139,10 +139,14 @@ via outro caminho, ou reativar mensagens frozen por um bom motivo.
 > solicitado; caso contrário `success=false` com "permissão negada em X de Y"
 > e `leftover_ids`. Coberto por `tests/test_action_verification.sh` (binários
 > `exim4`/`exiqgrep` falsos, sem depender de Exim real) e validado ao vivo
-> injetando mensagens reais neste host e confirmando a fila esvaziada. A
-> segunda cópia da lógica no menu interativo (`clean_full()` etc., mesmo bug,
-> mais o literal `exim` que quebra em Debian) ainda está pendente — ver
-> Tarefa 5.
+> injetando mensagens reais neste host e confirmando a fila esvaziada.
+>
+> **Atualização (Tarefa 5)**: a segunda cópia no menu interativo
+> (`clean_full()` etc.) foi corrigida — agora chama `_remove_ids_verified()`
+> diretamente (mesmo núcleo, texto colorido em vez de JSON), com
+> `$SUDO`/`$EXIM_BIN` padronizados e quarentena antes de remover. Coberto por
+> `tests/test_menu_dedup.sh`, que inclui uma guarda estática (grep) contra o
+> literal `exim` sem `$EXIM_BIN` voltar a aparecer.
 
 **Achado crítico de confiabilidade** (relevante para a Tarefa 2, "ações seguras"):
 em `clean-full/frozen/bounces/sender/auth`, o `xargs ... $EXIM_BIN -Mrm` roda
