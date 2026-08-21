@@ -1579,6 +1579,74 @@ _json_id_array() {
 }
 
 # ============================================================
+# VERIFICAÇÃO DE REMOÇÃO — Tarefa 1 (Sessão 1, pós-auditoria)
+# AUDITORIA.md item 3: -Mrm rodava sem $SUDO em todo lugar e o "sucesso"
+# reportado era a contagem calculada ANTES da tentativa de remover — o
+# painel podia dizer "N removidas" com as N mensagens intactas na fila.
+# Daqui pra frente toda remoção passa por _remove_ids_verified(): tenta
+# remover id a id ($SUDO + $EXIM_BIN sempre, -n1 pra não mascarar uma
+# falha isolada dentro de um lote), depois RECONSULTA a fila — a fonte
+# de verdade é o que ainda está lá, não o exit code isolado do -Mrm
+# (fica só como sinal antecipado, não é a autoridade final).
+# ============================================================
+_current_queue_ids() {
+    $SUDO "$EXIM_BIN" -bp 2>/dev/null | awk '{print $3}' | grep -E '^[A-Za-z0-9-]{6,}$'
+}
+
+# Recebe IDs-alvo (um por linha) via $1. Devolve 3 campos separados por
+# newline: contagem solicitada, contagem efetivamente confirmada como
+# removida, e a lista de IDs que sobraram (não puderam ser removidos).
+_remove_ids_verified() {
+    local ids="$1"
+    local requested_count
+    requested_count=$(printf '%s\n' "$ids" | grep -c . 2>/dev/null); requested_count=${requested_count:-0}
+
+    if [ "$requested_count" -eq 0 ]; then
+        printf '0\n0\n'
+        return 0
+    fi
+
+    printf '%s\n' "$ids" | grep -v '^$' \
+        | xargs -r -P4 -n1 $SUDO "$EXIM_BIN" -Mrm >/dev/null 2>&1
+
+    local remaining_now leftover="" leftover_count=0
+    remaining_now=$(_current_queue_ids)
+    while IFS= read -r id; do
+        [ -z "$id" ] && continue
+        if printf '%s\n' "$remaining_now" | grep -qxF "$id"; then
+            leftover="${leftover}${id}"$'\n'
+            leftover_count=$((leftover_count + 1))
+        fi
+    done <<< "$ids"
+
+    printf '%s\n%s\n%s' "$requested_count" "$((requested_count - leftover_count))" "$leftover"
+}
+
+# Monta a resposta JSON de uma ação de remoção em massa a partir do
+# resultado de _remove_ids_verified — só reporta success=true se TODAS
+# as mensagens solicitadas de fato sumiram da fila (delta real, nunca a
+# contagem otimista de antes da tentativa).
+_report_removal_result() {
+    local cmd="$1" label="$2" ids="$3" before_extra="$4"
+    local _verify requested removed leftover
+    _verify=$(_remove_ids_verified "$ids")
+    requested=$(printf '%s\n' "$_verify" | sed -n '1p')
+    removed=$(printf '%s\n' "$_verify" | sed -n '2p')
+    leftover=$(printf '%s\n' "$_verify" | tail -n +3 | grep -v '^$')
+
+    if [ "$requested" -eq "$removed" ]; then
+        output_action_json "true" "$cmd" "$label — $removed mensagens removidas" "$before_extra"
+    else
+        local _stuck=$((requested - removed))
+        local _extra="\"leftover_ids\": [$(_json_id_array "$leftover")]"
+        [ -n "$before_extra" ] && _extra="${before_extra}, ${_extra}"
+        output_action_json "false" "$cmd" \
+            "Permissão negada em ${_stuck} de ${requested} mensagens — $removed removidas, ${_stuck} continuam na fila" \
+            "$_extra"
+    fi
+}
+
+# ============================================================
 # EXECUTOR DE AÇÕES — modo --action=
 # Despacha para a função de limpeza/bloqueio correspondente
 # e emite JSON de resultado. Não requer análise prévia.
@@ -1595,25 +1663,21 @@ execute_action() {
     case "$cmd" in
 
         clean-full)
-            local count; count=$("$EXIM_BIN" -bpc 2>/dev/null || echo 0)
-            local ids; ids=$(timeout "$GLOBAL_TIMEOUT" "$EXIM_BIN" -bp 2>/dev/null \
+            local ids; ids=$(timeout "$GLOBAL_TIMEOUT" $SUDO "$EXIM_BIN" -bp 2>/dev/null \
                 | awk '{print $3}' | grep -E '^[A-Za-z0-9-]{6,}$')
+            local count; count=$(printf '%s\n' "$ids" | grep -c . 2>/dev/null); count=${count:-0}
             local _before=""
-            [ "$SNAPSHOT_MODE" = "1" ] && _before="\"before_snapshot\": {\"queue_total\": ${count:-0}, \"sample_ids\": [$(_json_id_array "$(echo "$ids" | head -"$SNAPSHOT_SAMPLE_LIMIT")")]}"
-            echo "$ids" | xargs -r -P4 "$EXIM_BIN" -Mrm >/dev/null 2>&1
-            output_action_json "true" "$cmd" \
-                "Fila limpa — $count mensagens removidas" "$_before"
+            [ "$SNAPSHOT_MODE" = "1" ] && _before="\"before_snapshot\": {\"queue_total\": ${count}, \"sample_ids\": [$(_json_id_array "$(echo "$ids" | head -"$SNAPSHOT_SAMPLE_LIMIT")")]}"
+            _report_removal_result "$cmd" "Fila limpa" "$ids" "$_before"
             ;;
 
         clean-frozen)
-            local ids; ids=$(exiqgrep -z -i 2>/dev/null \
+            local ids; ids=$($SUDO exiqgrep -z -i 2>/dev/null \
                 | grep -E '^[A-Za-z0-9-]{6,}$')
             local count; count=$(echo "$ids" | grep -c . 2>/dev/null); count=${count:-0}
             local _before=""
             [ "$SNAPSHOT_MODE" = "1" ] && _before="\"before_snapshot\": {\"frozen_count\": ${count}, \"sample_ids\": [$(_json_id_array "$(echo "$ids" | head -"$SNAPSHOT_SAMPLE_LIMIT")")]}"
-            echo "$ids" | xargs -r -P4 "$EXIM_BIN" -Mrm >/dev/null 2>&1
-            output_action_json "true" "$cmd" \
-                "$count mensagens frozen removidas" "$_before"
+            _report_removal_result "$cmd" "Mensagens frozen removidas" "$ids" "$_before"
             ;;
 
         clean-bounces)
@@ -1622,9 +1686,7 @@ execute_action() {
             local count; count=$(echo "$ids" | grep -c . 2>/dev/null); count=${count:-0}
             local _before=""
             [ "$SNAPSHOT_MODE" = "1" ] && _before="\"before_snapshot\": {\"bounce_count\": ${count}, \"sample_ids\": [$(_json_id_array "$(echo "$ids" | head -"$SNAPSHOT_SAMPLE_LIMIT")")]}"
-            echo "$ids" | xargs -r -P4 "$EXIM_BIN" -Mrm >/dev/null 2>&1
-            output_action_json "true" "$cmd" \
-                "$count bounces (<>) removidos" "$_before"
+            _report_removal_result "$cmd" "Bounces (<>) removidos" "$ids" "$_before"
             ;;
 
         clean-sender)
@@ -1643,9 +1705,7 @@ execute_action() {
             local count; count=$(echo "$ids" | grep -c . 2>/dev/null); count=${count:-0}
             local _before=""
             [ "$SNAPSHOT_MODE" = "1" ] && _before="\"before_snapshot\": {\"count\": ${count}, \"sender\": \"${param}\", \"sample_ids\": [$(_json_id_array "$(echo "$ids" | head -"$SNAPSHOT_SAMPLE_LIMIT")")]}"
-            echo "$ids" | xargs -r -P4 "$EXIM_BIN" -Mrm >/dev/null 2>&1
-            output_action_json "true" "$cmd" \
-                "$count mensagens de '$param' removidas" "$_before"
+            _report_removal_result "$cmd" "Mensagens de '$param' removidas" "$ids" "$_before"
             ;;
 
         clean-auth)
@@ -1659,16 +1719,15 @@ execute_action() {
                     "Parâmetro inválido: '$param' contém caracteres não permitidos"
                 exit 1
             fi
-            local removed=0 _match_ids=""
-            for mid in $(exiqgrep -f "" -i 2>/dev/null | head -500); do
-                "$EXIM_BIN" -Mvh "$mid" 2>/dev/null | grep -q "auth_id.*${param}" \
-                    && { _match_ids="${_match_ids}${mid}"$'\n'; removed=$((removed+1)); }
+            local _match_ids=""
+            for mid in $($SUDO exiqgrep -f "" -i 2>/dev/null | head -500); do
+                $SUDO "$EXIM_BIN" -Mvh "$mid" 2>/dev/null | grep -q "auth_id.*${param}" \
+                    && _match_ids="${_match_ids}${mid}"$'\n'
             done
+            local count; count=$(printf '%s\n' "$_match_ids" | grep -c . 2>/dev/null); count=${count:-0}
             local _before=""
-            [ "$SNAPSHOT_MODE" = "1" ] && _before="\"before_snapshot\": {\"count\": ${removed}, \"auth_user\": \"${param}\", \"sample_ids\": [$(_json_id_array "$(printf '%s' "$_match_ids" | head -"$SNAPSHOT_SAMPLE_LIMIT")")]}"
-            printf '%s' "$_match_ids" | xargs -r "$EXIM_BIN" -Mrm >/dev/null 2>&1
-            output_action_json "true" "$cmd" \
-                "$removed mensagens do usuário '$param' removidas" "$_before"
+            [ "$SNAPSHOT_MODE" = "1" ] && _before="\"before_snapshot\": {\"count\": ${count}, \"auth_user\": \"${param}\", \"sample_ids\": [$(_json_id_array "$(printf '%s' "$_match_ids" | head -"$SNAPSHOT_SAMPLE_LIMIT")")]}"
+            _report_removal_result "$cmd" "Mensagens do usuário '$param' removidas" "$_match_ids" "$_before"
             ;;
 
         block-ip)
@@ -1832,7 +1891,7 @@ execute_action() {
             ;;
 
         retry-queue)
-            "$EXIM_BIN" -qff 2>/dev/null
+            $SUDO "$EXIM_BIN" -qff 2>/dev/null
             output_action_json "true" "$cmd" \
                 "Reprocessamento forçado da fila ($EXIM_BIN -qff) concluído"
             ;;
