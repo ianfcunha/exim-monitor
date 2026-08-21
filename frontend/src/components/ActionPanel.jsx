@@ -26,13 +26,34 @@ const SNAPSHOT_ACTIONS = new Set([
 ])
 
 const ACTIONS = [
-  { id: 'retry-queue',   label: 'Reprocessar fila',   Icon: RotateCcw,      color: 'sky',    confirm: true, param: null },
-  { id: 'clean-frozen',  label: 'Remover frozen',      Icon: Snowflake,      color: 'amber',  confirm: true, param: null },
-  { id: 'clean-bounces', label: 'Limpar bounces',      Icon: CornerDownLeft, color: 'orange', confirm: true, param: null },
-  { id: 'clean-sender',  label: 'Limpar remetente',    Icon: Search,         color: 'purple', confirm: true, param: 'email', placeholder: 'remetente@dominio.com' },
-  { id: 'block-ip',      label: 'Bloquear IP',         Icon: Shield,         color: 'rose',   confirm: true, param: 'ip',    placeholder: '192.168.0.1' },
-  { id: 'block-sender',  label: 'Bloquear remetente',  Icon: Ban,            color: 'red',    confirm: true, param: 'email', placeholder: 'spam@dominio.com' },
+  { id: 'retry-queue',   label: 'Reprocessar fila',   Icon: RotateCcw,      color: 'sky',    confirm: true, param: null, requiredCaps: [] },
+  { id: 'clean-frozen',  label: 'Remover frozen',      Icon: Snowflake,      color: 'amber',  confirm: true, param: null, requiredCaps: ['cap_remove_messages', 'cap_quarantine'] },
+  { id: 'clean-bounces', label: 'Limpar bounces',      Icon: CornerDownLeft, color: 'orange', confirm: true, param: null, requiredCaps: ['cap_remove_messages', 'cap_quarantine'] },
+  { id: 'clean-sender',  label: 'Limpar remetente',    Icon: Search,         color: 'purple', confirm: true, param: 'email', placeholder: 'remetente@dominio.com', requiredCaps: ['cap_remove_messages', 'cap_quarantine'] },
+  { id: 'block-ip',      label: 'Bloquear IP',         Icon: Shield,         color: 'rose',   confirm: true, param: 'ip',    placeholder: '192.168.0.1', requiredCaps: ['cap_manage_firewall'] },
+  { id: 'block-sender',  label: 'Bloquear remetente',  Icon: Ban,            color: 'red',    confirm: true, param: 'email', placeholder: 'spam@dominio.com', requiredCaps: ['cap_write_blacklist'] },
 ]
+
+// T4 (Sessão 1, pós-auditoria): "permissão faltando vira informação
+// visível, nunca falha silenciosa" — em vez de deixar o usuário clicar
+// e só descobrir a falta de permissão quando a ação (já verificada de
+// verdade pela Tarefa 1) volta com erro, o botão nasce desabilitado com
+// o motivo explicado. `capabilities` vem de Server.capabilities
+// (persistido no último POST /servers/{id}/test) — null/undefined
+// (servidor nunca testado) não desabilita nada, deixa a ação tentar.
+const CAP_LABELS = {
+  cap_remove_messages: 'remover mensagens da fila',
+  cap_manage_firewall: 'bloquear IP',
+  cap_write_blacklist: 'bloquear remetente',
+  cap_quarantine:      'quarentenar mensagens antes de remover',
+}
+
+function missingCapReason(action, capabilities) {
+  if (!capabilities || action.requiredCaps.length === 0) return null
+  const missing = action.requiredCaps.filter(c => capabilities[c] === false)
+  if (missing.length === 0) return null
+  return `Este servidor está em modo somente leitura para esta ação — falta permissão para ${missing.map(c => CAP_LABELS[c] ?? c).join(' e ')}.`
+}
 
 // Tons por categoria de ação — bg/border misturados com var(--card)/var(--border)
 // (não um hex sólido) e text misturado com var(--text), pra se adaptar ao tema
@@ -172,11 +193,15 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
           const c = COLOR_MAP[action.color]
           const isRunning     = pending === action.id
           const isRecommended = recommendedActions.includes(action.id)
+          const capReason      = missingCapReason(action, activeServer?.capabilities)
+          const isCapBlocked   = !!capReason
+          const isDisabled     = !!pending || isCapBlocked
           return (
             <div key={action.id} style={{ position: 'relative' }}>
               <button
-                disabled={!!pending}
-                onClick={() => requestAction(action)}
+                disabled={isDisabled}
+                title={capReason || undefined}
+                onClick={() => !isCapBlocked && requestAction(action)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6,
                   borderRadius: 8,
@@ -185,18 +210,28 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
                   fontSize: 11, fontWeight: isRecommended ? 600 : 500,
                   color: isRecommended ? 'var(--accent-fg)' : c.text,
                   background: isRecommended ? 'var(--accent-bg)' : c.bg,
-                  cursor: pending ? 'not-allowed' : 'pointer',
+                  cursor: isDisabled ? 'not-allowed' : 'pointer',
                   transition: 'background 0.15s, opacity 0.15s',
-                  opacity: !!pending && !isRunning ? 0.45 : 1,
+                  opacity: isDisabled && !isRunning ? 0.45 : 1,
                   boxShadow: isRecommended ? '0 0 0 3px rgba(14,165,233,0.12)' : 'none',
                 }}
-                onMouseEnter={e => { if (!pending) e.currentTarget.style.background = isRecommended ? 'color-mix(in srgb, var(--sky) 22%, var(--card))' : c.hoverBg }}
+                onMouseEnter={e => { if (!isDisabled) e.currentTarget.style.background = isRecommended ? 'color-mix(in srgb, var(--sky) 22%, var(--card))' : c.hoverBg }}
                 onMouseLeave={e => { e.currentTarget.style.background = isRecommended ? 'var(--accent-bg)' : c.bg }}
               >
                 <Icon size={12} style={{ animation: isRunning ? 'spin 1s linear infinite' : undefined }} />
                 {isRunning ? 'Executando…' : action.label}
               </button>
-              {isRecommended && !isRunning && (
+              {isCapBlocked && !isRunning && (
+                <span style={{
+                  position: 'absolute', top: -7, right: -4,
+                  fontSize: 8, fontWeight: 700, letterSpacing: '0.05em',
+                  padding: '1px 5px', borderRadius: 999,
+                  background: 'var(--dim)', color: '#fff', pointerEvents: 'none',
+                }}>
+                  Só leitura
+                </span>
+              )}
+              {isRecommended && !isRunning && !isCapBlocked && (
                 <span style={{
                   position: 'absolute', top: -7, right: -4,
                   fontSize: 8, fontWeight: 700, letterSpacing: '0.05em',

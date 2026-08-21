@@ -232,6 +232,18 @@ escrita em `/etc/firewall.d/03_custom` + `systemctl restart firewall.service`,
 `exim -Mvh`, `exiqgrep`. Leitura do mainlog deveria ser resolvida com o usuário
 `mailiq` no grupo `adm` (ou equivalente), não via sudoers.
 
+> **Status: allowlist publicada** (Sessão 1, Tarefa 4) — `docs/seguranca.md`
+> tem o `/etc/sudoers.d/mailiq` de referência completo, cobrindo cada comando
+> desta lista (o `systemctl restart` já não existe mais, removido na Tarefa 2).
+> `diag-exim.sh --check` ganhou 4 checks de sondagem de capacidade
+> (`cap_remove_messages`, `cap_manage_firewall`, `cap_write_blacklist`,
+> `cap_quarantine`) que leem `sudo -n -l` e reportam o que o usuário
+> conectado consegue fazer de verdade — persistido em `Server.capabilities`
+> a cada teste de conexão, usado pelo `ActionPanel.jsx` pra desabilitar
+> botão com o motivo visível em vez de deixar a ação falhar calada. A
+> criação de fato do usuário `mailiq` + escrita do sudoers num servidor
+> real fica pro `mailiq-bootstrap.sh` — Tarefa 7, ainda pendente.
+
 ## 6. O que acontece hoje se o parsing do log falhar ou retornar zero linhas?
 
 **Nada visível — o painel mostra "tudo normal".** Não existe hoje nenhum
@@ -267,10 +279,21 @@ mecanismo de "não consegui ler este log":
 
 1. **Só root ou usuário com sudo irrestrito** — não existe usuário dedicado de
    menor privilégio nem allowlist de sudo (Tarefa 1).
+   > **Status: allowlist definida e sondagem de capacidade implementadas**
+   > (Sessão 1, Tarefa 4) — ver `docs/seguranca.md`. Criar o usuário
+   > `mailiq` de fato num servidor real ainda depende do
+   > `mailiq-bootstrap.sh` da Tarefa 7 (pendente).
 2. **Senha de root direto no painel** — `ServerCreate.ssh_user` default `"root"`,
    `ssh_auth_type` default `"password"` (`routers/servers.py:34-35`); `install.sh`
    pergunta o usuário SSH mas aceita `root` como default sem exigir confirmação
    extra (`install.sh:132-133`).
+   > **Status: corrigido no painel** (Sessão 1, Tarefa 4) — `ServerCreate.ssh_user`
+   > não tem mais default (campo obrigatório), `ssh_auth_type` default virou
+   > `"key"`, e `ssh_user="root"` exige `confirm_root=true` explícito (recusado
+   > com 422 sem isso) tanto na criação quanto na edição — mais um aviso
+   > persistente ("root") visível no card do servidor enquanto ele estiver
+   > assim configurado. `install.sh` continua com o mesmo comportamento — é a
+   > Tarefa 7 que substitui o caminho de instalação remota dele.
 3. **`install.sh` não deploya de fato em host remoto de terceiro** — a
    automação de "gerar chave e copiar para `authorized_keys`" só roda quando
    `SSH_HOST` é o próprio host (mesmo servidor / bridge Docker); para um host

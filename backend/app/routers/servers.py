@@ -27,14 +27,19 @@ MASK = "••••••••"
 
 # ── Schemas ────────────────────────────────────────────────────────────────
 
+# T4 (Sessão 1, pós-auditoria): "root" deixa de ser o default — sem
+# default nenhum aqui, o cliente do form tem que escolher. Root ainda é
+# aceito (alguns pilotos vão chegar sem o bootstrap rodado), mas exige
+# confirm_root=true explícito — ver create_server()/update_server().
 class ServerCreate(BaseModel):
     name:          str = Field(..., min_length=1, max_length=100)
     host:          str = Field(..., min_length=1, max_length=255)
     port:          int = Field(22, ge=1, le=65535)
-    ssh_user:      str = Field("root", max_length=100)
-    ssh_auth_type: str = Field("password", pattern="^(password|key)$")
+    ssh_user:      str = Field(..., min_length=1, max_length=100)
+    ssh_auth_type: str = Field("key", pattern="^(password|key)$")
     ssh_secret:    str = Field("", description="Senha SSH ou conteúdo da chave privada — nunca preenchido automaticamente")
     script_path:   str = Field("/root/diag-exim.sh", max_length=500)
+    confirm_root:  bool = Field(False, description="Obrigatório true se ssh_user='root' — ver docs/seguranca.md")
 
 
 class ServerUpdate(BaseModel):
@@ -49,6 +54,7 @@ class ServerUpdate(BaseModel):
     reset_host_key: Optional[bool] = Field(
         None, description="true = esquece o fingerprint pinado; próxima conexão fixa um novo"
     )
+    confirm_root:  bool = Field(False, description="Obrigatório true se ssh_user for alterado para 'root'")
 
 
 def _to_response(s: Server, include_secret: bool = False) -> dict:
@@ -65,6 +71,12 @@ def _to_response(s: Server, include_secret: bool = False) -> dict:
         "is_enabled":       s.is_enabled,
         "ssh_status":       s.ssh_status,
         "ssh_error_msg":    s.ssh_error_msg,
+        # T4: aviso persistente no painel enquanto o servidor estiver
+        # configurado como root — não é um erro (alguns pilotos vão
+        # começar assim), mas precisa ficar visível o tempo todo, não só
+        # no momento do cadastro.
+        "is_root":          s.ssh_user == "root",
+        "capabilities":     s.capabilities,
         "last_connected_at": to_utc_iso(s.last_connected_at),
         "created_at":       to_utc_iso(s.created_at),
     }
@@ -101,6 +113,18 @@ def create_server(
     current_user: User = Depends(require_admin),
 ):
     from ..ssh import SSHError, deploy_script
+
+    # T4: root exige escolha explícita — nunca é o default nem um
+    # acidente de deixar o campo em branco.
+    if payload.ssh_user == "root" and not payload.confirm_root:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Conectar como root exige confirmação explícita "
+                "(confirm_root=true). Recomendado: rode mailiq-bootstrap.sh "
+                "no servidor e use o usuário mailiq — veja docs/seguranca.md."
+            ),
+        )
 
     encrypted = encrypt_secret(payload.ssh_secret) if payload.ssh_secret else ""
     server = Server(
@@ -159,6 +183,16 @@ def update_server(
     server = get_server_owned_by(db, server_id, current_user)
     if not server:
         raise HTTPException(404, "Servidor não encontrado.")
+
+    if payload.ssh_user == "root" and not payload.confirm_root:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Alterar para root exige confirmação explícita "
+                "(confirm_root=true). Recomendado: rode mailiq-bootstrap.sh "
+                "no servidor e use o usuário mailiq — veja docs/seguranca.md."
+            ),
+        )
 
     if payload.name          is not None: server.name          = payload.name
     if payload.host          is not None: server.host          = payload.host
@@ -235,6 +269,16 @@ def test_server(
         try:
             check_data = run_check(cfg)
             checks = check_data.get("checks")
+            # T4 (Sessão 1, pós-auditoria): persiste a sondagem de
+            # capacidade (checks cap_*) no servidor — o painel usa isso
+            # pra desabilitar botão de ação com o motivo visível, sem
+            # esperar a ação falhar de verdade pra descobrir que faltava
+            # permissão ("falha silenciosa" que a Tarefa 4 pediu pra
+            # eliminar).
+            if checks:
+                server.capabilities = {
+                    c["check"]: c["ok"] for c in checks if c.get("check", "").startswith("cap_")
+                }
         except SSHError as exc:
             check_error = str(exc)[:500]
 
@@ -247,6 +291,7 @@ def test_server(
             "host_key_first_seen": first_seen,
             "checks": checks,
             "check_error": check_error,
+            "capabilities": server.capabilities,
         }
     except HostKeyMismatchError as exc:
         server.ssh_status    = "error"

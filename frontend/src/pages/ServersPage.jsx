@@ -27,12 +27,21 @@ const CHECK_LABELS = {
   open_relay:       'Relay aberto',
   starttls:         'STARTTLS',
   exim_version_cve: 'Versão do Exim',
+  // T4 (Sessão 1, pós-auditoria): sondagem de capacidade — ok:false aqui
+  // não é erro de conexão, é "este servidor está em modo só-leitura
+  // pra essa ação específica" (ver AlertTriangle/INFORMATIONAL_CHECKS
+  // abaixo e ActionPanel.jsx, que usa isso pra desabilitar botão).
+  cap_remove_messages: 'Remover mensagens da fila',
+  cap_manage_firewall: 'Bloquear IP',
+  cap_write_blacklist: 'Bloquear remetente',
+  cap_quarantine:      'Quarentena antes de remover',
 }
 
 // Checks informativos (não indicam falha de conexão/pré-requisito, só dado
 // de contexto) — ícone neutro em vez de X vermelho quando ok:false.
 const INFORMATIONAL_CHECKS = new Set([
   'cpanel', 'csf', 'imunify360', 'open_relay', 'starttls', 'exim_version_cve',
+  'cap_remove_messages', 'cap_manage_firewall', 'cap_write_blacklist', 'cap_quarantine',
 ])
 
 const inputStyle = {
@@ -42,9 +51,13 @@ const inputStyle = {
   boxSizing: 'border-box', transition: 'border-color 0.15s',
 }
 
+// T4 (Sessão 1, pós-auditoria): sem default "root"/"password" — o
+// cliente do form escolhe. "key" como default de autenticação (era
+// "password") e confirm_root=false (o backend recusa ssh_user="root"
+// sem esse flag true — ver o checkbox de aviso persistente abaixo).
 const EMPTY_FORM = {
-  name: '', host: '', port: 22, ssh_user: 'root',
-  ssh_auth_type: 'password', ssh_secret: '', script_path: '/root/diag-exim.sh',
+  name: '', host: '', port: 22, ssh_user: '',
+  ssh_auth_type: 'key', ssh_secret: '', script_path: '/root/diag-exim.sh', confirm_root: false,
 }
 
 /* ── Sub-componentes ── */
@@ -105,10 +118,31 @@ function ServerForm({ initial, onSave, onCancel, saving }) {
         <Field label="Porta SSH">
           <Input value={form.port} onChange={v => set('port')(Number(v))} type="number" placeholder="22" />
         </Field>
-        <Field label="Usuário SSH">
-          <Input value={form.ssh_user} onChange={set('ssh_user')} placeholder="root" />
+        <Field label="Usuário SSH *" hint="Recomendado: mailiq, criado por mailiq-bootstrap.sh (docs/seguranca.md) — não requer root.">
+          <Input value={form.ssh_user} onChange={set('ssh_user')} placeholder="mailiq" required />
         </Field>
       </div>
+
+      {form.ssh_user === 'root' && (
+        <div style={{
+          marginBottom: 14, padding: '10px 12px', borderRadius: 8,
+          background: 'var(--danger-bg)', border: '1px solid var(--danger-border)',
+        }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 11.5, color: 'var(--danger)', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={!!form.confirm_root}
+              onChange={e => set('confirm_root')(e.target.checked)}
+              style={{ marginTop: 2, width: 13, height: 13, accentColor: 'var(--danger)', flexShrink: 0 }}
+            />
+            <span>
+              Confirmo que quero conectar como <strong>root</strong> — entendo que isso dá ao Mail IQ
+              acesso irrestrito ao servidor. O recomendado é criar o usuário dedicado <code>mailiq</code>
+              com <code>mailiq-bootstrap.sh</code> (veja <code>docs/seguranca.md</code>).
+            </span>
+          </label>
+        </div>
+      )}
 
       <Field label="Tipo de autenticação">
         <Select value={form.ssh_auth_type} onValueChange={set('ssh_auth_type')}>
@@ -162,11 +196,15 @@ function ServerForm({ initial, onSave, onCancel, saving }) {
           }}>
           Cancelar
         </button>
-        <button type="submit" disabled={saving}
+        <button
+          type="submit"
+          disabled={saving || (form.ssh_user === 'root' && !form.confirm_root)}
           style={{
             padding: '8px 20px', borderRadius: 8, fontSize: 12, fontWeight: 700,
-            border: 'none', background: saving ? 'color-mix(in srgb, var(--sky) 55%, var(--card))' : 'var(--sky)',
-            color: '#fff', cursor: saving ? 'not-allowed' : 'pointer',
+            border: 'none',
+            background: (saving || (form.ssh_user === 'root' && !form.confirm_root))
+              ? 'color-mix(in srgb, var(--sky) 55%, var(--card))' : 'var(--sky)',
+            color: '#fff', cursor: (saving || (form.ssh_user === 'root' && !form.confirm_root)) ? 'not-allowed' : 'pointer',
           }}>
           {saving ? 'Salvando…' : 'Salvar servidor'}
         </button>
@@ -363,6 +401,16 @@ export default function ServersPage() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                     <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{s.name}</span>
                     <ServerStatusBadge status={s.ssh_status} />
+                    {s.is_root && (
+                      <span title="Conectado como root — acesso irrestrito ao servidor. Recomendado: usuário mailiq (docs/seguranca.md)."
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 4,
+                          fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 999,
+                          background: 'var(--danger-bg)', color: 'var(--danger)', border: '1px solid var(--danger-border)',
+                        }}>
+                        <AlertTriangle size={10} /> root
+                      </span>
+                    )}
                     {!s.is_enabled && (
                       <span style={{ fontSize: 10, padding: '1px 7px', borderRadius: 999, background: 'var(--surface)', color: 'var(--dim)', fontWeight: 600 }}>
                         Desativado

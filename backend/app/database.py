@@ -82,9 +82,14 @@ class Server(Base):
     name            = Column(String(100), nullable=False)
     host            = Column(String(255), nullable=False)
     port            = Column(Integer,     default=22,     nullable=False)
-    ssh_user        = Column(String(100), default="root", nullable=False)
-    # 'password' ou 'key'
-    ssh_auth_type   = Column(String(20),  default="password", nullable=False)
+    # T4 (Sessão 1, pós-auditoria): sem default "root" no nível de coluna —
+    # o default de fato fica no schema Pydantic (ServerCreate, routers/
+    # servers.py), que exige confirm_root=true explícito pra aceitar
+    # "root". O default de coluna aqui é só uma rede de segurança pra
+    # INSERT bruto (fora da API), não o caminho normal de cadastro.
+    ssh_user        = Column(String(100), nullable=False)
+    # 'password' ou 'key' — default "key" (era "password")
+    ssh_auth_type   = Column(String(20),  default="key", nullable=False)
     # Fernet-encrypted: senha SSH ou conteúdo da chave privada
     ssh_secret      = Column(String(4000), default="", nullable=False)
     script_path     = Column(String(500),  default="/root/diag-exim.sh", nullable=False)
@@ -95,6 +100,10 @@ class Server(Base):
     last_connected_at = Column(DateTime,   nullable=True)
     ssh_status      = Column(String(20),   default="unknown", nullable=False)  # ok | error | timeout | unknown
     ssh_error_msg   = Column(String(500),  nullable=True)
+    # T4: última sondagem de capacidade (diag-exim.sh --check, checks
+    # cap_*) — persistida a cada /test, pra o painel desabilitar botão
+    # de ação com o motivo visível em vez de deixar a ação falhar calada.
+    capabilities    = Column(JSONB, nullable=True)
     created_at      = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at      = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

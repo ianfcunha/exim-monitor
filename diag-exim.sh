@@ -49,6 +49,19 @@
 #        --snapshot=0    desativa o before_snapshot das ações destrutivas
 #                          acima (ligado por padrão — ver Changelog v5.7)
 # ============================================================
+# Changelog v5.13:
+#   - Novo (T4, pós-auditoria): --check ganha 4 novos checks
+#     (cap_remove_messages, cap_manage_firewall, cap_write_blacklist,
+#     cap_quarantine) — sondagem de capacidade real via `sudo -n -l`
+#     (ou "tudo permitido" se já for root), sem executar nada
+#     destrutivo pra testar. Backend persiste isso em
+#     Server.capabilities a cada /test — painel desabilita botão de
+#     ação com o motivo visível em vez de deixar a ação falhar calada.
+#     Bug pego testando com um usuário real sem privilégio: grep -qF
+#     "-Mrm" sem "--" faz o grep tentar interpretar "-Mrm" como opção
+#     ("invalid option -- 'M'") e a checagem falhava sempre, mesmo com
+#     sudoers concedendo exatamente esse comando.
+# ============================================================
 # Changelog v5.12:
 #   - Novo (T3, pós-auditoria): plan()/apply() de verdade. --dry-run=1
 #           reaproveita a mesma consulta de before_snapshot pra reportar o
@@ -303,7 +316,7 @@
 # exiqgrep etc. costumam morar) sejam encontrados mesmo assim.
 export PATH="$PATH:/usr/sbin:/sbin:/usr/local/sbin"
 
-VERSION="5.12"
+VERSION="5.13"
 LOG_PATH="/var/log/exim4/mainlog"
 # Lista única de candidatos a mainlog — consumida por collect() (quick e
 # completo) e run_check(). Debian/exim4, Debian/exim genérico, cPanel/WHM
@@ -1445,7 +1458,53 @@ run_check() {
     else
         _cve_msg="OK — Exim ${EXIM_VER_STR} sem CVE critico conhecido nesta lista curta (revisar periodicamente contra fontes atualizadas)"
     fi
-    _checks="${_checks}{\"check\":\"exim_version_cve\",\"ok\":${_cve_ok},\"detail\":\"${_cve_msg}\"}"
+    _checks="${_checks}{\"check\":\"exim_version_cve\",\"ok\":${_cve_ok},\"detail\":\"${_cve_msg}\"},"
+
+    # ── Checks 11-14: sondagem de capacidade (T4, Sessão 1, pós-auditoria) ──
+    # Informativos — não afetam _ok. Não executam nada destrutivo pra
+    # testar: leem o que "sudo -n -l" já concede (configurado pelo
+    # mailiq-bootstrap.sh, Tarefa 7) ou confiam em já ser root. Um
+    # servidor sem alguma dessas capacidades é um estado válido (modo
+    # só-leitura), não um erro de instalação — o backend usa isso pra
+    # desabilitar os botões de ação correspondentes, nunca pra recusar
+    # o cadastro. "Permissão faltando vira informação visível, nunca
+    # falha silenciosa" é o objetivo desta seção.
+    local _sudo_l=""
+    if [ "$(id -u)" -ne 0 ] && command -v sudo &>/dev/null; then
+        _sudo_l=$(sudo -n -l 2>/dev/null)
+    fi
+    _cap_allows() {
+        # "--" é essencial: padrões como "-Mrm" começam com "-" e sem
+        # isso o grep tenta interpretar o próprio padrão como opção
+        # (erro "invalid option"), fazendo a checagem falhar sempre.
+        [ "$(id -u)" -eq 0 ] && return 0
+        [ -n "$_sudo_l" ] && printf '%s' "$_sudo_l" | grep -qF -- "$1"
+    }
+
+    local _rm_ok="false" _rm_msg="Sem permissão para remover mensagens da fila (-Mrm) — limpeza de fila fica indisponível"
+    if _cap_allows "-Mrm"; then
+        _rm_ok="true"; _rm_msg="OK — permissão para remover mensagens da fila (-Mrm)"
+    fi
+    _checks="${_checks}{\"check\":\"cap_remove_messages\",\"ok\":${_rm_ok},\"detail\":\"${_rm_msg}\"},"
+
+    local _fw_ok="false" _fw_msg="Sem permissão para bloquear IP (iptables/csf/firewalld) — bloqueio de IP fica indisponível"
+    if _cap_allows "iptables" || _cap_allows "$EXIM_CSF_BIN" || _cap_allows "firewall-cmd"; then
+        _fw_ok="true"; _fw_msg="OK — permissão para bloquear IP"
+    fi
+    _checks="${_checks}{\"check\":\"cap_manage_firewall\",\"ok\":${_fw_ok},\"detail\":\"${_fw_msg}\"},"
+
+    local _bl_ok="false" _bl_msg="Sem permissão para bloquear remetente (escrever em /etc/exim4/spammer_sender) — bloqueio de remetente fica indisponível"
+    if [ "$(id -u)" -eq 0 ] || { [ -n "$SUDO" ] && $SUDO test -w "$(dirname /etc/exim4/spammer_sender)" 2>/dev/null; }; then
+        _bl_ok="true"; _bl_msg="OK — permissão para bloquear remetente"
+    fi
+    _checks="${_checks}{\"check\":\"cap_write_blacklist\",\"ok\":${_bl_ok},\"detail\":\"${_bl_msg}\"},"
+
+    local _qr_ok="false" _qr_msg="Sem permissão de leitura no spool — mensagens não podem ser quarentenadas antes de remover, então remoções ficam bloqueadas por segurança"
+    local _spool_input; _spool_input="$(_spool_dir)/input"
+    if $SUDO test -r "$_spool_input" 2>/dev/null; then
+        _qr_ok="true"; _qr_msg="OK — permissão de leitura no spool para quarentenar antes de remover"
+    fi
+    _checks="${_checks}{\"check\":\"cap_quarantine\",\"ok\":${_qr_ok},\"detail\":\"${_qr_msg}\"}"
 
     printf '{\n'
     printf '  "timestamp": "%s",\n' "$DATE_ISO"

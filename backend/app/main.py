@@ -32,7 +32,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Versão atual do schema — atualizar junto com cada nova migration
-_SCHEMA_VERSION = "010"
+_SCHEMA_VERSION = "011"
 
 _DDL_ALEMBIC_VERSION = """
     CREATE TABLE IF NOT EXISTS alembic_version (
@@ -385,6 +385,23 @@ def run_migrations() -> None:
                 {"v": "010"},
             )
             logger.info("Migration 010 aplicada com sucesso")
+            # Mesmo gap de migration chain corrigido de novo em 008→009
+            # (e antes em 004→005, 005→006) — sem isto, um banco parado
+            # em "009" pularia a 010→011 abaixo silenciosamente.
+            current = {"010"}
+
+        if "010" in current and "011" not in current:
+            logger.info("Aplicando migration 010 → 011 (servers.capabilities — sondagem de capacidade, T4)...")
+            conn.execute(text("""
+                ALTER TABLE servers
+                    ADD COLUMN IF NOT EXISTS capabilities JSONB
+            """))
+            conn.execute(text("DELETE FROM alembic_version"))
+            conn.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
+                {"v": "011"},
+            )
+            logger.info("Migration 011 aplicada com sucesso")
 
         logger.info("Banco de dados pronto (schema %s)", _SCHEMA_VERSION)
 
