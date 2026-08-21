@@ -279,6 +279,34 @@ def record_action_history(
         logger.exception("Falha ao persistir action_history (actor=%s action=%s)", actor, action)
 
 
+class ActionPlan(Base):
+    """
+    Tarefa 3 (Sessão 1, pós-auditoria): plan()/apply() de verdade —
+    plan() gera uma linha aqui (id + preview do que seria feito, sem
+    alterar nada no servidor); apply() só executa se o plan_id existir,
+    corresponder exatamente à ação/servidor/parâmetro pedidos, não ter
+    sido consumido ainda, e não ter mais de 5 minutos (ver
+    PLAN_MAX_AGE_SECONDS em routers/actions.py).
+
+    id é o próprio plan_id (uuid4 hex) — também usado como nome do
+    incidente de quarentena no script (--incident=<plan_id>), pra um
+    plano mapear 1:1 com o que de fato foi quarentenado.
+    """
+    __tablename__ = "action_plans"
+    __table_args__ = (
+        Index("ix_action_plans_created_at", "created_at"),
+    )
+
+    id          = Column(String(36),  primary_key=True)
+    server_id   = Column(Integer, ForeignKey("servers.id", ondelete="SET NULL"), nullable=True)
+    actor       = Column(String(100), nullable=False)
+    action      = Column(String(50),  nullable=False)
+    param       = Column(String(300), nullable=True)
+    preview     = Column(JSONB, nullable=True)
+    created_at  = Column(DateTime, default=datetime.utcnow, nullable=False)
+    consumed_at = Column(DateTime, nullable=True)
+
+
 def get_user_by_email(db, email: str):
     return db.query(User).filter(User.email == email).first()
 

@@ -4,16 +4,17 @@
  * única preferência realmente "geral" que existe hoje — antes só dava
  * pra trocar pelo dropdown do header).
  */
-import { Bell, ChevronRight, History, Moon, Server, Sun, Users } from 'lucide-react'
+import { AlertTriangle, Bell, ChevronRight, History, Moon, Server, Sun, Users } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Switch } from '@/components/ui/switch'
 import { useAuth } from '../contexts/AuthContext'
 
 const LINKS = [
-  { to: '/settings/alerts',  Icon: Bell,    title: 'Alertas',    desc: 'E-mail, Telegram, webhook, thresholds e relatório semanal.', adminOnly: true },
-  { to: '/settings/servers', Icon: Server,  title: 'Servidores', desc: 'Cadastre e gerencie os servidores monitorados.',              adminOnly: true },
-  { to: '/settings/users',   Icon: Users,   title: 'Usuários',   desc: 'Convide membros e gerencie permissões de acesso.',            adminOnly: true },
-  { to: '/settings/history', Icon: History, title: 'Histórico',  desc: 'Auditoria de ações executadas em cada servidor.',             adminOnly: true },
+  { to: '/settings/alerts',      Icon: Bell,          title: 'Alertas',      desc: 'E-mail, Telegram, webhook, thresholds e relatório semanal.', adminOnly: true },
+  { to: '/settings/servers',     Icon: Server,        title: 'Servidores',   desc: 'Cadastre e gerencie os servidores monitorados.',              adminOnly: true },
+  { to: '/settings/users',       Icon: Users,         title: 'Usuários',     desc: 'Convide membros e gerencie permissões de acesso.',            adminOnly: true },
+  { to: '/settings/history',     Icon: History,       title: 'Histórico',    desc: 'Auditoria de ações executadas em cada servidor.',             adminOnly: true },
+  { to: '/settings/maintenance', Icon: AlertTriangle, title: 'Manutenção',   desc: 'Limpar toda a fila e restaurar mensagens da quarentena.',     adminOnly: true },
 ]
 
 export default function GeneralSettings({ isDark, onToggleTheme }) {

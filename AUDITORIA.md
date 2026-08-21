@@ -282,13 +282,61 @@ mecanismo de "não consegui ler este log":
    consegue delegar acesso sem primeiro dar SSH root.
 4. **Ações destrutivas sem preview/confirmação de duas fases** — `clean-full`
    dispara e já apaga; não há `plan()`/`apply()` (Tarefa 2).
+   > **Status: corrigido** (Sessão 1, Tarefa 3) — ver detalhamento abaixo.
 5. **Falso "sucesso" em `-Mrm` sem privilégio suficiente** — reporta remoção
    mesmo quando nada foi removido (achado do item 3).
+   > **Status: corrigido** (Sessão 1, Tarefa 1) — ver nota no item 3 acima.
 6. **"Limpar toda a fila" no painel principal, sem dupla confirmação** — ainda
    não verificado no frontend nesta auditoria (fora do escopo de arquivos lidos
    aqui), mas a Tarefa 2 já assume que precisa mover para tela separada.
+   > **Status: corrigido** (Sessão 1, Tarefa 3) — removida de
+   > `ActionPanel.jsx`, virou tela própria em `pages/MaintenancePage.jsx`
+   > (`/settings/maintenance`): exige plan() com preview real + digitar o
+   > nome exato do servidor antes do apply() liberar.
 7. **Sem quarentena/restore, sem TTL de bloqueio, sem auditoria à prova de
    adulteração** — Tarefas 2 e 3.
+   > **Status: bloqueio de IP com TTL corrigido (Tarefa 2); quarentena/
+   > restore de mensagens corrigido (Tarefa 3); auditoria à prova de
+   > adulteração (hash encadeado) segue pendente — Tarefa 8.**
 8. **"Tudo normal" quando o log não é reconhecido** — Tarefa 4.
 
-Nenhuma mudança de código foi feita nesta tarefa — só leitura e este relatório.
+## Tarefa 3 — plan()/apply() e quarentena (Sessão 1, corrigido)
+
+- **Script** (`diag-exim.sh` v5.12): `--dry-run=1` roda a mesma consulta que
+  a ação real usaria (mesmo filtro `exiqgrep`/`awk`) sem tocar em nada — é
+  literalmente a mesma query, então o plano nunca diverge do que o apply
+  faria. Antes de qualquer `-Mrm` em `clean-full/frozen/bounces/sender/auth`,
+  `_quarantine_message()` copia `-H`/`-D`/`-J` do spool pra
+  `/var/spool/exim_quarantine/<incidente>/` (funciona com spool flat e com
+  `split_spool_directory`). `restore-quarantine:<incidente>` devolve os
+  arquivos pro diretório de origem — o Exim relê a fila do spool ao vivo,
+  sem reiniciar nada. `list-quarantine`/`expire-quarantine` espelham
+  `list-blocks`/`expire-blocks` da Tarefa 2 (retenção padrão 7 dias,
+  `EXIM_QUARANTINE_RETENTION_DAYS`).
+- **Backend**: tabela `action_plans` (migration 010) — `POST
+  /api/actions/{action}/plan` gera um `plan_id` (uuid4) de uso único válido
+  por 5 minutos (`PLAN_MAX_AGE_SECONDS`), que vira o próprio nome do
+  incidente de quarentena (`--incident=<plan_id>`) quando `apply()` roda de
+  verdade. `POST /api/actions/{action}` agora exige esse `plan_id` pra tudo
+  fora de `check-deliverability` — recusa sem plano (422), plano de outra
+  ação/servidor/parâmetro (409), plano já consumido (409) ou mais velho que
+  5 minutos (409). Rate limit por servidor-alvo (20/min, em memória) somado
+  ao limite por IP de origem já existente. `GET /api/actions/quarantine` +
+  `POST /api/actions/quarantine/{incidente}/restore` para a UI.
+- **Frontend**: `ActionPanel.jsx` virou plan()→preview→apply() pra toda ação
+  (inclusive `retry-queue`, que antes rodava sem confirmação nenhuma — achado
+  do item 3 acima). `clean-full` saiu do painel principal — mora em
+  `MaintenancePage.jsx` (`/settings/maintenance`), com preview do plano +
+  campo obrigatório de digitar o nome exato do servidor antes do botão
+  "Aplicar agora" habilitar, mais a lista de incidentes de quarentena com
+  restauração de um clique.
+- Validado ao vivo com Exim real neste host (incluindo pela API HTTP real,
+  logado como admin) e com testes automatizados: `tests/test_quarantine.sh`
+  (remove N mensagens reais, restaura, confirma os mesmos IDs de volta na
+  fila) e `tests/test_plan_apply_api.sh` (toda a guarda de `plan_id` —
+  sem plano, plano cruzado, reuso, inexistente, expirado).
+
+Nenhuma mudança de código foi feita na Tarefa 0 — só leitura e o relatório
+original. As tarefas seguintes (1, 2, 3, ...) alteram código, cada uma em
+commits próprios, e atualizam este arquivo conforme corrigem os achados
+acima.

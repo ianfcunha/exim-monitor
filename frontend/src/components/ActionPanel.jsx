@@ -1,32 +1,37 @@
 /**
  * Painel de ações — identidade AVILI light profissional.
  *
- * Ações simples (sem parâmetro): botão → confirmação → executa
- * Ações parametrizadas (block-ip, block-sender, clean-sender):
- *   botão → input inline → confirmação → executa
+ * T3 (Sessão 1, pós-auditoria): toda ação aqui passa por plan() antes de
+ * apply() — botão → (input inline, se houver) → "Ver plano" → preview do
+ * que seria feito → "Aplicar agora". O backend só executa de verdade com
+ * o plan_id devolvido pelo plan(), emitido há no máximo 5 minutos.
+ *
+ * "Limpar toda a fila" saiu daqui — é a única ação de escopo total (a
+ * fila inteira, não um filtro) e foi pro painel de Manutenção
+ * (Configurações → Manutenção), com dupla confirmação + nome do servidor
+ * digitado. As ações aqui continuam sendo as de escopo específico
+ * (frozen/bounces/um remetente/um IP).
  */
-import { AlertTriangle, Ban, CornerDownLeft, RotateCcw, Search, Shield, Snowflake, Trash2, X } from 'lucide-react'
+import { AlertTriangle, Ban, CornerDownLeft, RotateCcw, Search, Shield, Snowflake, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { runAction } from '../api/client'
+import { planAction, runAction } from '../api/client'
 import { Button } from '@/components/ui/button'
 import { useToast } from '../contexts/ToastContext'
 import { useServer } from '../contexts/ServerContext'
 
 // Ações que suportam before_snapshot no diag-exim.sh (Sessão 2, Item 1) —
-// só essas mostram o checkbox de captura de estado antes de confirmar.
+// só essas mostram o checkbox de captura de estado antes de planejar.
 const SNAPSHOT_ACTIONS = new Set([
-  'clean-full', 'clean-frozen', 'clean-bounces', 'clean-sender', 'clean-auth',
-  'block-ip', 'block-sender',
+  'clean-frozen', 'clean-bounces', 'clean-sender', 'clean-auth', 'block-ip', 'block-sender',
 ])
 
 const ACTIONS = [
-  { id: 'retry-queue',   label: 'Reprocessar fila',   Icon: RotateCcw,      color: 'sky',    confirm: false, param: null },
-  { id: 'clean-frozen',  label: 'Remover frozen',      Icon: Snowflake,      color: 'amber',  confirm: true,  param: null },
-  { id: 'clean-bounces', label: 'Limpar bounces',      Icon: CornerDownLeft, color: 'orange', confirm: true,  param: null },
-  { id: 'clean-sender',  label: 'Limpar remetente',    Icon: Search,         color: 'purple', confirm: true,  param: 'email', placeholder: 'remetente@dominio.com' },
-  { id: 'block-ip',      label: 'Bloquear IP',         Icon: Shield,         color: 'rose',   confirm: true,  param: 'ip',    placeholder: '192.168.0.1' },
-  { id: 'block-sender',  label: 'Bloquear remetente',  Icon: Ban,            color: 'red',    confirm: true,  param: 'email', placeholder: 'spam@dominio.com' },
-  { id: 'clean-full',    label: 'Limpar toda a fila',  Icon: Trash2,         color: 'red',    confirm: true,  param: null },
+  { id: 'retry-queue',   label: 'Reprocessar fila',   Icon: RotateCcw,      color: 'sky',    confirm: true, param: null },
+  { id: 'clean-frozen',  label: 'Remover frozen',      Icon: Snowflake,      color: 'amber',  confirm: true, param: null },
+  { id: 'clean-bounces', label: 'Limpar bounces',      Icon: CornerDownLeft, color: 'orange', confirm: true, param: null },
+  { id: 'clean-sender',  label: 'Limpar remetente',    Icon: Search,         color: 'purple', confirm: true, param: 'email', placeholder: 'remetente@dominio.com' },
+  { id: 'block-ip',      label: 'Bloquear IP',         Icon: Shield,         color: 'rose',   confirm: true, param: 'ip',    placeholder: '192.168.0.1' },
+  { id: 'block-sender',  label: 'Bloquear remetente',  Icon: Ban,            color: 'red',    confirm: true, param: 'email', placeholder: 'spam@dominio.com' },
 ]
 
 // Tons por categoria de ação — bg/border misturados com var(--card)/var(--border)
@@ -49,6 +54,13 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
   const [paramValue, setParamValue] = useState('')
   const [paramError, setParamError] = useState('')
   const [snapshot, setSnapshot]     = useState(true)
+  // T3: plano em vigor pra confirmId (null = ainda editando param/
+  // snapshot, ainda não planejado; objeto = plan() já rodou, mostra
+  // preview + "Aplicar agora"). planning/applying controlam qual dos
+  // dois botões mostra o spinner.
+  const [plan, setPlan]             = useState(null)
+  const [planning, setPlanning]     = useState(false)
+  const [applying, setApplying]     = useState(false)
   const inputRef                    = useRef(null)
   const cancelBtnRef                = useRef(null)
 
@@ -58,6 +70,7 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
     setParamValue('')
     setParamError('')
     setSnapshot(true)
+    setPlan(null)
     setConfirmId(action.id)
     // Move o foco pro dentro do painel de confirmação assim que ele
     // aparece — sem isso, numa ação sem parâmetro o foco fica parado no
@@ -95,23 +108,46 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
     return true
   }
 
-  const execute = async (action) => {
+  // T3, fase 1: plan() — não altera nada no servidor, só mostra o que
+  // apply() faria (preview.message já vem pronto do backend/script,
+  // prefixado com "[PLANO]").
+  const requestPlan = async (action) => {
     const param = action.param ? paramValue.trim() : null
     if (!validateParam(action, paramValue)) return
+    setPlanning(true)
+    try {
+      const res = await planAction(action.id, param, activeServer?.id ?? null)
+      setPlan(res)
+    } catch (err) {
+      toast({ type: 'err', msg: err?.response?.data?.detail || err.message || 'Erro ao planejar.' })
+    } finally {
+      setPlanning(false)
+    }
+  }
+
+  // T3, fase 2: apply() — só roda com o plan_id devolvido acima
+  // (válido por 5 minutos, uso único; o backend recusa qualquer coisa
+  // fora disso).
+  const execute = async (action) => {
+    if (!plan) return
+    const param = action.param ? paramValue.trim() : null
     setConfirmId(null)
     setPending(action.id)
+    setApplying(true)
     try {
-      const res = await runAction(action.id, param, activeServer?.id ?? null, snapshot)
+      const res = await runAction(action.id, param, activeServer?.id ?? null, snapshot, plan.plan_id)
       toast({ type: 'ok', msg: res.message || `${action.label} concluído.` })
       onActionComplete?.()
     } catch (err) {
       toast({ type: 'err', msg: err?.response?.data?.detail || err.message || 'Erro ao executar.' })
     } finally {
       setPending(null)
+      setApplying(false)
+      setPlan(null)
     }
   }
 
-  const cancel = () => { setConfirmId(null); setParamValue(''); setParamError('') }
+  const cancel = () => { setConfirmId(null); setParamValue(''); setParamError(''); setPlan(null) }
 
   const confirmAction = ACTIONS.find((a) => a.id === confirmId)
 
@@ -183,11 +219,11 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
             <AlertTriangle size={13} color="var(--danger)" />
             <span style={{ fontSize: 12, color: 'var(--danger)' }}>
-              Confirma: <strong>{confirmAction.label}</strong>?
+              {plan ? <>Plano pronto: <strong>{confirmAction.label}</strong></> : <>Confirma: <strong>{confirmAction.label}</strong>?</>}
             </span>
           </div>
 
-          {confirmAction.param && (
+          {!plan && confirmAction.param && (
             <div style={{ marginBottom: 10 }}>
               <input
                 ref={inputRef}
@@ -195,7 +231,7 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
                 value={paramValue}
                 placeholder={confirmAction.placeholder || ''}
                 onChange={e => { setParamValue(e.target.value); setParamError('') }}
-                onKeyDown={e => e.key === 'Enter' && execute(confirmAction)}
+                onKeyDown={e => e.key === 'Enter' && requestPlan(confirmAction)}
                 style={{
                   width: '100%', boxSizing: 'border-box',
                   borderRadius: 7,
@@ -224,7 +260,7 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
             </div>
           )}
 
-          {SNAPSHOT_ACTIONS.has(confirmAction.id) && (
+          {!plan && SNAPSHOT_ACTIONS.has(confirmAction.id) && (
             <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, fontSize: 11, color: 'var(--danger)', cursor: 'pointer', userSelect: 'none' }}>
               <input
                 type="checkbox"
@@ -236,15 +272,40 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
             </label>
           )}
 
+          {plan && (
+            <div style={{
+              marginBottom: 10, fontSize: 11.5, color: 'var(--text)',
+              background: 'var(--card)', border: '1px solid var(--danger-border)',
+              borderRadius: 7, padding: '8px 10px',
+            }}>
+              {plan.preview?.message || 'Plano gerado.'}
+              <div style={{ marginTop: 4, fontSize: 10, color: 'var(--dim)' }}>
+                Válido por {Math.floor((plan.expires_in_seconds ?? 300) / 60)} min — aplique agora ou cancele.
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-2">
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => execute(confirmAction)}
-              className="border-transparent bg-red-600 text-white shadow-sm hover:bg-red-700 hover:text-white active:bg-red-800"
-            >
-              Confirmar
-            </Button>
+            {!plan ? (
+              <Button
+                size="sm"
+                onClick={() => requestPlan(confirmAction)}
+                disabled={planning}
+                className="border-transparent bg-red-600 text-white shadow-sm hover:bg-red-700 hover:text-white active:bg-red-800"
+              >
+                {planning ? 'Planejando…' : 'Ver plano'}
+              </Button>
+            ) : (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => execute(confirmAction)}
+                disabled={applying}
+                className="border-transparent bg-red-600 text-white shadow-sm hover:bg-red-700 hover:text-white active:bg-red-800"
+              >
+                {applying ? 'Aplicando…' : 'Aplicar agora'}
+              </Button>
+            )}
             <Button ref={cancelBtnRef} variant="outline" size="sm" onClick={cancel}>
               <X size={11} /> Cancelar
             </Button>

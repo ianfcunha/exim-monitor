@@ -64,12 +64,30 @@ export const refreshStatus = (serverId = null) =>
   api.post('/status/refresh', null, { params: serverId ? { server_id: serverId } : {} }).then(r => r.data)
 
 // ── Acoes (com server_id) ──────────────────────────────────────────────────
-export const runAction = (action, param = null, serverId = null, snapshot = true) =>
+// T3 (Sessão 1, pós-auditoria): toda ação destrutiva agora é plan() depois
+// apply() — planAction() não altera nada no servidor, só retorna um
+// plan_id (válido 5min) + preview do que aconteceria. runAction() exige
+// esse plan_id pra qualquer ação fora de check-deliverability.
+export const planAction = (action, param = null, serverId = null) =>
   api.post(
-    `/actions/${action}`,
-    { param, snapshot },
+    `/actions/${action}/plan`,
+    { param },
     { params: serverId ? { server_id: serverId } : {} }
   ).then(r => r.data)
+
+export const runAction = (action, param = null, serverId = null, snapshot = true, planId = null) =>
+  api.post(
+    `/actions/${action}`,
+    { param, snapshot, plan_id: planId },
+    { params: serverId ? { server_id: serverId } : {} }
+  ).then(r => r.data)
+
+// ── Quarentena de mensagens (T3) ────────────────────────────────────────────
+export const fetchQuarantine = (serverId = null) =>
+  api.get('/actions/quarantine', { params: serverId ? { server_id: serverId } : {} }).then(r => r.data)
+
+export const restoreQuarantine = (incident, serverId = null) =>
+  api.post(`/actions/quarantine/${incident}/restore`, null, { params: serverId ? { server_id: serverId } : {} }).then(r => r.data)
 
 // ── Historico de acoes (auditoria) ──────────────────────────────────────────
 export const fetchActionHistory = (serverId = null, limit = 100) =>

@@ -32,11 +32,36 @@
 #                          próprios via check-ip-status), sem alterar nada
 #                          expire-blocks — remove bloqueios iptables cujo
 #                          TTL venceu (chamado periodicamente pelo backend)
+#                          restore-quarantine:<incidente> — devolve as
+#                          mensagens de um incidente pro spool de origem
+#                          list-quarantine — incidentes com mensagens ainda
+#                          em quarentena, sem alterar nada
+#                          expire-quarantine — purga definitivamente
+#                          incidentes mais velhos que a retenção
 #        --ttl=N         TTL em segundos pra block-ip (padrão 14400 = 4h);
 #                          CSF/firewalld usam TTL nativo, iptables cru usa
 #                          bookkeeping próprio (ver expire-blocks)
+#        --dry-run=1     modo plan(): mostra o que a ação --action= faria
+#                          (mesma consulta que apply() usa), sem alterar
+#                          nada — nem sequer quarenteia
+#        --incident=ID   nome da pasta de quarentena pra esta chamada
+#                          (T3); vazio = gera um a partir de cmd+timestamp
 #        --snapshot=0    desativa o before_snapshot das ações destrutivas
 #                          acima (ligado por padrão — ver Changelog v5.7)
+# ============================================================
+# Changelog v5.12:
+#   - Novo (T3, pós-auditoria): plan()/apply() de verdade. --dry-run=1
+#           reaproveita a mesma consulta de before_snapshot pra reportar o
+#           que a ação faria, sem tocar em nada — o backend (Sessão 1,
+#           Tarefa 3) só chama a ação real com um plan_id emitido há menos
+#           de 5 minutos. Quarentena: clean-full/frozen/bounces/sender/auth
+#           agora copiam -H/-D/-J do spool pra
+#           /var/spool/exim_quarantine/<incidente>/ ANTES de -Mrm — ver
+#           _quarantine_message(). Novo restore-quarantine:<incidente>
+#           devolve os arquivos pro spool original (Exim relê a fila ao
+#           vivo, sem reiniciar nada); list-quarantine/expire-quarantine
+#           (retenção padrão 7 dias, EXIM_QUARANTINE_RETENTION_DAYS)
+#           espelham list-blocks/expire-blocks da Tarefa 2.
 # ============================================================
 # Changelog v5.11:
 #   - Fix (T2, pós-auditoria): _apply_ip_block() substitui
@@ -278,7 +303,7 @@
 # exiqgrep etc. costumam morar) sejam encontrados mesmo assim.
 export PATH="$PATH:/usr/sbin:/sbin:/usr/local/sbin"
 
-VERSION="5.11"
+VERSION="5.12"
 LOG_PATH="/var/log/exim4/mainlog"
 # Lista única de candidatos a mainlog — consumida por collect() (quick e
 # completo) e run_check(). Debian/exim4, Debian/exim genérico, cPanel/WHM
@@ -323,6 +348,14 @@ TH_QUEUE_MSGS_GRANDES=${EXIM_TH_QUEUE_MSGS_GRANDES:-3}  # min. de msgs >5MB p/ c
 # padrão dos EXIM_TH_*. Não cobre a ACL específica de um cliente (ver
 # analyze_suspicious_tlds abaixo).
 EXIM_SUSPICIOUS_TLDS="${EXIM_SUSPICIOUS_TLDS:-zip,top,xyz,work,click,country,stream}"
+# Quarentena de mensagens removidas (T3, Sessão 1, pós-auditoria) — ver
+# _quarantine_message()/--action=restore-quarantine mais abaixo. Diretório
+# deve pertencer ao usuário mailiq (chown feito pelo mailiq-bootstrap.sh,
+# Tarefa 4) pra list-quarantine/expire-quarantine não precisarem de sudo
+# só pra navegar; copiar de/para o spool real do Exim continua exigindo
+# $SUDO de qualquer forma (mesma regra de -Mrm).
+QUARANTINE_ROOT="/var/spool/exim_quarantine"
+QUARANTINE_RETENTION_DAYS="${EXIM_QUARANTINE_RETENTION_DAYS:-7}"
 DATE=$(date "+%Y-%m-%d %H:%M:%S")
 # Timestamp ISO 8601 em UTC com sufixo Z — usado só nos campos "timestamp"
 # do JSON. $DATE (hora local do servidor, sem timezone) segue sendo usado
@@ -359,6 +392,8 @@ IP_PARAM=""            # --action=check-ip-status/unblock-ip: --ip=<ip>
 TOOL_PARAM=""           # --action=unblock-ip: --tool=csf|imunify360|iptables
 SNAPSHOT_MODE=1         # --action=<destrutiva>: captura before_snapshot por padrao; --snapshot=0 desativa
 IPBLOCK_TTL=14400      # --action=block-ip: TTL em segundos (--ttl=); padrao 4h
+DRY_RUN=0               # --dry-run=1: plan() — so mostra o que faria, nao altera nada
+INCIDENT_PARAM=""       # --incident=<id>: nome da pasta de quarentena (T3); vazio = gera um
 for arg in "$@"; do
     case "$arg" in
         --auto)        AUTO_MODE=1 ;;
@@ -380,6 +415,8 @@ for arg in "$@"; do
         --tool=*)      TOOL_PARAM="${arg#--tool=}" ;;
         --snapshot=*)  SNAPSHOT_MODE="${arg#--snapshot=}" ;;
         --ttl=*)       IPBLOCK_TTL="${arg#--ttl=}" ;;
+        --dry-run=*)   DRY_RUN="${arg#--dry-run=}" ;;
+        --incident=*)  INCIDENT_PARAM="${arg#--incident=}" ;;
     esac
 done
 
@@ -1605,31 +1642,99 @@ _json_id_array() {
 }
 
 # ============================================================
+# QUARENTENA — Tarefa 3 (Sessão 1, pós-auditoria)
+# Antes de qualquer -Mrm, copia os arquivos de spool da mensagem
+# (-H/-D, e -J se existir — journal transiente de uma entrega em
+# andamento) pra $QUARANTINE_ROOT/<incidente>/. Restaurar é
+# literalmente devolver os mesmos arquivos pro diretório de origem: o
+# Exim lê a fila direto do spool a cada -bp/entrega, não precisa
+# reiniciar nada nem "reinjetar" por outro mecanismo.
+# ============================================================
+_EXIM_SPOOL_DIR_CACHE=""
+_spool_dir() {
+    if [ -z "$_EXIM_SPOOL_DIR_CACHE" ]; then
+        _EXIM_SPOOL_DIR_CACHE=$($SUDO "$EXIM_BIN" -bP spool_directory 2>/dev/null | awk -F'= ' '{print $2}')
+        _EXIM_SPOOL_DIR_CACHE="${_EXIM_SPOOL_DIR_CACHE:-/var/spool/exim4}"
+    fi
+    printf '%s' "$_EXIM_SPOOL_DIR_CACHE"
+}
+
+# $1 = message id, $2 = sufixo (-H/-D/-J). Funciona tanto com spool
+# "flat" (padrão Debian/Ubuntu — arquivos direto em input/) quanto com
+# split_spool_directory (comum em servidores de fila grande — um nível
+# de subdiretório por hash do id).
+_find_spool_file() {
+    local id="$1" suffix="$2"
+    local base; base="$(_spool_dir)/input"
+    if [ -f "${base}/${id}${suffix}" ]; then
+        printf '%s' "${base}/${id}${suffix}"
+        return 0
+    fi
+    $SUDO find "$base" -mindepth 2 -maxdepth 2 -name "${id}${suffix}" 2>/dev/null | head -1
+}
+
+# Copia os arquivos de uma mensagem pra dentro de $incident_dir e
+# registra em manifest.tsv (id / diretório de origem / timestamp) —
+# essa linha é o que --action=restore-quarantine usa pra devolver o
+# arquivo pro lugar exato de onde saiu. Não falha a ação chamadora se
+# não achar os arquivos (mensagem pode já ter sumido por outro motivo);
+# só não quarentena o que não existe.
+_quarantine_message() {
+    local id="$1" incident_dir="$2"
+    local h_file d_file j_file orig_dir=""
+    h_file=$(_find_spool_file "$id" "-H")
+    d_file=$(_find_spool_file "$id" "-D")
+    [ -z "$h_file" ] && [ -z "$d_file" ] && return 1
+
+    $SUDO mkdir -p "$incident_dir" 2>/dev/null
+    $SUDO chmod 750 "$incident_dir" 2>/dev/null
+
+    if [ -n "$h_file" ]; then orig_dir="$(dirname "$h_file")"; $SUDO cp -p "$h_file" "$incident_dir/" 2>/dev/null; fi
+    if [ -n "$d_file" ]; then [ -z "$orig_dir" ] && orig_dir="$(dirname "$d_file")"; $SUDO cp -p "$d_file" "$incident_dir/" 2>/dev/null; fi
+    j_file=$(_find_spool_file "$id" "-J")
+    [ -n "$j_file" ] && $SUDO cp -p "$j_file" "$incident_dir/" 2>/dev/null
+
+    printf '%s\t%s\t%s\n' "$id" "$orig_dir" "$(date +%s)" \
+        | $SUDO tee -a "$incident_dir/manifest.tsv" >/dev/null 2>&1
+    return 0
+}
+
+# ============================================================
 # VERIFICAÇÃO DE REMOÇÃO — Tarefa 1 (Sessão 1, pós-auditoria)
 # AUDITORIA.md item 3: -Mrm rodava sem $SUDO em todo lugar e o "sucesso"
 # reportado era a contagem calculada ANTES da tentativa de remover — o
 # painel podia dizer "N removidas" com as N mensagens intactas na fila.
-# Daqui pra frente toda remoção passa por _remove_ids_verified(): tenta
-# remover id a id ($SUDO + $EXIM_BIN sempre, -n1 pra não mascarar uma
-# falha isolada dentro de um lote), depois RECONSULTA a fila — a fonte
-# de verdade é o que ainda está lá, não o exit code isolado do -Mrm
-# (fica só como sinal antecipado, não é a autoridade final).
+# Daqui pra frente toda remoção passa por _remove_ids_verified(): antes
+# de tentar, quarentena cada id (T3); depois tenta remover id a id
+# ($SUDO + $EXIM_BIN sempre, -n1 pra não mascarar uma falha isolada
+# dentro de um lote); por fim RECONSULTA a fila — a fonte de verdade é
+# o que ainda está lá, não o exit code isolado do -Mrm (fica só como
+# sinal antecipado, não é a autoridade final).
 # ============================================================
 _current_queue_ids() {
     $SUDO "$EXIM_BIN" -bp 2>/dev/null | awk '{print $3}' | grep -E '^[A-Za-z0-9-]{6,}$'
 }
 
-# Recebe IDs-alvo (um por linha) via $1. Devolve 3 campos separados por
-# newline: contagem solicitada, contagem efetivamente confirmada como
-# removida, e a lista de IDs que sobraram (não puderam ser removidos).
+# Recebe IDs-alvo (um por linha) via $1 e o diretório de quarentena
+# via $2 (vazio = não quarenteia, comportamento antigo). Devolve 3
+# campos separados por newline: contagem solicitada, contagem
+# efetivamente confirmada como removida, e a lista de IDs que
+# sobraram (não puderam ser removidos).
 _remove_ids_verified() {
-    local ids="$1"
+    local ids="$1" incident_dir="$2"
     local requested_count
     requested_count=$(printf '%s\n' "$ids" | grep -c . 2>/dev/null); requested_count=${requested_count:-0}
 
     if [ "$requested_count" -eq 0 ]; then
         printf '0\n0\n'
         return 0
+    fi
+
+    if [ -n "$incident_dir" ]; then
+        while IFS= read -r id; do
+            [ -z "$id" ] && continue
+            _quarantine_message "$id" "$incident_dir"
+        done <<< "$ids"
     fi
 
     printf '%s\n' "$ids" | grep -v '^$' \
@@ -1648,26 +1753,48 @@ _remove_ids_verified() {
     printf '%s\n%s\n%s' "$requested_count" "$((requested_count - leftover_count))" "$leftover"
 }
 
-# Monta a resposta JSON de uma ação de remoção em massa a partir do
-# resultado de _remove_ids_verified — só reporta success=true se TODAS
-# as mensagens solicitadas de fato sumiram da fila (delta real, nunca a
-# contagem otimista de antes da tentativa).
+# Monta a resposta JSON de uma ação de remoção em massa. Se DRY_RUN=1
+# (T3: fase plan()), não toca em nada — só reporta o que seria afetado,
+# reaproveitando a mesma consulta que apply() usaria (garantia de que o
+# plano bate exatamente com o que a ação real faria). Caso contrário
+# (apply()), usa o resultado de _remove_ids_verified — só reporta
+# success=true se TODAS as mensagens solicitadas de fato sumiram da
+# fila (delta real, nunca a contagem otimista de antes da tentativa).
 _report_removal_result() {
-    local cmd="$1" label="$2" ids="$3" before_extra="$4"
-    local _verify requested removed leftover
-    _verify=$(_remove_ids_verified "$ids")
-    requested=$(printf '%s\n' "$_verify" | sed -n '1p')
+    local cmd="$1" label="$2" ids="$3" before_extra="$4" incident="$5"
+    local requested; requested=$(printf '%s\n' "$ids" | grep -c . 2>/dev/null); requested=${requested:-0}
+
+    if [ "$DRY_RUN" = "1" ]; then
+        output_action_json "true" "$cmd" \
+            "[PLANO] ${label} afetaria ${requested} mensagem(ns) — nada foi alterado" \
+            "${before_extra:+${before_extra}, }\"plan\": {\"would_affect\": ${requested}}"
+        return 0
+    fi
+
+    local incident_dir=""
+    [ -n "$incident" ] && incident_dir="$QUARANTINE_ROOT/$incident"
+
+    local _verify requested_v removed leftover
+    _verify=$(_remove_ids_verified "$ids" "$incident_dir")
+    requested_v=$(printf '%s\n' "$_verify" | sed -n '1p')
     removed=$(printf '%s\n' "$_verify" | sed -n '2p')
     leftover=$(printf '%s\n' "$_verify" | tail -n +3 | grep -v '^$')
 
-    if [ "$requested" -eq "$removed" ]; then
-        output_action_json "true" "$cmd" "$label — $removed mensagens removidas" "$before_extra"
+    local _quarantine_extra=""
+    [ -n "$incident" ] && [ "$removed" -gt 0 ] && \
+        _quarantine_extra="\"quarantine_incident\": \"${incident}\", \"quarantine_retention_days\": ${QUARANTINE_RETENTION_DAYS}"
+
+    if [ "$requested_v" -eq "$removed" ]; then
+        local _extra="$before_extra"
+        [ -n "$_quarantine_extra" ] && _extra="${_extra:+${_extra}, }${_quarantine_extra}"
+        output_action_json "true" "$cmd" "$label — $removed mensagens removidas" "$_extra"
     else
-        local _stuck=$((requested - removed))
+        local _stuck=$((requested_v - removed))
         local _extra="\"leftover_ids\": [$(_json_id_array "$leftover")]"
+        [ -n "$_quarantine_extra" ] && _extra="${_extra}, ${_quarantine_extra}"
         [ -n "$before_extra" ] && _extra="${before_extra}, ${_extra}"
         output_action_json "false" "$cmd" \
-            "Permissão negada em ${_stuck} de ${requested} mensagens — $removed removidas, ${_stuck} continuam na fila" \
+            "Permissão negada em ${_stuck} de ${requested_v} mensagens — $removed removidas, ${_stuck} continuam na fila" \
             "$_extra"
     fi
 }
@@ -1686,6 +1813,16 @@ execute_action() {
         exit 1
     }
 
+    # T3: nome da pasta de quarentena pra esta chamada — se veio de
+    # --incident= (o backend manda o próprio plan_id, pra rastrear
+    # plano → incidente 1:1), usa ele; senão gera um (uso direto via
+    # CLI, sem backend). _validate_action_param garante o mesmo
+    # conjunto seguro de caracteres usado pra interpolar em comandos.
+    local _incident="$INCIDENT_PARAM"
+    if [ -z "$_incident" ] || ! _validate_action_param "$_incident"; then
+        _incident="${cmd}-$(date +%s)-$$"
+    fi
+
     case "$cmd" in
 
         clean-full)
@@ -1694,7 +1831,7 @@ execute_action() {
             local count; count=$(printf '%s\n' "$ids" | grep -c . 2>/dev/null); count=${count:-0}
             local _before=""
             [ "$SNAPSHOT_MODE" = "1" ] && _before="\"before_snapshot\": {\"queue_total\": ${count}, \"sample_ids\": [$(_json_id_array "$(echo "$ids" | head -"$SNAPSHOT_SAMPLE_LIMIT")")]}"
-            _report_removal_result "$cmd" "Fila limpa" "$ids" "$_before"
+            _report_removal_result "$cmd" "Fila limpa" "$ids" "$_before" "$_incident"
             ;;
 
         clean-frozen)
@@ -1703,7 +1840,7 @@ execute_action() {
             local count; count=$(echo "$ids" | grep -c . 2>/dev/null); count=${count:-0}
             local _before=""
             [ "$SNAPSHOT_MODE" = "1" ] && _before="\"before_snapshot\": {\"frozen_count\": ${count}, \"sample_ids\": [$(_json_id_array "$(echo "$ids" | head -"$SNAPSHOT_SAMPLE_LIMIT")")]}"
-            _report_removal_result "$cmd" "Mensagens frozen removidas" "$ids" "$_before"
+            _report_removal_result "$cmd" "Mensagens frozen removidas" "$ids" "$_before" "$_incident"
             ;;
 
         clean-bounces)
@@ -1712,7 +1849,7 @@ execute_action() {
             local count; count=$(echo "$ids" | grep -c . 2>/dev/null); count=${count:-0}
             local _before=""
             [ "$SNAPSHOT_MODE" = "1" ] && _before="\"before_snapshot\": {\"bounce_count\": ${count}, \"sample_ids\": [$(_json_id_array "$(echo "$ids" | head -"$SNAPSHOT_SAMPLE_LIMIT")")]}"
-            _report_removal_result "$cmd" "Bounces (<>) removidos" "$ids" "$_before"
+            _report_removal_result "$cmd" "Bounces (<>) removidos" "$ids" "$_before" "$_incident"
             ;;
 
         clean-sender)
@@ -1731,7 +1868,7 @@ execute_action() {
             local count; count=$(echo "$ids" | grep -c . 2>/dev/null); count=${count:-0}
             local _before=""
             [ "$SNAPSHOT_MODE" = "1" ] && _before="\"before_snapshot\": {\"count\": ${count}, \"sender\": \"${param}\", \"sample_ids\": [$(_json_id_array "$(echo "$ids" | head -"$SNAPSHOT_SAMPLE_LIMIT")")]}"
-            _report_removal_result "$cmd" "Mensagens de '$param' removidas" "$ids" "$_before"
+            _report_removal_result "$cmd" "Mensagens de '$param' removidas" "$ids" "$_before" "$_incident"
             ;;
 
         clean-auth)
@@ -1753,7 +1890,7 @@ execute_action() {
             local count; count=$(printf '%s\n' "$_match_ids" | grep -c . 2>/dev/null); count=${count:-0}
             local _before=""
             [ "$SNAPSHOT_MODE" = "1" ] && _before="\"before_snapshot\": {\"count\": ${count}, \"auth_user\": \"${param}\", \"sample_ids\": [$(_json_id_array "$(printf '%s' "$_match_ids" | head -"$SNAPSHOT_SAMPLE_LIMIT")")]}"
-            _report_removal_result "$cmd" "Mensagens do usuário '$param' removidas" "$_match_ids" "$_before"
+            _report_removal_result "$cmd" "Mensagens do usuário '$param' removidas" "$_match_ids" "$_before" "$_incident"
             ;;
 
         block-ip)
@@ -1770,6 +1907,12 @@ execute_action() {
                 output_action_json "false" "$cmd" \
                     "Endereço IP inválido: '$param' (esperado IPv4 ou IPv6)"
                 exit 1
+            fi
+            if [ "$DRY_RUN" = "1" ]; then
+                output_action_json "true" "$cmd" \
+                    "[PLANO] bloquearia $param por ${IPBLOCK_TTL}s — nada foi alterado" \
+                    "\"plan\": {\"ip\": \"${param}\", \"ttl_seconds\": ${IPBLOCK_TTL}}"
+                exit 0
             fi
             local _before=""
             if [ "$SNAPSHOT_MODE" = "1" ]; then
@@ -1853,6 +1996,101 @@ execute_action() {
             local _status_json; _status_json=$(check_ip_status_json "$IP_PARAM")
             output_action_json "true" "$cmd" \
                 "Status de bloqueio verificado para $IP_PARAM" "$_status_json"
+            ;;
+
+        restore-quarantine)
+            # T3: devolve os arquivos de spool de um incidente pro
+            # diretório de origem — a mensagem volta a aparecer em
+            # exim -bp imediatamente, sem reiniciar nada (o Exim lê o
+            # spool ao vivo). Restaurado = removido da quarentena (não
+            # faz sentido reter uma cópia de algo que já voltou pra
+            # fila real).
+            if [ -z "$param" ]; then
+                output_action_json "false" "$cmd" \
+                    "Parâmetro obrigatório: --action=restore-quarantine:<incidente>"
+                exit 1
+            fi
+            if ! _validate_action_param "$param"; then
+                output_action_json "false" "$cmd" \
+                    "Parâmetro inválido: '$param' contém caracteres não permitidos"
+                exit 1
+            fi
+            local _qdir="$QUARANTINE_ROOT/$param"
+            if [ ! -f "$_qdir/manifest.tsv" ]; then
+                output_action_json "false" "$cmd" \
+                    "Incidente '$param' não encontrado em $QUARANTINE_ROOT (expirado, já restaurado ou nunca existiu)"
+                exit 1
+            fi
+            local _restored_ids="" _restored_count=0 _remaining_manifest=""
+            while IFS=$'\t' read -r _qid _qorig _qts; do
+                [ -z "$_qid" ] && continue
+                local _copy_ok=1
+                for suf in -H -D -J; do
+                    [ -f "${_qdir}/${_qid}${suf}" ] || continue
+                    $SUDO cp -p "${_qdir}/${_qid}${suf}" "${_qorig}/" 2>/dev/null || _copy_ok=0
+                done
+                if [ "$_copy_ok" -eq 1 ]; then
+                    _restored_ids="${_restored_ids}${_qid}"$'\n'
+                    _restored_count=$((_restored_count + 1))
+                    $SUDO rm -f "${_qdir}/${_qid}"-H "${_qdir}/${_qid}"-D "${_qdir}/${_qid}"-J 2>/dev/null
+                else
+                    _remaining_manifest="${_remaining_manifest}$(printf '%s\t%s\t%s' "$_qid" "$_qorig" "$_qts")"$'\n'
+                fi
+            done < <($SUDO cat "$_qdir/manifest.tsv" 2>/dev/null)
+
+            if [ -z "$_remaining_manifest" ]; then
+                $SUDO rm -rf "$_qdir" 2>/dev/null
+            else
+                printf '%s' "$_remaining_manifest" | $SUDO tee "$_qdir/manifest.tsv" >/dev/null 2>&1
+            fi
+
+            output_action_json "true" "$cmd" \
+                "${_restored_count} mensagem(ns) restaurada(s) da quarentena '$param'" \
+                "\"restored_ids\": [$(_json_id_array "$_restored_ids")]"
+            ;;
+
+        list-quarantine)
+            # Incidentes com mensagens ainda em quarentena — pra tela de
+            # "restaurar" no painel. expires_at é baseado no item mais
+            # antigo do incidente (mesmo critério que expire-quarantine
+            # usa pra decidir o que purgar).
+            local _now; _now=$(date +%s)
+            local _out="[" _first=1
+            while IFS= read -r _idir; do
+                [ -z "$_idir" ] && continue
+                [ -f "${_idir}/manifest.tsv" ] || continue
+                local _count; _count=$($SUDO grep -c . "${_idir}/manifest.tsv" 2>/dev/null); _count=${_count:-0}
+                [ "$_count" -eq 0 ] && continue
+                local _oldest_ts; _oldest_ts=$($SUDO awk -F'\t' '{print $3}' "${_idir}/manifest.tsv" 2>/dev/null | sort -n | head -1)
+                local _expires_at=$(( ${_oldest_ts:-$_now} + QUARANTINE_RETENTION_DAYS * 86400 ))
+                [ "$_first" -eq 1 ] || _out="${_out},"
+                _out="${_out}{\"incident\": \"$(basename "$_idir")\", \"count\": ${_count}, \"expires_at\": ${_expires_at}}"
+                _first=0
+            done < <($SUDO find "$QUARANTINE_ROOT" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
+            _out="${_out}]"
+            output_action_json "true" "$cmd" "Incidentes em quarentena" "\"incidents\": ${_out}"
+            ;;
+
+        expire-quarantine)
+            # Chamado periodicamente pelo backend (mesmo padrão de
+            # expire-blocks) — só depois de QUARANTINE_RETENTION_DAYS
+            # (padrão 7) a remoção de uma mensagem vira definitiva.
+            local _cutoff=$(( $(date +%s) - QUARANTINE_RETENTION_DAYS * 86400 ))
+            local _purged=0
+            while IFS= read -r _idir; do
+                [ -z "$_idir" ] && continue
+                if [ ! -f "${_idir}/manifest.tsv" ]; then
+                    $SUDO rm -rf "$_idir" 2>/dev/null
+                    continue
+                fi
+                local _oldest_ts; _oldest_ts=$($SUDO awk -F'\t' '{print $3}' "${_idir}/manifest.tsv" 2>/dev/null | sort -n | head -1)
+                if [ -n "$_oldest_ts" ] && [ "$_oldest_ts" -le "$_cutoff" ]; then
+                    $SUDO rm -rf "$_idir" 2>/dev/null
+                    _purged=$((_purged + 1))
+                fi
+            done < <($SUDO find "$QUARANTINE_ROOT" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
+            output_action_json "true" "$cmd" \
+                "${_purged} incidente(s) de quarentena purgado(s) (retenção: ${QUARANTINE_RETENTION_DAYS}d) — remoção definitiva"
             ;;
 
         unblock-ip)
@@ -1967,6 +2205,12 @@ execute_action() {
                     "Remetente $param já está na blacklist ($exim_bl_s)"
                 exit 0
             fi
+            if [ "$DRY_RUN" = "1" ]; then
+                output_action_json "true" "$cmd" \
+                    "[PLANO] adicionaria $param à blacklist ($exim_bl_s) — nada foi alterado" \
+                    "\"plan\": {\"sender\": \"${param}\", \"blacklist_file\": \"${exim_bl_s}\"}"
+                exit 0
+            fi
             local _before=""
             [ "$SNAPSHOT_MODE" = "1" ] && _before="\"before_snapshot\": {\"already_blacklisted\": false, \"blacklist_file\": \"${exim_bl_s}\"}"
             printf '%s\n' "$param" | $SUDO tee -a "$exim_bl_s" >/dev/null 2>&1 \
@@ -1977,6 +2221,13 @@ execute_action() {
             ;;
 
         retry-queue)
+            if [ "$DRY_RUN" = "1" ]; then
+                local _qcount; _qcount=$($SUDO "$EXIM_BIN" -bpc 2>/dev/null || echo 0)
+                output_action_json "true" "$cmd" \
+                    "[PLANO] forçaria reprocessamento de ~${_qcount} mensagem(ns) na fila — nada foi alterado" \
+                    "\"plan\": {\"queue_total\": ${_qcount}}"
+                exit 0
+            fi
             $SUDO "$EXIM_BIN" -qff 2>/dev/null
             output_action_json "true" "$cmd" \
                 "Reprocessamento forçado da fila ($EXIM_BIN -qff) concluído"
@@ -2003,7 +2254,7 @@ execute_action() {
 
         *)
             output_action_json "false" "$cmd" \
-                "Ação desconhecida: '$cmd'. Opções: clean-full, clean-frozen, clean-bounces, clean-sender:<addr>, clean-auth:<user>, block-ip:<ip>, block-sender:<email>, retry-queue, check-deliverability[:dominio], check-ip-status --ip=<ip>, unblock-ip --ip=<ip> --tool=csf|imunify360|iptables, list-blocks, expire-blocks"
+                "Ação desconhecida: '$cmd'. Opções: clean-full, clean-frozen, clean-bounces, clean-sender:<addr>, clean-auth:<user>, block-ip:<ip>, block-sender:<email>, retry-queue, check-deliverability[:dominio], check-ip-status --ip=<ip>, unblock-ip --ip=<ip> --tool=csf|imunify360|iptables, list-blocks, expire-blocks, restore-quarantine:<incidente>, list-quarantine, expire-quarantine"
             exit 1
             ;;
     esac

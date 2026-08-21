@@ -32,7 +32,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Versão atual do schema — atualizar junto com cada nova migration
-_SCHEMA_VERSION = "009"
+_SCHEMA_VERSION = "010"
 
 _DDL_ALEMBIC_VERSION = """
     CREATE TABLE IF NOT EXISTS alembic_version (
@@ -355,6 +355,36 @@ def run_migrations() -> None:
                 {"v": "009"},
             )
             logger.info("Migration 009 aplicada com sucesso")
+            # Mesmo gap de migration chain já corrigido antes (004→005,
+            # depois 005→006) e que voltou a acontecer aqui: sem isto, um
+            # banco parado exatamente em "008" pularia a 009→010 abaixo
+            # silenciosamente, porque "current" nunca refletia a versão
+            # recém-aplicada.
+            current = {"009"}
+
+        if "009" in current and "010" not in current:
+            logger.info("Aplicando migration 009 → 010 (action_plans — plan()/apply(), T3)...")
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS action_plans (
+                    id          VARCHAR(36)  PRIMARY KEY,
+                    server_id   INTEGER REFERENCES servers(id) ON DELETE SET NULL,
+                    actor       VARCHAR(100) NOT NULL,
+                    action      VARCHAR(50)  NOT NULL,
+                    param       VARCHAR(300),
+                    preview     JSONB,
+                    created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+                    consumed_at TIMESTAMP
+                )
+            """))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_action_plans_created_at ON action_plans (created_at)"
+            ))
+            conn.execute(text("DELETE FROM alembic_version"))
+            conn.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
+                {"v": "010"},
+            )
+            logger.info("Migration 010 aplicada com sucesso")
 
         logger.info("Banco de dados pronto (schema %s)", _SCHEMA_VERSION)
 

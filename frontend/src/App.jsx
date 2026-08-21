@@ -10,6 +10,7 @@ import Dashboard from './pages/Dashboard'
 import GeneralSettings from './pages/GeneralSettings'
 import InviteAccept from './pages/InviteAccept'
 import Login from './pages/Login'
+import MaintenancePage from './pages/MaintenancePage'
 import ServersPage from './pages/ServersPage'
 import Settings from './pages/Settings'
 import SettingsLayout from './pages/SettingsLayout'
@@ -56,6 +57,7 @@ export default function App() {
               <Route path="servers" element={<ServersPage />} />
               <Route path="users"   element={<UsersPage />} />
               <Route path="history" element={<ActionHistoryPage />} />
+              <Route path="maintenance" element={<MaintenancePage />} />
             </Route>
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>

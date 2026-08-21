@@ -5,16 +5,17 @@
  * header. Cada seção é uma rota aninhada de /settings, renderizada
  * via <Outlet/>.
  */
-import { ArrowLeft, Bell, History, Home, Server, Users } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Bell, History, Home, Server, Users } from 'lucide-react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
 const NAV_ITEMS = [
-  { to: '/settings',         end: true,  label: 'Geral',      Icon: Home,    adminOnly: false },
-  { to: '/settings/alerts',  end: false, label: 'Alertas',     Icon: Bell,    adminOnly: true },
-  { to: '/settings/servers', end: false, label: 'Servidores',  Icon: Server,  adminOnly: true },
-  { to: '/settings/users',   end: false, label: 'Usuários',    Icon: Users,   adminOnly: true },
-  { to: '/settings/history', end: false, label: 'Histórico',   Icon: History, adminOnly: true },
+  { to: '/settings',             end: true,  label: 'Geral',       Icon: Home,          adminOnly: false },
+  { to: '/settings/alerts',      end: false, label: 'Alertas',      Icon: Bell,          adminOnly: true },
+  { to: '/settings/servers',     end: false, label: 'Servidores',   Icon: Server,        adminOnly: true },
+  { to: '/settings/users',       end: false, label: 'Usuários',     Icon: Users,         adminOnly: true },
+  { to: '/settings/history',     end: false, label: 'Histórico',    Icon: History,       adminOnly: true },
+  { to: '/settings/maintenance', end: false, label: 'Manutenção',   Icon: AlertTriangle, adminOnly: true },
 ]
 
 export default function SettingsLayout() {

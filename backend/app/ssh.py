@@ -290,10 +290,23 @@ def _sanitize_actor(actor: str) -> str:
     return cleaned[:64]
 
 
+_UNSAFE_INCIDENT_CHARS = re.compile(r"[^A-Za-z0-9._@-]+")
+
+
+def _sanitize_incident(incident: str) -> str:
+    """Mesma cautela de _sanitize_actor — o incident id (normalmente o
+    próprio plan_id, um uuid4) vira nome de diretório de quarentena no
+    servidor remoto, então nunca confiamos nele cru."""
+    cleaned = _UNSAFE_INCIDENT_CHARS.sub("", incident).strip("-")
+    return cleaned[:64]
+
+
 def run_action(action: str, param: Optional[str] = None,
                server_cfg: Optional[Dict[str, Any]] = None,
                actor: Optional[str] = None,
-               snapshot: bool = True) -> Dict[str, Any]:
+               snapshot: bool = True,
+               dry_run: bool = False,
+               incident: Optional[str] = None) -> Dict[str, Any]:
     """
     Executa uma ação isolada e retorna o JSON de resultado.
 
@@ -301,6 +314,13 @@ def run_action(action: str, param: Optional[str] = None,
     (estado antes de ações destrutivas) na resposta — ver diag-exim.sh
     --snapshot=. O usuário pode desativar antes de confirmar a ação
     (custo extra de listar IDs antes de limpar filas muito grandes).
+
+    dry_run=True (T3, plan()): pede --dry-run=1 — o script roda a mesma
+    consulta que apply() usaria, mas não altera nada nem quarenteia.
+
+    incident: nome da pasta de quarentena (T3) — o router de plan/apply
+    passa o próprio plan_id aqui, pra um plano mapear 1:1 com o
+    incidente de quarentena que apply() de fato cria.
     """
     action_arg = f"{action}:{param}" if param else action
     args = f"--action={action_arg}"
@@ -310,6 +330,12 @@ def run_action(action: str, param: Optional[str] = None,
             args += f" --actor={safe_actor}"
     if not snapshot:
         args += " --snapshot=0"
+    if dry_run:
+        args += " --dry-run=1"
+    if incident:
+        safe_incident = _sanitize_incident(incident)
+        if safe_incident:
+            args += f" --incident={safe_incident}"
     return _run(args, server_cfg)
 
 
@@ -385,6 +411,36 @@ def expire_blocks(server_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
     expiração de verdade, não só um número que ninguém aplica.
     """
     return _run("--action=expire-blocks", server_cfg)
+
+
+# ── Quarentena de mensagens (T3, Sessão 1, pós-auditoria) ──────────────────
+
+def list_quarantine(server_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Incidentes com mensagens ainda em quarentena — diag-exim.sh
+    --action=list-quarantine. Só leitura."""
+    return _run("--action=list-quarantine", server_cfg)
+
+
+def restore_quarantine(incident: str, server_cfg: Optional[Dict[str, Any]] = None,
+                       actor: Optional[str] = None) -> Dict[str, Any]:
+    """Devolve as mensagens de um incidente pro spool de origem
+    (diag-exim.sh --action=restore-quarantine)."""
+    safe_incident = _sanitize_incident(incident)
+    if not safe_incident:
+        raise SSHError(f"Incidente inválido: '{incident}'")
+    args = f"--action=restore-quarantine:{safe_incident}"
+    if actor:
+        safe_actor = _sanitize_actor(actor)
+        if safe_actor:
+            args += f" --actor={safe_actor}"
+    return _run(args, server_cfg)
+
+
+def expire_quarantine(server_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Purga definitivamente incidentes mais velhos que a retenção
+    (diag-exim.sh --action=expire-quarantine) — chamado periodicamente
+    pelo coletor, mesmo padrão de expire_blocks."""
+    return _run("--action=expire-quarantine", server_cfg)
 
 
 # ── Mensagens: fila e log ──────────────────────────────────────────────────
