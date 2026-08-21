@@ -11,7 +11,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text, create_engine, func
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text, create_engine, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, relationship, sessionmaker
 from sqlalchemy.pool import QueuePool
@@ -489,6 +489,42 @@ def save_detector_config_overrides(db, server_id: int, detector_type: str, thres
     db.commit()
     db.refresh(row)
     return row
+
+
+class BaselineMetric(Base):
+    """
+    Sessão 2, Tarefa 3: histórico horário por servidor E por conta, para
+    comparar cada coisa contra a própria história — sem isto todo
+    threshold é fixo, gera alarme falso na primeira semana e o cliente
+    desliga o alerta (a forma real de morrer aqui, por isso a ênfase).
+
+    Uma linha por (server_id, entity, metric, hour_of_day). `entity` é
+    "" para métricas de nível de servidor (ex.: queue_total) e o
+    identificador da conta (ex.: "login:user@dominio.com") para métricas
+    por conta (ex.: auth_volume).
+
+    `samples` guarda até BASELINE_MAX_DAYS (30) pontos, um por dia
+    (mais recente sobrescreve o do mesmo dia — ver baseline.py:
+    record_sample()), como [{"day": "2026-08-21", "value": 42.0}, ...].
+    `mean`/`stddev` são cache calculado a cada gravação (evita
+    recalcular em toda leitura de detector, que roda a cada ciclo full).
+    """
+    __tablename__ = "baseline_metrics"
+    __table_args__ = (
+        Index("ix_baseline_metrics_lookup", "server_id", "entity", "metric", "hour_of_day", unique=True),
+    )
+
+    id          = Column(Integer, primary_key=True)
+    server_id   = Column(Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=False)
+    entity      = Column(String(300), nullable=False, default="")
+    metric      = Column(String(50),  nullable=False)
+    hour_of_day = Column(Integer,     nullable=False)  # 0-23, UTC
+
+    samples = Column(JSONB, nullable=False, default=list)
+    mean    = Column(Float, nullable=True)
+    stddev  = Column(Float, nullable=True)
+
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
 def get_user_by_email(db, email: str):

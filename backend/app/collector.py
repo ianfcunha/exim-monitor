@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from .alerts import check_and_alert
+from .baseline import record_cycle_samples
 from .config import settings
 from .crypto import SecretDecryptionError
 from .database import Server, SessionLocal, Snapshot, build_server_cfg
@@ -172,6 +173,16 @@ async def _collect_server(server_cfg: Dict[str, Any], mode: str) -> None:
                 queue_total = queue.get("total", 0),
                 server_id   = server_id,
             )
+
+            # Sessão 2, Tarefa 3: amostragem de baseline — precisa de um
+            # server_id real (não o fallback .env, server_id=None, que
+            # não tem linha em `servers` para a FK de baseline_metrics).
+            if server_id is not None:
+                db = SessionLocal()
+                try:
+                    record_cycle_samples(db, server_id, data)
+                finally:
+                    db.close()
 
         if mode == "quick":
             # T2/T3 (Sessão 1, pós-auditoria): "TTL de 4h"/"retenção de
