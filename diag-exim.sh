@@ -342,7 +342,7 @@
 # exiqgrep etc. costumam morar) sejam encontrados mesmo assim.
 export PATH="$PATH:/usr/sbin:/sbin:/usr/local/sbin"
 
-VERSION="5.15"
+VERSION="5.16"
 LOG_PATH="/var/log/exim4/mainlog"
 # Lista única de candidatos a mainlog — consumida por collect() (quick e
 # completo) e run_check(). Debian/exim4, Debian/exim genérico, cPanel/WHM
@@ -896,6 +896,29 @@ analyze_log() {
     TOP_AUTH_COUNT=$(echo "$AUTH_USERS" | head -1 | awk '{print $1}')
     [ -z "$TOP_AUTH_COUNT" ] && TOP_AUTH_COUNT=0
 
+    # Diversidade de IP por conta autenticada (Sessão 2, Tarefa 2 —
+    # sinal principal do detector auth_abuse: mesma credencial (A=login:)
+    # autenticando de N IPs de origem distintos numa janela curta é o
+    # padrão clássico de conta SMTP comprometida — muito mais específico
+    # que só "volume alto", que uma conta legítima também pode ter. Só
+    # calculado no modo full (QUICK_MODE=0): é o modo que alimenta o motor
+    # de incidentes; o quick continua leve.
+    AUTH_IP_DIVERSITY_JSON="[]"
+    if [ "$QUICK_MODE" -eq 0 ]; then
+        _auth_ip_pairs=$(echo "$LOG_SAMPLE" | grep " <= " | grep "A=" | awk '
+            {
+                user=""; ip="";
+                for (i=1; i<=NF; i++) {
+                    if ($i ~ /^A=/)            { user=$i; sub(/^A=/, "", user) }
+                    if ($i ~ /^\[[0-9.]+\]$/)  { ip=$i;   gsub(/[][]/, "", ip) }
+                }
+                if (user != "" && ip != "") print user "|" ip
+            }')
+        _auth_total_per_user=$(echo "$_auth_ip_pairs" | awk -F'|' '{print $1}' | sort | uniq -c)
+        _auth_distinct_ips=$(echo "$_auth_ip_pairs" | sort -u | awk -F'|' '{print $1}' | sort | uniq -c | sort -rn | head -10)
+        AUTH_IP_DIVERSITY_JSON=$(_auth_ip_diversity_json "$_auth_distinct_ips" "$_auth_total_per_user")
+    fi
+
     # IPs — filtra os próprios do servidor
     ALL_IPS_RAW=$(echo "$LOG_SAMPLE" | grep " <= " | \
         grep -oP '\[\K[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(?=\])' | \
@@ -1391,6 +1414,28 @@ _domains_to_json() {
     printf '[%s]' "$out"
 }
 
+# Monta o array JSON de auth_ip_diversity a partir de:
+#   $1 = saída de "uniq -c | sort -rn" de usuários (coluna 2 = user, IPs distintos)
+#   $2 = saída de "uniq -c" de usuários (coluna 2 = user, total de autenticações)
+# Ver analyze_log() — sinal principal do detector auth_abuse.
+_auth_ip_diversity_json() {
+    local distinct_raw="$1" totals_raw="$2"
+    local out="" first=1 cnt user total user_esc
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        cnt=$(echo "$line" | awk '{print $1}')
+        user=$(echo "$line" | awk '{print $2}')
+        [ -z "$user" ] && continue
+        total=$(echo "$totals_raw" | awk -v u="$user" '$2==u{print $1}')
+        [ -z "$total" ] && total=0
+        user_esc=$(printf '%s' "$user" | sed 's/"/\\"/g')
+        [ "$first" -eq 0 ] && out="${out},"
+        out="${out}{\"user\":\"${user_esc}\",\"distinct_ips\":${cnt},\"count\":${total}}"
+        first=0
+    done <<< "$distinct_raw"
+    printf '[%s]' "$out"
+}
+
 # ============================================================
 # MODO --check: AUTODIAGNÓSTICO DO SERVIDOR (T2-3)
 # Verifica pré-requisitos e retorna JSON {"ok":bool,"checks":[]}.
@@ -1694,8 +1739,10 @@ output_json() {
     printf '  },\n'
     printf '  "top_sender": "%s", "top_sender_count": %s,\n'         "$TOP_SENDER" "${TOP_SENDER_COUNT:-0}"
     printf '  "top_auth_user": "%s", "top_auth_count": %s,\n'         "$TOP_AUTH_USER" "${TOP_AUTH_COUNT:-0}"
+    printf '  "auth_ip_diversity": %s,\n' "${AUTH_IP_DIVERSITY_JSON:-[]}"
     printf '  "top_ip": "%s", "top_ip_count": %s,\n'         "$TOP_IP" "${TOP_IP_COUNT:-0}"
     printf '  "top_recipient": "%s", "top_recipient_count": %s,\n'         "$TOP_RECIPIENT" "${TOP_RECIPIENT_COUNT:-0}"
+    printf '  "top_dest_domain": "%s", "top_dest_domain_count": %s,\n'         "${TOP_DEST_DOMAIN:-}" "${TOP_DEST_DOMAIN_COUNT:-0}"
     printf '  "relay_suspect": "%s", "relay_suspect_send": %s, "relay_suspect_bounce": %s,\n'         "$RELAY_SUSPECT" "${RELAY_SUSPECT_SEND:-0}" "${RELAY_SUSPECT_BOUNCE:-0}"
     printf '  "top_rejected_domains": %s,\n' "$_rejected_json"
     printf '  "top_defer_domains": %s,\n' "$_defer_json"

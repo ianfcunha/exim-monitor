@@ -444,6 +444,53 @@ def record_incident_event(db, incident: "Incident", event_type: str, actor: str 
     return ev
 
 
+class DetectorConfig(Base):
+    """
+    Sessão 2, Tarefa 2: "threshold configurável" por tipo de detector e
+    por servidor — sobrescreve DEFAULT_THRESHOLDS[type] (detectors.py)
+    campo a campo (só as chaves presentes aqui substituem; o resto usa o
+    padrão). Deliberadamente plano/genérico (JSONB, sem uma aba
+    "Regras" dedicada) — formulário simples por tipo, como pedido.
+    """
+    __tablename__ = "detector_config"
+    __table_args__ = (
+        Index("ix_detector_config_server_type", "server_id", "type", unique=True),
+    )
+
+    id         = Column(Integer, primary_key=True)
+    server_id  = Column(Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=False)
+    type       = Column(String(30), nullable=False)
+    thresholds = Column(JSONB, nullable=False, default=dict)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+def get_detector_config_overrides(db, server_id: int, detector_type: str) -> dict:
+    """Retorna só os overrides salvos (dict vazio se nunca configurado) —
+    detectors.py._cfg() já sabe fazer merge com DEFAULT_THRESHOLDS."""
+    row = (
+        db.query(DetectorConfig)
+        .filter(DetectorConfig.server_id == server_id, DetectorConfig.type == detector_type)
+        .first()
+    )
+    return row.thresholds if row else {}
+
+
+def save_detector_config_overrides(db, server_id: int, detector_type: str, thresholds: dict) -> "DetectorConfig":
+    row = (
+        db.query(DetectorConfig)
+        .filter(DetectorConfig.server_id == server_id, DetectorConfig.type == detector_type)
+        .first()
+    )
+    if row is None:
+        row = DetectorConfig(server_id=server_id, type=detector_type, thresholds=thresholds)
+        db.add(row)
+    else:
+        row.thresholds = thresholds
+    db.commit()
+    db.refresh(row)
+    return row
+
+
 def get_user_by_email(db, email: str):
     return db.query(User).filter(User.email == email).first()
 

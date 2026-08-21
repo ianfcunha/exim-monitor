@@ -32,7 +32,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Versão atual do schema — atualizar junto com cada nova migration
-_SCHEMA_VERSION = "013"
+_SCHEMA_VERSION = "014"
 
 _DDL_ALEMBIC_VERSION = """
     CREATE TABLE IF NOT EXISTS alembic_version (
@@ -474,6 +474,28 @@ def run_migrations() -> None:
                 {"v": "013"},
             )
             logger.info("Migration 013 aplicada com sucesso")
+            current = {"013"}
+
+        if "013" in current and "014" not in current:
+            logger.info("Aplicando migration 013 → 014 (detector_config — thresholds por tipo, Sessão 2 T2)...")
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS detector_config (
+                    id          SERIAL PRIMARY KEY,
+                    server_id   INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+                    type        VARCHAR(30) NOT NULL,
+                    thresholds  JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    updated_at  TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+            """))
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_detector_config_server_type ON detector_config (server_id, type)"
+            ))
+            conn.execute(text("DELETE FROM alembic_version"))
+            conn.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
+                {"v": "014"},
+            )
+            logger.info("Migration 014 aplicada com sucesso")
 
         logger.info("Banco de dados pronto (schema %s)", _SCHEMA_VERSION)
 
