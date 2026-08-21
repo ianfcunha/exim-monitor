@@ -274,6 +274,13 @@ class ActionHistory(Base):
     # altera nada (check-deliverability) ou não tem reversão de um clique.
     plan_id     = Column(String(36),  nullable=True)
     revert_hint = Column(String(300), nullable=True)
+    # Sessão 2, Tarefa 5: liga a ação executada ao incidente que a
+    # sugeriu, quando aplicável — "Aplicar correção sugerida" na tela de
+    # Triagem passa isto junto (rota /fix/apply); ações disparadas fora
+    # do fluxo de incidente (ActionPanel comum) deixam null. SET NULL (não
+    # CASCADE) pela mesma razão de server_id acima: auditoria sobrevive
+    # à remoção do incidente.
+    incident_id = Column(Integer, ForeignKey("incidents.id", ondelete="SET NULL"), nullable=True)
 
 
 def record_action_history(
@@ -287,6 +294,7 @@ def record_action_history(
     message: Optional[str],
     plan_id: Optional[str] = None,
     revert_hint: Optional[str] = None,
+    incident_id: Optional[int] = None,
 ) -> None:
     """Persiste uma ação executada — incluindo tentativas negadas (permissão
     insuficiente, rate limit, plano inválido) e falhas de conexão, não só
@@ -298,7 +306,7 @@ def record_action_history(
         db.add(ActionHistory(
             server_id=server_id, actor=actor, action=action,
             param=param, success=success, message=message,
-            plan_id=plan_id, revert_hint=revert_hint,
+            plan_id=plan_id, revert_hint=revert_hint, incident_id=incident_id,
         ))
         db.commit()
     except Exception:
@@ -332,6 +340,108 @@ class ActionPlan(Base):
     preview     = Column(JSONB, nullable=True)
     created_at  = Column(DateTime, default=datetime.utcnow, nullable=False)
     consumed_at = Column(DateTime, nullable=True)
+
+
+class Incident(Base):
+    """
+    Sessão 2 — "o incidente é o produto": em vez de um snapshot mudo que
+    o próximo ciclo de coleta reescreve por cima, um incidente é uma
+    entidade com identidade estável (fingerprint) e uma máquina de
+    estados explícita (ver IncidentEvent) — cada transição fica
+    registrada, nunca só um campo sobrescrito.
+
+    Exatamente 3 tipos críticos + 1 tipo atenção-only (ver
+    detectors.py): auth_abuse, reputation, queue_stuck (críticos) e
+    dest_deferral (sempre atenção — é transitório, não indica um
+    problema deste servidor).
+
+    Agravamento (mesma fingerprint, métrica pior) NÃO cria um incidente
+    novo — adiciona um evento "escalated" a este (ver incident_engine.py:
+    evaluate_incidents()).
+    """
+    __tablename__ = "incidents"
+    __table_args__ = (
+        Index("ix_incidents_fingerprint", "fingerprint"),
+        Index("ix_incidents_status", "status"),
+        Index("ix_incidents_server_status", "server_id", "status"),
+    )
+
+    id        = Column(Integer, primary_key=True)
+    server_id = Column(Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=False)
+    type      = Column(String(30), nullable=False)  # auth_abuse | reputation | queue_stuck | dest_deferral
+    severity  = Column(String(20), nullable=False)  # critico | atencao
+    status    = Column(String(20), default="aberto", nullable=False)  # aberto | em_observacao | mitigado | resolvido
+
+    # tipo + servidor + entidade (conta, IP ou domínio de destino) — chave
+    # estável de deduplicação. `entity` fica também em coluna própria
+    # (não só embutida na string) porque o motor de evidência
+    # (evidence.py) precisa dela isolada para filtrar linhas de log.
+    fingerprint = Column(String(300), nullable=False)
+    entity      = Column(String(300), nullable=False)
+
+    first_seen  = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_seen   = Column(DateTime, default=datetime.utcnow, nullable=False)
+    resolved_at = Column(DateTime, nullable=True)
+    resolution  = Column(String(20), nullable=True)  # manual | automatica | expirada
+
+    evidence      = Column(JSONB, nullable=True)  # linhas de log que provam o diagnóstico
+    metrics       = Column(JSONB, nullable=True)  # números do incidente
+    suggested_fix = Column(JSONB, nullable=True)  # {"description": "...", "action": {"action":"block-ip","param":"1.2.3.4"}}
+    triggered_by  = Column(JSONB, nullable=True)  # {"rule": "...", "threshold": ..., "observed": ...}
+
+    # Anti-ruído (Tarefa 4): silenciado até este instante — cobre tanto
+    # "silenciar este incidente" quanto a janela de silêncio noturno para
+    # severidade atenção (calculada e aplicada em incident_notify.py).
+    silenced_until = Column(DateTime, nullable=True)
+
+    # Ciclos full consecutivos em que o detector não encontrou mais esta
+    # fingerprint — motor de resolução automática (RESOLVE_AFTER_CLEAN_CYCLES
+    # em incident_engine.py). Zera a cada reaparecimento.
+    consecutive_clean = Column(Integer, default=0, nullable=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    server = relationship("Server")
+    events = relationship(
+        "IncidentEvent", back_populates="incident",
+        order_by="IncidentEvent.at", cascade="all, delete-orphan",
+    )
+
+    @property
+    def display_id(self) -> str:
+        return f"INC-{self.id}"
+
+
+class IncidentEvent(Base):
+    """
+    Máquina de estados do incidente — append-only, cada transição é um
+    evento imutável, nunca um campo sobrescrito por cima. `actor` é
+    "system" para transições automáticas do motor de detecção.
+    """
+    __tablename__ = "incident_events"
+    __table_args__ = (
+        Index("ix_incident_events_incident", "incident_id"),
+    )
+
+    id          = Column(Integer, primary_key=True)
+    incident_id = Column(Integer, ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False)
+    # opened | escalated | ack | silenced | mitigated | resolved | reopened
+    event_type  = Column(String(20), nullable=False)
+    at          = Column(DateTime, default=datetime.utcnow, nullable=False)
+    actor       = Column(String(100), nullable=False, default="system")
+    detail      = Column(JSONB, nullable=True)
+
+    incident = relationship("Incident", back_populates="events")
+
+
+def record_incident_event(db, incident: "Incident", event_type: str, actor: str = "system",
+                          detail: Optional[dict] = None) -> "IncidentEvent":
+    """Registra uma transição de estado do incidente. Não commita —
+    quem chama já está numa transação que também atualiza `incident`
+    (status/last_seen/etc.), commitados juntos atomicamente."""
+    ev = IncidentEvent(incident_id=incident.id, event_type=event_type, actor=actor, detail=detail)
+    db.add(ev)
+    return ev
 
 
 def get_user_by_email(db, email: str):

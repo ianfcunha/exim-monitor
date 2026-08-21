@@ -32,7 +32,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Versão atual do schema — atualizar junto com cada nova migration
-_SCHEMA_VERSION = "012"
+_SCHEMA_VERSION = "013"
 
 _DDL_ALEMBIC_VERSION = """
     CREATE TABLE IF NOT EXISTS alembic_version (
@@ -422,6 +422,58 @@ def run_migrations() -> None:
                 {"v": "012"},
             )
             logger.info("Migration 012 aplicada com sucesso")
+            # Mesmo gap corrigido de novo (008→009, 009→010, 010→011) —
+            # sem isto a 012→013 abaixo seria pulada num banco parado em "011".
+            current = {"012"}
+
+        if "012" in current and "013" not in current:
+            logger.info("Aplicando migration 012 → 013 (incidents/incident_events, Sessão 2 T1)...")
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS incidents (
+                    id                 SERIAL PRIMARY KEY,
+                    server_id          INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+                    type               VARCHAR(30)  NOT NULL,
+                    severity           VARCHAR(20)  NOT NULL,
+                    status             VARCHAR(20)  NOT NULL DEFAULT 'aberto',
+                    fingerprint        VARCHAR(300) NOT NULL,
+                    entity             VARCHAR(300) NOT NULL,
+                    first_seen         TIMESTAMP NOT NULL DEFAULT NOW(),
+                    last_seen          TIMESTAMP NOT NULL DEFAULT NOW(),
+                    resolved_at        TIMESTAMP,
+                    resolution         VARCHAR(20),
+                    evidence           JSONB,
+                    metrics            JSONB,
+                    suggested_fix      JSONB,
+                    triggered_by       JSONB,
+                    silenced_until     TIMESTAMP,
+                    consecutive_clean  INTEGER NOT NULL DEFAULT 0,
+                    created_at         TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+            """))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_incidents_fingerprint ON incidents (fingerprint)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_incidents_status ON incidents (status)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_incidents_server_status ON incidents (server_id, status)"))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS incident_events (
+                    id          SERIAL PRIMARY KEY,
+                    incident_id INTEGER NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+                    event_type  VARCHAR(20)  NOT NULL,
+                    at          TIMESTAMP NOT NULL DEFAULT NOW(),
+                    actor       VARCHAR(100) NOT NULL DEFAULT 'system',
+                    detail      JSONB
+                )
+            """))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_incident_events_incident ON incident_events (incident_id)"))
+            conn.execute(text("""
+                ALTER TABLE action_history
+                    ADD COLUMN IF NOT EXISTS incident_id INTEGER REFERENCES incidents(id) ON DELETE SET NULL
+            """))
+            conn.execute(text("DELETE FROM alembic_version"))
+            conn.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
+                {"v": "013"},
+            )
+            logger.info("Migration 013 aplicada com sucesso")
 
         logger.info("Banco de dados pronto (schema %s)", _SCHEMA_VERSION)
 
