@@ -383,6 +383,27 @@ mecanismo de "não consegui ler este log":
    > `ActionPanel.jsx`, virou tela própria em `pages/MaintenancePage.jsx`
    > (`/settings/maintenance`): exige plan() com preview real + digitar o
    > nome exato do servidor antes do apply() liberar.
+   >
+   > **Varredura completa do frontend feita na Tarefa 9** (esta auditoria
+   > original nunca tinha lido o frontend — item pendente desde a Tarefa 0).
+   > Achado real, mais sério que "Limpar toda a fila": `DiagnosisPanel.jsx`
+   > tinha seus PRÓPRIOS botões de "ação rápida" nas ações recomendadas —
+   > cada um chamando `onAction?.(action)` **direto**, sem plan()/apply(),
+   > sem quarentena, sem nenhuma garantia da Tarefa 3. Só não era
+   > explorável porque `Dashboard.jsx` amarrava
+   > `onAction={handleActionComplete}`, uma função que ignora o argumento e
+   > só recarrega dados — os botões pareciam funcionais (rótulo, cor,
+   > hover) mas não faziam nada. Um dev futuro "consertando" essa ligação
+   > (o jeito óbvio seria chamar a ação direto) reintroduziria exatamente o
+   > bypass que a Tarefa 3 fechou — uma segunda cópia da mesma classe de
+   > bug do menu interativo (Tarefa 5), desta vez no frontend. Removidos;
+   > `ActionPanel.jsx` já cobre a mesma necessidade com segurança (badge
+   > "Sugerido", usando `diagnosis.actions_recommended` do backend em vez
+   > de uma cópia hardcoded que já tinha divergido da lista real do
+   > script). Restante da varredura (`deleteServer`/`deleteUser` já têm
+   > `confirm()` nativo; `handleForgetHostKey` idem com aviso de segurança
+   > explícito; nenhum outro componente chama a API de ações fora de
+   > `ActionPanel`/`MaintenancePage`) não encontrou mais nada.
 7. **Sem quarentena/restore, sem TTL de bloqueio, sem auditoria à prova de
    adulteração** — Tarefas 2 e 3.
    > **Status: bloqueio de IP com TTL corrigido (Tarefa 2); quarentena/

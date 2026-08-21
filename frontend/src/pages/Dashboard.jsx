@@ -488,7 +488,7 @@ export default function Dashboard({ onLogout }) {
         </div>
 
         {/* Diagnóstico */}
-        <DiagnosisPanel diagnosis={diag} onAction={handleActionComplete} />
+        <DiagnosisPanel diagnosis={diag} />
 
         {/* Tabelas + Ações */}
         <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${isAdmin ? 'lg:grid-cols-3' : ''}`}>

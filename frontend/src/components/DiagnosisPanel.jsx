@@ -3,31 +3,31 @@
  *
  * Comportamento:
  *   - OK   → começa colapsado; mostra só badge verde pequeno
- *   - HIGH/CRITICAL → auto-expande; mostra ações recomendadas em destaque
+ *   - HIGH/CRITICAL → auto-expande
  *
  * Props:
- *   diagnosis     → { problem, severity, description, actions_recommended? }
- *   onAction(cmd) → chamado ao clicar numa ação rápida (opcional)
+ *   diagnosis → { problem, severity, description, actions_recommended? }
+ *
+ * T9 (Sessão 1, pós-auditoria — "fechar o gap da auditoria"): este
+ * painel tinha seus PRÓPRIOS botões de "ação rápida" (onAction(cmd)),
+ * cada um chamando a ação direto — sem plan()/apply(), sem quarentena,
+ * sem nenhuma das garantias da Tarefa 3. Só não era um problema porque
+ * Dashboard.jsx passava onAction=handleActionComplete, uma função que
+ * ignora o argumento e só recarrega os dados — os botões pareciam
+ * executar a ação (rótulo, cor, hover), mas na prática não faziam
+ * nada. Um dev futuro "consertando" essa ligação (o jeito óbvio seria
+ * chamar runAction(action) direto) reintroduziria exatamente o bypass
+ * que a Tarefa 3 fechou. Removidos — ActionPanel.jsx já mostra as
+ * mesmas ações recomendadas (badge "Sugerido", usando
+ * diag.actions_recommended vindo do backend, não uma cópia hardcoded
+ * aqui) através do fluxo plan()→preview→apply() de verdade.
  */
 import { ChevronDown } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import StatusBadge from './StatusBadge'
 
-// ── Mapeamento problema → ações ───────────────────────────────────────────
-const ACTIONS_BY_PROBLEM = {
-  SPAM_RELAY:         ['clean-full', 'clean-bounces', 'block-ip'],
-  SPAM_MASSIVO:       ['clean-full', 'clean-sender', 'block-ip'],
-  AUTH_ABUSE:         ['clean-auth', 'clean-frozen'],
-  BOUNCE_CONCENTRADO: ['clean-bounces', 'clean-full'],
-  IP_FLOOD:           ['block-ip', 'clean-full', 'clean-frozen'],
-  FILA_TRAVADA:       ['clean-frozen', 'retry-queue'],
-  ALTO_DEFERIMENTO:   ['clean-bounces', 'clean-frozen', 'retry-queue'],
-  BOUNCE_STORM:       ['clean-bounces', 'clean-frozen', 'retry-queue'],
-  ALTA_REJEICAO:      ['clean-bounces', 'clean-frozen', 'retry-queue'],
-  FILA_ALTA:          ['retry-queue', 'clean-frozen'],
-  NORMAL:             [],
-}
-
+// Só pra exibição em texto (não clicáveis) — a ação de verdade mora
+// em ActionPanel.jsx, com o rótulo já em português lá também.
 const ACTION_LABELS = {
   'clean-full':    'Limpar toda a fila',
   'clean-bounces': 'Limpar bounces',
@@ -35,24 +35,8 @@ const ACTION_LABELS = {
   'clean-sender':  'Limpar remetente',
   'clean-auth':    'Limpar usuário auth',
   'block-ip':      'Bloquear IP',
+  'block-sender':  'Bloquear remetente',
   'retry-queue':   'Forçar reprocessamento',
-}
-
-// Estilos por ação — ação principal é a primeira da lista. Chip sólido
-// escuro DE PROPÓSITO nos dois temas (não var(--text), que vira quase
-// branco no escuro) — é o único badge "cheio" da lista, contraste com
-// os outros que são outline/pastel.
-const ACTION_STYLE_PRIMARY = {
-  bg: '#1E293B', border: '#1E293B', text: '#fff',
-}
-const ACTION_STYLES = {
-  'clean-full':    { bg: 'var(--danger-bg)', border: 'var(--danger-border)', text: 'var(--danger)' },
-  'clean-bounces': { bg: 'var(--warn-bg)', border: 'var(--warn-border)', text: 'var(--warn)' },
-  'clean-frozen':  { bg: 'var(--warn-bg)', border: 'var(--warn-border)', text: 'var(--warn)' },
-  'clean-sender':  { bg: 'var(--warn-bg)', border: 'var(--warn-border)', text: 'var(--warn)' },
-  'clean-auth':    { bg: 'var(--danger-bg)', border: 'var(--danger-border)', text: 'var(--danger)' },
-  'block-ip':      { bg: 'var(--danger-bg)', border: 'var(--danger-border)', text: 'var(--danger)' },
-  'retry-queue':   { bg: 'var(--accent-bg)', border: 'var(--accent-border)', text: 'var(--accent-fg)' },
 }
 
 // Cores de fundo do painel por severidade
@@ -70,14 +54,13 @@ const SEVERITY_BG = {
   UNKNOWN:  { bg: 'var(--surface)', border: 'var(--border)', dot: 'var(--dim)' },
 }
 
-export default function DiagnosisPanel({ diagnosis, onAction }) {
+export default function DiagnosisPanel({ diagnosis }) {
   const prevSeverity = useRef(null)
   const [collapsed, setCollapsed] = useState(true)
 
-  const { problem = 'UNKNOWN', severity = 'UNKNOWN', description = '' } = diagnosis ?? {}
+  const { problem = 'UNKNOWN', severity = 'UNKNOWN', description = '', actions_recommended: recommendedActions = [] } = diagnosis ?? {}
   const isOk            = severity === 'OK' || severity === 'LOW'
   const isCritical      = severity === 'CRITICAL' || severity === 'HIGH' || severity === 'DEGRADED'
-  const recommendedActions = ACTIONS_BY_PROBLEM[problem] ?? []
   const colors          = SEVERITY_BG[severity] ?? SEVERITY_BG.UNKNOWN
 
   // Auto-expande quando status piora; auto-colapsa quando volta a OK
@@ -144,46 +127,19 @@ export default function DiagnosisPanel({ diagnosis, onAction }) {
             </p>
           )}
 
-          {/* Ações recomendadas */}
+          {/* Ações recomendadas — só informativo. Executar de verdade
+              acontece no painel de Ações abaixo (badge "Sugerido"),
+              com plan()/apply() de verdade — ver nota no topo do
+              arquivo (T9, Sessão 1, pós-auditoria). */}
           {recommendedActions.length > 0 && (
             <div>
-              <p style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 8, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              <p style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                 Ações recomendadas
               </p>
-              <div className="flex flex-wrap gap-2">
-                {recommendedActions.map((action, i) => {
-                  const isPrimary = i === 0 && isCritical
-                  const st = isPrimary ? ACTION_STYLE_PRIMARY : (ACTION_STYLES[action] ?? ACTION_STYLES['retry-queue'])
-                  return (
-                    <button
-                      key={action}
-                      onClick={() => onAction?.(action)}
-                      style={{
-                        borderRadius: 8,
-                        border: `1px solid ${st.border}`,
-                        padding: isPrimary ? '7px 16px' : '5px 12px',
-                        fontSize: isPrimary ? 12 : 11,
-                        fontWeight: isPrimary ? 700 : 500,
-                        color: st.text,
-                        background: st.bg,
-                        cursor: 'pointer',
-                        transition: 'filter 0.15s, transform 0.1s',
-                        boxShadow: isPrimary ? '0 2px 8px rgba(0,0,0,0.12)' : undefined,
-                      }}
-                      onMouseEnter={e => {
-                        e.currentTarget.style.filter = 'brightness(0.93)'
-                        if (isPrimary) e.currentTarget.style.transform = 'translateY(-1px)'
-                      }}
-                      onMouseLeave={e => {
-                        e.currentTarget.style.filter = 'none'
-                        e.currentTarget.style.transform = 'none'
-                      }}
-                    >
-                      {ACTION_LABELS[action] ?? action}
-                    </button>
-                  )
-                })}
-              </div>
+              <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>
+                {recommendedActions.map(a => ACTION_LABELS[a] ?? a).join(', ')}
+                {' — '}veja o badge <strong>Sugerido</strong> no painel de Ações abaixo.
+              </p>
             </div>
           )}
         </div>
