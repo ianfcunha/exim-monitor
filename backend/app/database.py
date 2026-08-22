@@ -218,6 +218,15 @@ class AlertSettings(Base):
     night_silence_start = Column(String(5), default="", nullable=False)
     night_silence_end   = Column(String(5), default="", nullable=False)
 
+    # ── Custo estimado (Sessão 3, Tarefa 1) ─────────────────────────────
+    # NULL = não configurado = nenhuma estimativa financeira é exibida em
+    # lugar nenhum (instrução explícita: "não invente valor em reais
+    # automaticamente" — um número inventado destrói credibilidade na
+    # primeira reunião). Só depois de preenchido aqui é que
+    # incident_impact.py calcula e rotula como "estimativa".
+    cost_per_sysadmin_hour_brl = Column(Float, nullable=True)
+    cost_per_ticket_brl        = Column(Float, nullable=True)
+
 
 class AlertHistory(Base):
     """
@@ -415,6 +424,16 @@ class Incident(Base):
     # fingerprint — motor de resolução automática (RESOLVE_AFTER_CLEAN_CYCLES
     # em incident_engine.py). Zera a cada reaparecimento.
     consecutive_clean = Column(Integer, default=0, nullable=False)
+
+    # Sessão 3, Tarefa 1: impacto do incidente — mensagens/contas/domínios
+    # afetados, tempo em aberto, queda na taxa de entrega e (só se
+    # configurado) estimativa financeira. NULL enquanto aberto (calculado
+    # ao vivo em incident_impact.py::compute_impact() a cada leitura, sem
+    # gravar); congelado aqui em exatamente um lugar — o momento em que o
+    # status vira "resolvido" (routers/incidents.py e incident_engine.py,
+    # nunca em outro ponto) — pra não recalcular pra trás com dado que já
+    # não existe mais (fila que já foi limpa, log que já rotacionou).
+    impact = Column(JSONB, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

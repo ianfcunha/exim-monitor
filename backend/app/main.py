@@ -32,7 +32,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Versão atual do schema — atualizar junto com cada nova migration
-_SCHEMA_VERSION = "016"
+_SCHEMA_VERSION = "017"
 
 _DDL_ALEMBIC_VERSION = """
     CREATE TABLE IF NOT EXISTS alembic_version (
@@ -553,6 +553,33 @@ def run_migrations() -> None:
                 {"v": "016"},
             )
             logger.info("Migration 016 aplicada com sucesso")
+            # Recorrente nesta base: bloco de migration sem atualizar `current`
+            # no fim quebra silenciosamente qualquer cadeia de N→N+1 que
+            # aterrisse além dele num boot só — já foi corrigido 5x antes
+            # (ver histórico de migrations 004→005 em diante); faltava aqui.
+            current = {"016"}
+
+        if "016" in current and "017" not in current:
+            logger.info("Aplicando migration 016 → 017 (impacto por incidente + custo estimado, Sessão 3 T1)...")
+            conn.execute(text("""
+                ALTER TABLE incidents
+                    ADD COLUMN IF NOT EXISTS impact JSONB
+            """))
+            conn.execute(text("""
+                ALTER TABLE alert_settings
+                    ADD COLUMN IF NOT EXISTS cost_per_sysadmin_hour_brl DOUBLE PRECISION
+            """))
+            conn.execute(text("""
+                ALTER TABLE alert_settings
+                    ADD COLUMN IF NOT EXISTS cost_per_ticket_brl DOUBLE PRECISION
+            """))
+            conn.execute(text("DELETE FROM alembic_version"))
+            conn.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
+                {"v": "017"},
+            )
+            logger.info("Migration 017 aplicada com sucesso")
+            current = {"017"}
 
         logger.info("Banco de dados pronto (schema %s)", _SCHEMA_VERSION)
 

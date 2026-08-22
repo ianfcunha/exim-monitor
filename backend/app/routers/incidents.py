@@ -29,6 +29,7 @@ from ..database import (
     record_incident_event, save_detector_config_overrides, to_utc_iso,
 )
 from ..detectors import DEFAULT_THRESHOLDS
+from ..incident_impact import compute_impact, freeze_impact
 from ..incident_notify import notify_incident_event
 from ..ssh import SSHError, run_action
 
@@ -65,7 +66,19 @@ def _get_incident_or_404(db: Session, incident_id: int, current_user: User) -> I
     return incident
 
 
-def _incident_to_dict(incident: Incident, server_name: Optional[str] = None, include_events: bool = False) -> dict:
+def _incident_to_dict(
+    incident: Incident, server_name: Optional[str] = None, include_events: bool = False,
+    db: Optional[Session] = None,
+) -> dict:
+    # Impacto (Sessão 3, T1): incidente resolvido usa o snapshot congelado
+    # em Incident.impact (freeze_impact(), chamado no fechamento); aberto
+    # recalcula ao vivo se `db` foi passado — deliberadamente só no
+    # detalhe (get_incident), não em list_incidents, pra não fazer N
+    # queries extras de Snapshot por página da Triagem.
+    impact = incident.impact
+    if impact is None and db is not None:
+        impact = compute_impact(db, incident)
+
     d = {
         "id": incident.id,
         "display_id": incident.display_id,
@@ -85,6 +98,7 @@ def _incident_to_dict(incident: Incident, server_name: Optional[str] = None, inc
         "suggested_fix": incident.suggested_fix,
         "triggered_by": incident.triggered_by,
         "silenced_until": to_utc_iso(incident.silenced_until),
+        "impact": impact,
     }
     if include_events:
         d["events"] = [
@@ -165,7 +179,7 @@ def incidents_summary(db: Session = Depends(get_db), current_user: User = Depend
 def get_incident(incident_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     incident = _get_incident_or_404(db, incident_id, current_user)
     server = incident.server
-    return _incident_to_dict(incident, server_name=server.name if server else None, include_events=True)
+    return _incident_to_dict(incident, server_name=server.name if server else None, include_events=True, db=db)
 
 
 # ── Transições manuais ──────────────────────────────────────────────────────
@@ -209,6 +223,7 @@ def resolve_incident(incident_id: int, body: ResolveRequest = ResolveRequest(), 
     incident.status = "resolvido"
     incident.resolved_at = datetime.utcnow()
     incident.resolution = body.resolution
+    freeze_impact(db, incident)  # única gravação em Incident.impact — precisa de resolved_at já setado acima
     record_incident_event(db, incident, "resolved", actor=current_user.username)
     db.commit()
     notify_incident_event(incident, "resolved")

@@ -63,6 +63,52 @@ function MetricsGrid({ metrics }) {
   )
 }
 
+// Sessão 3, Tarefa 1 — "o número que o dono do host entende". Vem de
+// incident.impact (backend/app/incident_impact.py): calculado ao vivo
+// enquanto o incidente está aberto, congelado no fechamento.
+function fmtDuration(seconds) {
+  if (seconds == null) return '—'
+  const h = Math.floor(seconds / 3600)
+  const m = Math.round((seconds % 3600) / 60)
+  if (h === 0) return `${m}min`
+  return `${h}h${m > 0 ? ` ${m}min` : ''}`
+}
+
+function ImpactSection({ impact }) {
+  if (!impact) return null
+  const entities = [...(impact.accounts_affected || []), ...(impact.domains_affected || [])]
+  return (
+    <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+        Impacto
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 8, marginBottom: entities.length ? 8 : 0 }}>
+        <Stat label="Mensagens afetadas" value={impact.messages_affected} />
+        {impact.stuck_over_4h > 0 && <Stat label="Presas há +4h" value={impact.stuck_over_4h} />}
+        <Stat label="Tempo em aberto" value={fmtDuration(impact.total_open_seconds)} />
+        <Stat
+          label="Impacto na entrega"
+          value={impact.delivery_rate_impact_pct == null ? 'sem baseline' : `${impact.delivery_rate_impact_pct > 0 ? '-' : '+'}${Math.abs(impact.delivery_rate_impact_pct)} p.p.`}
+        />
+      </div>
+      {entities.length > 0 && (
+        <p style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: impact.cost_estimate ? 8 : 0 }}>
+          Contas/domínios de cliente afetados: <strong style={{ color: 'var(--text)' }}>{entities.join(', ')}</strong>
+        </p>
+      )}
+      {impact.cost_estimate && (
+        <div style={{
+          fontSize: 11.5, padding: '8px 10px', borderRadius: 8,
+          background: 'var(--warn-bg)', border: '1px solid var(--warn-border)', color: 'var(--warn)',
+        }}>
+          <strong>Custo estimado: R$ {impact.cost_estimate.total_brl.toFixed(2)}</strong> ({impact.cost_estimate.label})
+          <div style={{ fontSize: 10.5, opacity: 0.85, marginTop: 2 }}>{impact.cost_estimate.basis}</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function IncidentDetail({ incident, onChanged }) {
   const toast = useToast()
   const [busy, setBusy]           = useState(null) // 'ack' | 'silence' | 'resolve' | null
@@ -169,9 +215,18 @@ export default function IncidentDetail({ incident, onChanged }) {
         <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
           {TYPE_LABELS[incident.type] ?? incident.type} — <span style={{ fontWeight: 500 }}>{incident.entity}</span>
         </div>
-        <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>
-          {incident.server_name ?? `servidor #${incident.server_id}`} · desde {fmtDateTime(incident.first_seen)}
-          {' · '}última vez {fmtDateTime(incident.last_seen)}
+        <div style={{ fontSize: 11.5, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span>
+            {incident.server_name ?? `servidor #${incident.server_id}`} · desde {fmtDateTime(incident.first_seen)}
+            {' · '}última vez {fmtDateTime(incident.last_seen)}
+          </span>
+          {/* Sessão 3, T2 — o documento que o dono do host encaminha ao cliente dele */}
+          <a
+            href={`/incidents/${incident.id}/report`} target="_blank" rel="noreferrer"
+            style={{ fontSize: 11, color: 'var(--sky)', fontWeight: 600, textDecoration: 'none' }}
+          >
+            Ver relatório →
+          </a>
         </div>
       </div>
 
@@ -214,6 +269,9 @@ export default function IncidentDetail({ incident, onChanged }) {
 
       {/* ── Métricas ── */}
       <MetricsGrid metrics={incident.metrics} />
+
+      {/* ── Impacto (Sessão 3, T1) ── */}
+      <ImpactSection impact={incident.impact} />
 
       {/* ── Correção sugerida ── */}
       <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>

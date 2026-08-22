@@ -30,6 +30,7 @@ from .baseline import make_baseline_fn
 from .database import (
     Incident, Snapshot, get_detector_config_overrides, record_incident_event,
 )
+from .incident_impact import freeze_impact
 from .detectors import (
     Candidate, detect_auth_abuse, detect_dest_deferral, detect_queue_stuck, detect_reputation,
 )
@@ -129,6 +130,7 @@ def evaluate_incidents(db, server_id: int, data: Dict[str, Any],
                 incident.status = "resolvido"
                 incident.resolved_at = now
                 incident.resolution = "automatica"
+                freeze_impact(db, incident)  # Sessão 3, T1 — mesmo congelamento do fechamento manual (routers/incidents.py)
                 record_incident_event(db, incident, "resolved", actor="system",
                                       detail={"consecutive_clean": incident.consecutive_clean})
                 db.commit()

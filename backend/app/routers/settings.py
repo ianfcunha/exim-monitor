@@ -52,6 +52,10 @@ class AlertSettingsSchema(BaseModel):
     # Webhook genérico
     webhook_url:    str = ""
     webhook_secret: str = ""   # "" = nao alterar se vier mascarado
+    # Custo estimado (Sessão 3, T1) — None = não configurado = nenhuma
+    # estimativa financeira aparece em lugar nenhum (ver incident_impact.py)
+    cost_per_sysadmin_hour_brl: Optional[float] = Field(None, ge=0)
+    cost_per_ticket_brl:        Optional[float] = Field(None, ge=0)
 
     class Config:
         from_attributes = True
@@ -79,6 +83,8 @@ def _to_response(cfg: AlertSettings) -> dict:
         "weekly_report_last_sent_at": to_utc_iso(cfg.weekly_report_last_sent_at),
         "webhook_url":    cfg.webhook_url,
         "webhook_secret": MASK if cfg.webhook_secret else "",
+        "cost_per_sysadmin_hour_brl": cfg.cost_per_sysadmin_hour_brl,
+        "cost_per_ticket_brl":        cfg.cost_per_ticket_brl,
     }
 
 
@@ -116,6 +122,8 @@ def update_settings(
     cfg.cooldown_minutes   = payload.cooldown_minutes
     cfg.weekly_report_enabled = payload.weekly_report_enabled
     cfg.webhook_url         = payload.webhook_url
+    cfg.cost_per_sysadmin_hour_brl = payload.cost_per_sysadmin_hour_brl
+    cfg.cost_per_ticket_brl        = payload.cost_per_ticket_brl
 
     # Atualiza campos sensiveis apenas se vieram preenchidos (nao mascarados)
     if payload.resend_api_key and payload.resend_api_key != MASK:

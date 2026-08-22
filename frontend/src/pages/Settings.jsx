@@ -410,6 +410,29 @@ export default function Settings() {
         </Field>
       </Section>
 
+      {/* Custo estimado (Sessão 3, T1) — opcional; sem preencher, nenhuma
+          estimativa financeira aparece no relatório de incidente. */}
+      <Section title="Custo estimado (opcional)">
+        <p style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 14 }}>
+          Preencha só se quiser que o relatório de incidente mostre uma estimativa em R$,
+          sempre rotulada como estimativa. Deixe em branco para não mostrar nenhum valor financeiro.
+        </p>
+        <Field label="Custo médio por hora de sysadmin (R$)">
+          <Input
+            value={cfg.cost_per_sysadmin_hour_brl ?? ''}
+            onChange={val => set('cost_per_sysadmin_hour_brl')(val === '' ? null : Number(val))}
+            type="number" placeholder="ex: 80"
+          />
+        </Field>
+        <Field label="Custo médio por ticket de suporte (R$)">
+          <Input
+            value={cfg.cost_per_ticket_brl ?? ''}
+            onChange={val => set('cost_per_ticket_brl')(val === '' ? null : Number(val))}
+            type="number" placeholder="ex: 25"
+          />
+        </Field>
+      </Section>
+
       {/* Relatório semanal */}
       <Section title="Relatório Semanal">
         <Toggle

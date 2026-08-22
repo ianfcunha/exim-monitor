@@ -49,6 +49,13 @@
 #        --snapshot=0    desativa o before_snapshot das ações destrutivas
 #                          acima (ligado por padrão — ver Changelog v5.7)
 # ============================================================
+# Changelog v5.17:
+#   - Novo (Sessão 3, T1): "queue.age.over_4h" no JSON completo —
+#           contagem de mensagens na fila há mais de 4h (todo o bucket
+#           de dias + a parte do bucket de horas com dígito >=4).
+#           Alimenta o cálculo de impacto por incidente no backend
+#           ("mensagens presas há mais de 4h" — Tarefa 1).
+# ============================================================
 # Changelog v5.15:
 #   - Novo (T6, pós-auditoria): analyze_log() calcula log.lines_total/
 #     lines_recognized/recognition_pct — abaixo de 80%
@@ -342,7 +349,7 @@
 # exiqgrep etc. costumam morar) sejam encontrados mesmo assim.
 export PATH="$PATH:/usr/sbin:/sbin:/usr/local/sbin"
 
-VERSION="5.16"
+VERSION="5.17"
 LOG_PATH="/var/log/exim4/mainlog"
 # Lista única de candidatos a mainlog — consumida por collect() (quick e
 # completo) e run_check(). Debian/exim4, Debian/exim genérico, cPanel/WHM
@@ -1217,6 +1224,16 @@ analyze_age() {
     OLD_HOURS=$(echo "$QUEUE_RAW" | awk '$1~/^[0-9]+h$/{c++} END{print c+0}')
     OLD_MINS=$(echo  "$QUEUE_RAW" | awk '$1~/^[0-9]+m$/{c++} END{print c+0}')
 
+    # Sessão 3, Tarefa 1: "mensagens presas há mais de 4h" precisa do
+    # dígito real da coluna de idade do "exim -bp" (não só o bucket
+    # d/h/m que OLD_* já contam) — todo dia-bucket conta (>=24h>4h por
+    # definição), e do bucket de hora só as que já bateram >=4h.
+    OVER_4H=$(echo "$QUEUE_RAW" | awk '
+        $1~/^[0-9]+d$/ {c++}
+        $1~/^[0-9]+h$/ { n=$1+0; if (n>=4) c++ }
+        END{print c+0}
+    ')
+
     # Coluna 2 de "exim -bp" traz o tamanho em bytes puro OU com sufixo
     # K/M/G (ex.: "443", "50K", "2.0M") — somar $2 direto sem converter
     # o sufixo (como o QUEUE_SIZE fazia antes) subestima em até ~1000x
@@ -1729,7 +1746,7 @@ output_json() {
     printf '    "size_kb": "%s",\n' "${QUEUE_SIZE:-N/A}"
     printf '    "size_distribution": { "over_1mb": %s, "over_5mb": %s, "under_10kb": %s, "sampled": %s },\n' \
         "${QSZ_OVER_1MB:-0}" "${QSZ_OVER_5MB:-0}" "${QSZ_UNDER_10KB:-0}" "$([ "${QUEUE_SAMPLED:-0}" -eq 1 ] && echo true || echo false)"
-    printf '    "age": { "days": %s, "hours": %s, "minutes": %s }\n'         "${OLD_DAYS:-0}" "${OLD_HOURS:-0}" "${OLD_MINS:-0}"
+    printf '    "age": { "days": %s, "hours": %s, "minutes": %s, "over_4h": %s }\n'         "${OLD_DAYS:-0}" "${OLD_HOURS:-0}" "${OLD_MINS:-0}" "${OVER_4H:-0}"
     printf '  },\n'
     printf '  "log": {\n'
     printf '    "delivered": %s, "rejected": %s, "deferred": %s,\n'         "${DELIVERED_COUNT:-0}" "${REJECT_COUNT:-0}" "${DEFER_COUNT:-0}"
