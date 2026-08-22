@@ -11,6 +11,7 @@ import GeneralSettings from './pages/GeneralSettings'
 import InviteAccept from './pages/InviteAccept'
 import Login from './pages/Login'
 import MaintenancePage from './pages/MaintenancePage'
+import ReputationPage from './pages/ReputationPage'
 import ServersPage from './pages/ServersPage'
 import Settings from './pages/Settings'
 import SettingsLayout from './pages/SettingsLayout'
@@ -62,6 +63,7 @@ export default function App() {
                 {app_url}/incidents/INC-####, por display_id, não pelo id
                 numérico interno. */}
             <Route path="/incidents/:displayId" element={<TriagePage />} />
+            <Route path="/reputation" element={<ReputationPage />} />
             <Route path="/dashboard" element={<Dashboard onLogout={logout} />} />
             <Route path="/settings" element={<SettingsLayout />}>
               <Route index          element={<GeneralSettings isDark={isDark} onToggleTheme={toggleTheme} />} />

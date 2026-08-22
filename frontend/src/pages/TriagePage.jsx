@@ -13,7 +13,7 @@
  * que isto virou incidente" e evidência ficam todos visíveis de
  * primeira, sem navegação adicional.
  */
-import { LayoutGrid, RefreshCw } from 'lucide-react'
+import { LayoutGrid, RefreshCw, ShieldCheck } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { fetchIncident, fetchIncidents, fetchIncidentsSummary, resolveIncident, silenceIncident } from '../api/client'
@@ -133,6 +133,9 @@ export default function TriagePage() {
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={load} disabled={loading}>
             <RefreshCw size={12} style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} /> Atualizar
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => navigate('/reputation')}>
+            <ShieldCheck size={12} /> Reputação
           </Button>
           <Button size="sm" variant="outline" onClick={() => navigate('/dashboard')}>
             <LayoutGrid size={12} /> Painel clássico

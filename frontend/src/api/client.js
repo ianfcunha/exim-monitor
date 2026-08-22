@@ -200,6 +200,10 @@ export const fetchIncidentConfig = (serverId) =>
 export const saveIncidentConfig = (serverId, type, thresholds) =>
   api.put(`/incidents/config/${serverId}/${type}`, { thresholds }).then(r => r.data)
 
+// ── Reputação (Sessão 3, T4) — cross-fleet por padrão ───────────────────────
+export const fetchReputation = (serverId = null) =>
+  api.get('/reputation', { params: serverId ? { server_id: serverId } : {} }).then(r => r.data)
+
 // ── Relatório de incidente (Sessão 3, T2) ───────────────────────────────────
 // HTML autocontido — buscado como blob (não navegação direta) porque a
 // rota exige o mesmo Bearer token de toda a API; quem chama abre via

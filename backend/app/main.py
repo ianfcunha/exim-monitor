@@ -23,7 +23,7 @@ from .database import run_retention
 from .limiter import limiter
 from .monthly_report import monthly_report_loop
 from .reports import weekly_report_loop
-from .routers import actions, auth, history, incidents, messages, security, servers, status, users
+from .routers import actions, auth, history, incidents, messages, reputation, security, servers, status, users
 from .routers import settings as settings_router
 
 logging.basicConfig(
@@ -718,6 +718,7 @@ app.include_router(servers.router)
 app.include_router(status.router)
 app.include_router(actions.router)
 app.include_router(incidents.router)
+app.include_router(reputation.router)
 app.include_router(security.router)
 app.include_router(history.router)
 app.include_router(messages.router)
