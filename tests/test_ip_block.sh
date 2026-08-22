@@ -18,7 +18,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DIAG="$SCRIPT_DIR/diag-exim.sh"
+DIAG="$SCRIPT_DIR/diag-exim/diag-exim.sh"
 
 PASS=0
 FAIL=0

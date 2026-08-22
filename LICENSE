@@ -1,0 +1,39 @@
+Mail IQ — Commercial License
+
+Copyright (c) 2026 AVILI. All rights reserved.
+
+This repository is open-core. The license below applies to everything
+in this repository EXCEPT the `diag-exim/` directory, which is
+licensed separately and permissively — see `diag-exim/LICENSE` (MIT).
+
+Scope of this license: the panel backend (`backend/`), the panel
+frontend (`frontend/`), fleet aggregation, incident history, alerting,
+and reporting — everything that requires the Mail IQ panel to be
+running to have any effect.
+
+Terms:
+
+1. This software is proprietary and confidential. No license, right,
+   or interest in this software is granted except as expressly stated
+   in a separate written agreement with AVILI (a commercial license,
+   a support contract, or explicit written permission).
+
+2. You may not copy, modify, merge, publish, distribute, sublicense,
+   or sell copies of this software, or use it to provide a competing
+   hosted or managed service, without such a written agreement.
+
+3. You may run this software for your own internal operational use
+   (self-hosted, on your own infrastructure) under the terms of your
+   commercial agreement with AVILI. Evaluating the software for the
+   purpose of deciding whether to enter such an agreement is
+   permitted.
+
+4. THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+   HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY
+   ARISING FROM THE USE OF THIS SOFTWARE.
+
+For licensing terms, contact AVILI. If you only need the standalone
+diagnostic script (queue/log diagnosis and manual remediation on a
+single Exim server, no fleet features), see `diag-exim/` instead — it
+is MIT-licensed and does not require this agreement.

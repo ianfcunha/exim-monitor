@@ -36,6 +36,31 @@ class Base(DeclarativeBase):
     pass
 
 
+class Organization(Base):
+    """
+    Sessão 3, Tarefa 5 — fronteira open-core: "adicionar org_id e
+    contagem de servidores no schema (barato agora, caro depois). Não
+    construa billing." Deliberadamente mínima: nenhum plano, limite,
+    cobrança ou fluxo de onboarding — só a coluna existindo, pra uma
+    eventual feature multi-org/billing não precisar de uma migration
+    retroativa numa base de produção já grande. `org_id` em User/Server
+    é nullable e não é lido por nenhuma regra de acesso hoje
+    (get_servers_for_user() continua usando owner_id) — isto é
+    preparação de schema, não uma feature ativa.
+
+    "Contagem de servidores" não vira uma coluna denormalizada aqui de
+    propósito (evita o problema de manter um contador sincronizado sem
+    nenhum consumidor real ainda) — ver get_org_server_count() abaixo,
+    uma consulta simples que qualquer feature futura de billing pode
+    chamar quando existir.
+    """
+    __tablename__ = "organizations"
+
+    id         = Column(Integer, primary_key=True)
+    name       = Column(String(200), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class User(Base):
     """
     Usuário da plataforma.
@@ -45,6 +70,7 @@ class User(Base):
     __tablename__ = "users"
 
     id                 = Column(Integer, primary_key=True)
+    org_id             = Column(Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True)
     email              = Column(String(255), unique=True, nullable=False)
     username           = Column(String(100), unique=True, nullable=False)
     password_hash      = Column(String(500), nullable=True)   # null enquanto convite pendente
@@ -80,6 +106,9 @@ class Server(Base):
 
     id              = Column(Integer, primary_key=True)
     owner_id        = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    # Sessão 3, T5 — mesma preparação de schema de User.org_id, ver
+    # Organization acima. Não lido por get_servers_for_user() hoje.
+    org_id          = Column(Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True)
     name            = Column(String(100), nullable=False)
     host            = Column(String(255), nullable=False)
     port            = Column(Integer,     default=22,     nullable=False)
@@ -594,6 +623,13 @@ def get_server_owned_by(db, server_id: int, user: User):
     """Retorna o servidor se o usuário tem acesso a ele, None caso contrário."""
     owner_id = user.id if user.role == "admin" else user.invited_by
     return db.query(Server).filter(Server.id == server_id, Server.owner_id == owner_id).first()
+
+
+def get_org_server_count(db, org_id: int) -> int:
+    """Sessão 3, T5 — consulta simples, não um contador denormalizado
+    (ver Organization). Sem consumidor hoje; existe pra uma feature
+    futura de billing por servidor não precisar reinventar isto."""
+    return db.query(Server).filter(Server.org_id == org_id).count()
 
 
 def build_server_cfg(s: Server) -> dict:

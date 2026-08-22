@@ -1,15 +1,34 @@
 # Mail IQ
 
 Plataforma de gestão operacional para servidores de e-mail Exim — não é só
-monitoramento: existe um ciclo diagnóstico → ação. O script `diag-exim.sh`
-roda no servidor monitorado, classifica problemas (`AUTH_ABUSE`, `IP_FLOOD`,
-`SPAM_RELAY`, etc.) e o dashboard sugere/executa a ação correta (limpar fila,
-bloquear IP, bloquear remetente, forçar reprocessamento).
+monitoramento: existe um ciclo diagnóstico → ação. O script
+[`diag-exim/diag-exim.sh`](diag-exim/) roda no servidor monitorado, classifica
+problemas (`AUTH_ABUSE`, `IP_FLOOD`, `SPAM_RELAY`, etc.) e o painel
+sugere/executa a ação correta (limpar fila, bloquear IP, bloquear remetente,
+forçar reprocessamento) — detecta o incidente, notifica onde você já está
+(Telegram/e-mail/webhook) e gera o relatório que você encaminha pro seu
+cliente.
 
 Nome de código no GitHub: `exim-monitor`.
 
 Suporta ambientes Debian/Ubuntu (`exim4`) e cPanel/WHM. Compatibilidade com
 outros painéis (Plesk, DirectAdmin) é trabalho futuro.
+
+## Licenciamento
+
+Este repositório é **open-core** — duas licenças diferentes, sem ambiguidade
+sobre onde uma termina e a outra começa:
+
+| | Licença | O que cobre |
+|---|---|---|
+| [`diag-exim/`](diag-exim/) | **MIT** (permissiva) | O script de diagnóstico/ação sozinho — roda em qualquer servidor Exim, sem o painel, sem conta, sem depender de nada aqui. Use, modifique, redistribua, incorpore no que quiser. |
+| Todo o resto (`backend/`, `frontend/`, agregação de frota, histórico, alertas, relatórios) | **Comercial** — ver [`LICENSE`](LICENSE) | O painel: tudo que só existe/funciona com o Mail IQ rodando. Requer licença comercial pra uso além de avaliação. |
+
+Se você só quer diagnosticar e agir manualmente num servidor Exim, o
+`diag-exim/` sozinho já resolve — é o pacote que existe pra isso, com README
+próprio. O painel existe pra quem opera mais de um servidor e quer o
+histórico, os alertas e os relatórios prontos sem construir isso por conta
+própria.
 
 ## O que este software executa no seu servidor
 
@@ -134,17 +153,23 @@ frontend/            Dashboard React
     components/        gráficos, painéis de ação/diagnóstico, seletor de servidor
     contexts/           auth, servidor ativo, toasts
 
-diag-exim.sh           script que roda no servidor monitorado — coleta,
-                       diagnóstico e ações (--quick / --json / --check / --action=…)
+diag-exim/              pacote open-core (MIT — ver diag-exim/LICENSE), autônomo
+  diag-exim.sh           script que roda no servidor monitorado — coleta,
+                         diagnóstico e ações (--quick / --json / --check / --action=…)
+  README.md              uso standalone, sem o painel
+  LICENSE                MIT
 mailiq-bootstrap.sh    roda uma vez, como root, NO SERVIDOR MONITORADO —
                        cria o usuário mailiq, instala a chave, escreve o
                        sudoers mínimo
 install.sh             instalador do painel (gera .env, sobe Docker Compose,
                        configura proxy) — não toca em nenhum servidor EXIM
+LICENSE                comercial — cobre tudo neste repositório EXCETO diag-exim/
 docs/
   seguranca.md          sudoers de referência completo, pra auditar antes
                         de instalar
   compatibilidade.md    matriz de formatos de log validados vs. inferidos
+  dados.md               que dados o sistema lê, onde ficam, retenção — a
+                        resposta pra pergunta de LGPD antes de ela ser feita
 tests/                  testes automatizados contra Exim/iptables/API reais
   fixtures/              amostras de mainlog por formato
 ```

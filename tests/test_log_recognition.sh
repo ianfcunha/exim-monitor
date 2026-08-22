@@ -16,7 +16,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DIAG="$SCRIPT_DIR/diag-exim.sh"
+DIAG="$SCRIPT_DIR/diag-exim/diag-exim.sh"
 FIXTURES="$SCRIPT_DIR/tests/fixtures"
 SOURCEABLE="$(mktemp)"
 

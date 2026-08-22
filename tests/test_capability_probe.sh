@@ -21,7 +21,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DIAG="$SCRIPT_DIR/diag-exim.sh"
+DIAG="$SCRIPT_DIR/diag-exim/diag-exim.sh"
 TEST_USER="mailiq-capprobe-test"
 SUDOERS_FILE="/etc/sudoers.d/${TEST_USER}"
 

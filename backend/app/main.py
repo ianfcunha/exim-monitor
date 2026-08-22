@@ -33,7 +33,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Versão atual do schema — atualizar junto com cada nova migration
-_SCHEMA_VERSION = "018"
+_SCHEMA_VERSION = "019"
 
 _DDL_ALEMBIC_VERSION = """
     CREATE TABLE IF NOT EXISTS alembic_version (
@@ -599,6 +599,31 @@ def run_migrations() -> None:
             )
             logger.info("Migration 018 aplicada com sucesso")
             current = {"018"}
+
+        if "018" in current and "019" not in current:
+            logger.info("Aplicando migration 018 → 019 (org_id — preparação de schema, Sessão 3 T5)...")
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS organizations (
+                    id         SERIAL PRIMARY KEY,
+                    name       VARCHAR(200) NOT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+            """))
+            conn.execute(text("""
+                ALTER TABLE users
+                    ADD COLUMN IF NOT EXISTS org_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL
+            """))
+            conn.execute(text("""
+                ALTER TABLE servers
+                    ADD COLUMN IF NOT EXISTS org_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL
+            """))
+            conn.execute(text("DELETE FROM alembic_version"))
+            conn.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
+                {"v": "019"},
+            )
+            logger.info("Migration 019 aplicada com sucesso")
+            current = {"019"}
 
         logger.info("Banco de dados pronto (schema %s)", _SCHEMA_VERSION)
 
