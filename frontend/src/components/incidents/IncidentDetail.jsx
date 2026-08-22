@@ -9,9 +9,9 @@
  * já validado em ActionPanel/MaintenancePage (Sessão 1, T3): nada
  * executa até o usuário ver exatamente o que vai mudar.
  */
-import { AlertTriangle, Check, CheckCircle2, Settings2, ShieldOff } from 'lucide-react'
+import { AlertTriangle, Check, CheckCircle2, FileText, Settings2, ShieldOff } from 'lucide-react'
 import { useState } from 'react'
-import { ackIncident, applyIncidentFix, planIncidentFix, resolveIncident, silenceIncident } from '../../api/client'
+import { ackIncident, applyIncidentFix, fetchIncidentReportHtml, planIncidentFix, resolveIncident, silenceIncident } from '../../api/client'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { SEVERITY_STYLE, STATUS_LABELS, STATUS_STYLE, TYPE_LABELS, applyLabel } from './incidentLabels'
@@ -116,6 +116,7 @@ export default function IncidentDetail({ incident, onChanged }) {
   const [planning, setPlanning]   = useState(false)
   const [applying, setApplying]   = useState(false)
   const [thresholdsOpen, setThresholdsOpen] = useState(false)
+  const [reportLoading, setReportLoading] = useState(false)
 
   if (!incident) {
     return (
@@ -158,6 +159,25 @@ export default function IncidentDetail({ incident, onChanged }) {
       toast({ type: 'err', msg: err?.response?.data?.detail || err.message || 'Erro ao aplicar correção.' })
     } finally {
       setApplying(false)
+    }
+  }
+
+  // Sessão 3, T2 — busca o HTML como blob (a rota exige o mesmo Bearer
+  // token de toda a API, então uma navegação direta <a href> quebraria)
+  // e abre numa aba nova; de lá o próprio usuário usa Ctrl+P/"Salvar
+  // como" do navegador pra imprimir ou gerar o arquivo autocontido que
+  // encaminha ao cliente dele.
+  const openReport = async () => {
+    setReportLoading(true)
+    try {
+      const res = await fetchIncidentReportHtml(incident.id)
+      const url = window.URL.createObjectURL(res.data)
+      window.open(url, '_blank')
+      setTimeout(() => window.URL.revokeObjectURL(url), 60_000)
+    } catch (err) {
+      toast({ type: 'err', msg: err?.response?.data?.detail || err.message || 'Erro ao gerar relatório.' })
+    } finally {
+      setReportLoading(false)
     }
   }
 
@@ -221,12 +241,15 @@ export default function IncidentDetail({ incident, onChanged }) {
             {' · '}última vez {fmtDateTime(incident.last_seen)}
           </span>
           {/* Sessão 3, T2 — o documento que o dono do host encaminha ao cliente dele */}
-          <a
-            href={`/incidents/${incident.id}/report`} target="_blank" rel="noreferrer"
-            style={{ fontSize: 11, color: 'var(--sky)', fontWeight: 600, textDecoration: 'none' }}
+          <button
+            onClick={openReport} disabled={reportLoading}
+            style={{
+              fontSize: 11, color: 'var(--sky)', fontWeight: 600, background: 'none', border: 'none',
+              padding: 0, cursor: reportLoading ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4,
+            }}
           >
-            Ver relatório →
-          </a>
+            <FileText size={11} /> {reportLoading ? 'Gerando relatório…' : 'Ver relatório →'}
+          </button>
         </div>
       </div>
 

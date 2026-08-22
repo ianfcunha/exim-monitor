@@ -18,10 +18,13 @@ vez no fechamento (routers/incidents.py::resolve_incident,
 incident_engine.py auto-resolve) — aí o resultado é congelado em
 Incident.impact e nunca mais recalculado.
 """
+import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from .database import Incident, Snapshot, get_alert_settings
+
+_IP_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$|^[0-9a-fA-F:]+$")
 
 # Janela "antes" usada como baseline de comparação pra queda na taxa de
 # entrega — mesma ordem de grandeza da baseline horária (T3, Sessão 2),
@@ -55,7 +58,13 @@ def _entities_affected(incident: Incident) -> Tuple[List[str], List[str]]:
     usa entity="geral", sem entidade extraível)."""
     entity = incident.entity or ""
     if entity.startswith("domain:"):
-        return [], [entity.split(":", 1)[1]]
+        value = entity.split(":", 1)[1]
+        # detect_reputation() usa domain-ou-ip como fallback pro entity
+        # do incidente de certificado (`domain or ip or 'cert'`) — um IP
+        # aqui não é um domínio de cliente, é o próprio servidor.
+        if _IP_RE.match(value):
+            return [], []
+        return [], [value]
     if entity.startswith("sender:"):
         return [entity.split(":", 1)[1]], []
     if entity.startswith("ip:") or entity in ("frozen", "geral"):

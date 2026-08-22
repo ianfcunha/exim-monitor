@@ -198,4 +198,12 @@ export const fetchIncidentConfig = (serverId) =>
 export const saveIncidentConfig = (serverId, type, thresholds) =>
   api.put(`/incidents/config/${serverId}/${type}`, { thresholds }).then(r => r.data)
 
+// ── Relatório de incidente (Sessão 3, T2) ───────────────────────────────────
+// HTML autocontido — buscado como blob (não navegação direta) porque a
+// rota exige o mesmo Bearer token de toda a API; quem chama abre via
+// URL.createObjectURL (nova aba) ou dispara download, mesmo padrão de
+// exportLogMessages/exportActionHistory.
+export const fetchIncidentReportHtml = (id) =>
+  api.get(`/incidents/${id}/report`, { responseType: 'blob' })
+
 export default api

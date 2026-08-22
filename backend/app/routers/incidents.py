@@ -18,19 +18,21 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_user, require_admin
 from ..crypto import SecretDecryptionError
 from ..database import (
-    ActionPlan, DetectorConfig, Incident, IncidentEvent, User, build_server_cfg, get_db,
+    ActionHistory, ActionPlan, DetectorConfig, Incident, IncidentEvent, User, build_server_cfg, get_db,
     get_detector_config_overrides, get_server_owned_by, get_servers_for_user, record_action_history,
     record_incident_event, save_detector_config_overrides, to_utc_iso,
 )
 from ..detectors import DEFAULT_THRESHOLDS
 from ..incident_impact import compute_impact, freeze_impact
 from ..incident_notify import notify_incident_event
+from ..incident_report import render_incident_report_html
 from ..ssh import SSHError, run_action
 
 router = APIRouter(prefix="/api/incidents", tags=["incidents"])
@@ -180,6 +182,30 @@ def get_incident(incident_id: int, db: Session = Depends(get_db), current_user: 
     incident = _get_incident_or_404(db, incident_id, current_user)
     server = incident.server
     return _incident_to_dict(incident, server_name=server.name if server else None, include_events=True, db=db)
+
+
+@router.get("/{incident_id}/report", summary="Relatório de incidente — HTML autocontido, imprimível", response_class=HTMLResponse)
+def get_incident_report(incident_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Sessão 3, Tarefa 2 — o documento que o dono do host encaminha ao
+    cliente dele. Mesma regra de acesso da leitura normal (get_incident,
+    não uma rota pública) — quem abre isto de fora do painel recebe o
+    HTML como arquivo (o frontend baixa/abre via blob, não navega direto
+    pra cá — ver TriagePage/IncidentDetail), não uma URL compartilhável
+    sem login."""
+    incident = _get_incident_or_404(db, incident_id, current_user)
+    server = incident.server
+    actions = (
+        db.query(ActionHistory)
+        .filter(ActionHistory.incident_id == incident.id)
+        .order_by(ActionHistory.executed_at.asc())
+        .all()
+    )
+    impact = incident.impact or compute_impact(db, incident)
+    html = render_incident_report_html(
+        incident, server_name=server.name if server else f"servidor #{incident.server_id}",
+        actions=actions, impact=impact,
+    )
+    return HTMLResponse(content=html)
 
 
 # ── Transições manuais ──────────────────────────────────────────────────────
