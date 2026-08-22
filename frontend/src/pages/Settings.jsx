@@ -4,7 +4,7 @@
  */
 import { RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { fetchAlertHistory, fetchAlertSettings, saveAlertSettings, testEmail, testTelegram, testWeeklyReport, testWebhook } from '../api/client'
+import { fetchAlertHistory, fetchAlertSettings, saveAlertSettings, testEmail, testMonthlyReport, testTelegram, testWeeklyReport, testWebhook } from '../api/client'
 import { Select as SelectPrimitive, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { useServer } from '../contexts/ServerContext'
@@ -258,7 +258,7 @@ export default function Settings() {
     }
   }
 
-  const TEST_FN = { email: testEmail, telegram: testTelegram, weeklyReport: testWeeklyReport, webhook: testWebhook }
+  const TEST_FN = { email: testEmail, telegram: testTelegram, weeklyReport: testWeeklyReport, monthlyReport: testMonthlyReport, webhook: testWebhook }
 
   const runTest = async (type) => {
     setTestMsg(prev => ({ ...prev, [type]: { text: 'Enviando…', err: false } }))
@@ -454,6 +454,38 @@ export default function Settings() {
             )}
             <GhostBtn onClick={() => runTest('weeklyReport')}>Enviar relatório de teste agora</GhostBtn>
             <Feedback msg={testMsg.weeklyReport?.text} isError={testMsg.weeklyReport?.err} />
+          </div>
+        )}
+      </Section>
+
+      {/* Relatório mensal (Sessão 3, T3) — por servidor (aba selecionada com
+          um server_id) ou pela frota inteira (seção sem server_id, no
+          registro global "servidor padrão"). */}
+      <Section title="Relatório Mensal">
+        <Toggle
+          checked={!!cfg.monthly_report_enabled}
+          onChange={set('monthly_report_enabled')}
+          label={activeServer
+            ? `Enviar resumo mensal por e-mail deste servidor (${activeServer.name}) todo dia 1`
+            : 'Enviar resumo mensal por e-mail da frota inteira todo dia 1'}
+        />
+        <p style={{ fontSize: 11, color: 'var(--dim)', marginTop: 6 }}>
+          Incidentes por tipo, MTTR, mensagens recuperadas da quarentena, tempo total em blocklist e evolução da taxa de entrega.
+        </p>
+        {cfg.monthly_report_enabled && (
+          <div style={{ marginTop: 14 }}>
+            {!cfg.email_to && (
+              <p style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 8 }}>
+                Configure o destinatário na seção de E-mail acima para o relatório poder ser enviado.
+              </p>
+            )}
+            {cfg.monthly_report_last_sent_at && (
+              <p style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 8 }}>
+                Último envio: {new Date(cfg.monthly_report_last_sent_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+              </p>
+            )}
+            <GhostBtn onClick={() => runTest('monthlyReport')}>Enviar relatório de teste agora</GhostBtn>
+            <Feedback msg={testMsg.monthlyReport?.text} isError={testMsg.monthlyReport?.err} />
           </div>
         )}
       </Section>

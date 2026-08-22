@@ -227,6 +227,16 @@ class AlertSettings(Base):
     cost_per_sysadmin_hour_brl = Column(Float, nullable=True)
     cost_per_ticket_brl        = Column(Float, nullable=True)
 
+    # ── Relatório mensal (Sessão 3, Tarefa 3) ───────────────────────────
+    # Mesmo padrão de weekly_report_* acima — um registro com server_id
+    # preenchido envia o relatório DAQUELE servidor; o registro global
+    # (server_id nulo, id=1) envia o relatório DA FROTA inteira. Persistido
+    # (não em memória) pelo mesmo motivo do semanal: sobreviver a um
+    # restart do backend sem perder o controle de quando foi o último
+    # envio do mês.
+    monthly_report_enabled      = Column(Boolean, default=False, nullable=False)
+    monthly_report_last_sent_at = Column(DateTime, nullable=True)
+
 
 class AlertHistory(Base):
     """

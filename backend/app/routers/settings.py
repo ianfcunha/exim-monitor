@@ -18,6 +18,7 @@ from ..auth import get_current_user, require_admin
 from ..database import (
     AlertHistory, AlertSettings, Server, User, get_alert_settings, get_db, to_utc_iso,
 )
+from ..monthly_report import send_fleet_monthly_report, send_monthly_report
 from ..reports import send_weekly_report
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -49,6 +50,8 @@ class AlertSettingsSchema(BaseModel):
     cooldown_minutes:   int = Field(30, ge=1, le=1440)
     # Relatório semanal por e-mail
     weekly_report_enabled: bool = False
+    # Relatório mensal por e-mail (Sessão 3, T3)
+    monthly_report_enabled: bool = False
     # Webhook genérico
     webhook_url:    str = ""
     webhook_secret: str = ""   # "" = nao alterar se vier mascarado
@@ -81,6 +84,8 @@ def _to_response(cfg: AlertSettings) -> dict:
         "cooldown_minutes":    cfg.cooldown_minutes,
         "weekly_report_enabled":     cfg.weekly_report_enabled,
         "weekly_report_last_sent_at": to_utc_iso(cfg.weekly_report_last_sent_at),
+        "monthly_report_enabled":      cfg.monthly_report_enabled,
+        "monthly_report_last_sent_at": to_utc_iso(cfg.monthly_report_last_sent_at),
         "webhook_url":    cfg.webhook_url,
         "webhook_secret": MASK if cfg.webhook_secret else "",
         "cost_per_sysadmin_hour_brl": cfg.cost_per_sysadmin_hour_brl,
@@ -121,6 +126,7 @@ def update_settings(
     cfg.queue_threshold    = payload.queue_threshold
     cfg.cooldown_minutes   = payload.cooldown_minutes
     cfg.weekly_report_enabled = payload.weekly_report_enabled
+    cfg.monthly_report_enabled = payload.monthly_report_enabled
     cfg.webhook_url         = payload.webhook_url
     cfg.cost_per_sysadmin_hour_brl = payload.cost_per_sysadmin_hour_brl
     cfg.cost_per_ticket_brl        = payload.cost_per_ticket_brl
@@ -210,6 +216,33 @@ async def test_weekly_report(
     if not sent:
         raise HTTPException(502, "Falha ao enviar o relatório de teste — veja os logs do backend.")
     return {"ok": True, "message": f"Relatório semanal de teste enviado para {cfg.email_to}"}
+
+
+@router.post("/test/monthly-report", summary="Dispara o relatório mensal imediatamente (teste)")
+async def test_monthly_report(
+    server_id: Optional[int] = Query(None, description="Servidor específico; omitido = frota inteira"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Mesma lógica de test_weekly_report — mark_sent=False não mexe em
+    monthly_report_last_sent_at, então não atrasa o próximo envio real
+    do dia 1. server_id omitido testa o relatório DA FROTA (registro
+    global de AlertSettings), não um servidor específico."""
+    cfg = get_alert_settings(db, server_id=server_id)
+    if not cfg.monthly_report_enabled:
+        raise HTTPException(400, "Ative o relatório mensal antes de testar.")
+    if not cfg.email_to or (not cfg.resend_api_key and not cfg.smtp_password):
+        raise HTTPException(400, "Configure e-mail e Resend API key (ou senha SMTP) antes de testar.")
+
+    if server_id is not None:
+        server = db.get(Server, server_id)
+        sent = await send_monthly_report(server_id, server.name if server else "servidor", mark_sent=False)
+    else:
+        sent = await send_fleet_monthly_report(mark_sent=False)
+
+    if not sent:
+        raise HTTPException(502, "Falha ao enviar o relatório de teste — veja os logs do backend.")
+    return {"ok": True, "message": f"Relatório mensal de teste enviado para {cfg.email_to}"}
 
 
 @router.post("/test/telegram", summary="Envia mensagem de teste no Telegram")
