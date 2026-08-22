@@ -4,6 +4,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { AuthProvider } from './contexts/AuthContext'
 import { ServerProvider } from './contexts/ServerContext'
 import { ToastProvider } from './contexts/ToastContext'
+import { useAdvancedMode } from './hooks/useAdvancedMode'
 import { useDarkMode } from './hooks/useDarkMode'
 import ActionHistoryPage from './pages/ActionHistoryPage'
 import Dashboard from './pages/Dashboard'
@@ -29,6 +30,11 @@ export default function App() {
   // classe .dark no <html> em toda tela (Login incluso), não só onde o
   // controle de toggle é exibido (menu de configurações do Dashboard).
   const { isDark, toggleTheme } = useDarkMode()
+  // Sessão 3, T6 — "poda": PHP mailer detector, gráficos históricos
+  // elaborados, log viewer, badge de papel e atalhos fora da Triagem só
+  // aparecem com isto ligado (padrão: desligado). Não precisa ser
+  // chamado incondicionalmente como o tema (não afeta a tela de Login).
+  const { advanced, toggleAdvanced } = useAdvancedMode()
 
   useEffect(() => {
     if (token) localStorage.setItem('exim_token', token)
@@ -64,9 +70,9 @@ export default function App() {
                 numérico interno. */}
             <Route path="/incidents/:displayId" element={<TriagePage />} />
             <Route path="/reputation" element={<ReputationPage />} />
-            <Route path="/dashboard" element={<Dashboard onLogout={logout} />} />
+            <Route path="/dashboard" element={<Dashboard onLogout={logout} advanced={advanced} />} />
             <Route path="/settings" element={<SettingsLayout />}>
-              <Route index          element={<GeneralSettings isDark={isDark} onToggleTheme={toggleTheme} />} />
+              <Route index          element={<GeneralSettings isDark={isDark} onToggleTheme={toggleTheme} advanced={advanced} onToggleAdvanced={toggleAdvanced} />} />
               <Route path="alerts"  element={<Settings />} />
               <Route path="servers" element={<ServersPage />} />
               <Route path="users"   element={<UsersPage />} />

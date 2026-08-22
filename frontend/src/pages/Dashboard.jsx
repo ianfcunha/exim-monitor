@@ -4,11 +4,16 @@
  *
  * Melhorias UX incluídas:
  *   - Título dinâmico da aba conforme severidade
- *   - Badge de role (Admin/Viewer) + username no header
  *   - Tendência nos MetricCards (seta ↑↓ vs coleta anterior)
  *   - Tooltips explicativos nos cards
  *   - DiagnosisPanel colapsável (auto-colapsa em OK, auto-expande em CRITICAL)
- *   - Atalhos de teclado: R=Refresh, L=Logs
+ *
+ * Sessão 3, T6 — "poda": este é o Painel clássico agora, secundário à
+ * Triagem (/triage). PHP mailer detector, gráficos históricos, log
+ * viewer, badge de role (Admin/Viewer) e os atalhos R=Refresh/L=Logs só
+ * aparecem com `advanced` ligado (Configurações → Geral → Modo
+ * avançado, desligado por padrão — ver useAdvancedMode.js) — nenhum
+ * deles foi removido, só deixaram de ser o caminho principal/de demo.
  */
 import {
   CheckCircle, Clock, FileText, History, Inbox,
@@ -137,7 +142,7 @@ const METRIC_TOOLTIPS = {
 }
 
 // ── Componente principal ─────────────────────────────────────────────────────
-export default function Dashboard({ onLogout }) {
+export default function Dashboard({ onLogout, advanced = false }) {
   const { isAdmin, username } = useAuth()
   const { activeServer }      = useServer()
   const quick                 = useQuickStatus()
@@ -199,7 +204,11 @@ export default function Dashboard({ onLogout }) {
   }, [diag.severity])
 
   // ── Atalhos de teclado ────────────────────────────────────────────────────
+  // Sessão 3, T6 — "poda": atalhos fora da Triagem só existem em modo
+  // avançado. A Triagem (J/K/E/S) é a única história de atalhos que
+  // aparece por padrão, sem um segundo conjunto concorrente aqui.
   useEffect(() => {
+    if (!advanced) return
     const handler = (e) => {
       const tag = e.target.tagName?.toUpperCase()
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
@@ -215,7 +224,7 @@ export default function Dashboard({ onLogout }) {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [refreshing]) // eslint-disable-line
+  }, [refreshing, advanced]) // eslint-disable-line
 
   // ── Top tables ────────────────────────────────────────────────────────────
   const domainRows = (arr) =>
@@ -364,8 +373,9 @@ export default function Dashboard({ onLogout }) {
           {/* ── Direita ── */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
 
-            {/* Badge usuário + role */}
-            {username && (
+            {/* Badge usuário + role — Sessão 3, T6: complexidade de papel
+                (admin/viewer) fica fora do caminho principal por padrão */}
+            {advanced && username && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div
@@ -388,28 +398,33 @@ export default function Dashboard({ onLogout }) {
               </Tooltip>
             )}
 
-            {/* Hint de atalhos */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span
-                  className="hidden lg:inline"
-                  style={{ fontSize: 9, color: 'var(--border)', userSelect: 'none', letterSpacing: '0.05em' }}
-                >
-                  [R] refresh · [L] logs
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>Atalhos de teclado disponíveis</TooltipContent>
-            </Tooltip>
+            {/* Hint de atalhos — só faz sentido com os atalhos ligados (modo avançado) */}
+            {advanced && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    className="hidden lg:inline"
+                    style={{ fontSize: 9, color: 'var(--border)', userSelect: 'none', letterSpacing: '0.05em' }}
+                  >
+                    [R] refresh · [L] logs
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>Atalhos de teclado disponíveis</TooltipContent>
+              </Tooltip>
+            )}
 
-            <HBtn onClick={handleRefresh} disabled={refreshing} title="Forçar atualização (R)">
+            <HBtn onClick={handleRefresh} disabled={refreshing} title="Forçar atualização">
               <RefreshCw size={12} style={{ animation: refreshing ? 'spin 1s linear infinite' : undefined }} />
               <span className="hidden sm:inline">{refreshing ? 'Atualizando…' : 'Refresh'}</span>
             </HBtn>
 
-            <HBtn onClick={() => setLogViewer(true)} title="Visualizador de log (L)">
-              <FileText size={12} />
-              <span className="hidden sm:inline">Logs</span>
-            </HBtn>
+            {/* Log viewer — Sessão 3, T6: fica atrás do modo avançado (ver useAdvancedMode) */}
+            {advanced && (
+              <HBtn onClick={() => setLogViewer(true)} title="Visualizador de log">
+                <FileText size={12} />
+                <span className="hidden sm:inline">Logs</span>
+              </HBtn>
+            )}
 
             <SettingsControls onLogout={onLogout} />
           </div>
@@ -510,10 +525,15 @@ export default function Dashboard({ onLogout }) {
           </div>
         )}
 
-        {/* Scripts PHP maliciosos — dado do ciclo completo (5min) */}
-        <div className="grid grid-cols-1 gap-4">
-          <PhpMailersCard phpMailers={f.php_mailers} loading={full.loading} />
-        </div>
+        {/* Scripts PHP maliciosos — dado do ciclo completo (5min).
+            Sessão 3, T6: fica atrás do modo avançado — "uma demo com
+            cinco painéis dilui; uma demo com um incidente real
+            detectado convence". */}
+        {advanced && (
+          <div className="grid grid-cols-1 gap-4">
+            <PhpMailersCard phpMailers={f.php_mailers} loading={full.loading} />
+          </div>
+        )}
 
         {/* Domínios com erros */}
         {(topRejected.length > 0 || topDeferred.length > 0) && (
@@ -539,11 +559,13 @@ export default function Dashboard({ onLogout }) {
           </div>
         )}
 
-        {/* Gráficos */}
-        <div className={hourlyStats.length > 0 ? 'grid grid-cols-1 lg:grid-cols-2 gap-4' : ''}>
-          <HistoryChart key={chartKey} />
-          {hourlyStats.length > 0 && <HourlyBarChart data={hourlyStats} loading={loading} />}
-        </div>
+        {/* Gráficos históricos elaborados — Sessão 3, T6: modo avançado */}
+        {advanced && (
+          <div className={hourlyStats.length > 0 ? 'grid grid-cols-1 lg:grid-cols-2 gap-4' : ''}>
+            <HistoryChart key={chartKey} />
+            {hourlyStats.length > 0 && <HourlyBarChart data={hourlyStats} loading={loading} />}
+          </div>
+        )}
 
       </main>
 

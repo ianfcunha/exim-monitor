@@ -4,7 +4,7 @@
  * única preferência realmente "geral" que existe hoje — antes só dava
  * pra trocar pelo dropdown do header).
  */
-import { AlertTriangle, Bell, ChevronRight, History, Moon, Server, Sun, Users } from 'lucide-react'
+import { AlertTriangle, Bell, ChevronRight, History, Moon, Server, Sparkles, Sun, Users } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Switch } from '@/components/ui/switch'
 import { useAuth } from '../contexts/AuthContext'
@@ -17,7 +17,7 @@ const LINKS = [
   { to: '/settings/maintenance', Icon: AlertTriangle, title: 'Manutenção',   desc: 'Limpar toda a fila e restaurar mensagens da quarentena.',     adminOnly: true },
 ]
 
-export default function GeneralSettings({ isDark, onToggleTheme }) {
+export default function GeneralSettings({ isDark, onToggleTheme, advanced, onToggleAdvanced }) {
   const { isAdmin } = useAuth()
   const links = LINKS.filter(l => !l.adminOnly || isAdmin)
 
@@ -37,6 +37,32 @@ export default function GeneralSettings({ isDark, onToggleTheme }) {
           </span>
           <Switch checked={!!isDark} onCheckedChange={onToggleTheme} />
         </label>
+      </div>
+
+      {/* Sessão 3, T6 — "poda": estes recursos ficam fora do Painel
+          clássico por padrão (log viewer, detector de PHP malicioso,
+          gráficos históricos, badge de papel, atalhos R/L). Ligar aqui
+          não afeta a Triagem, que já é o caminho principal. */}
+      <div style={{
+        background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12,
+        padding: '20px 20px 16px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+      }}>
+        <p style={{ fontSize: 10, letterSpacing: '0.30em', textTransform: 'uppercase', color: 'var(--sky)', fontWeight: 700, marginBottom: 16 }}>
+          Painel clássico
+        </p>
+        <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', userSelect: 'none' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Sparkles size={15} color="var(--muted)" />
+            <span style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>Modo avançado</span>
+          </span>
+          <Switch checked={!!advanced} onCheckedChange={onToggleAdvanced} />
+        </label>
+        <p style={{ fontSize: 11, color: 'var(--dim)', marginTop: 8, lineHeight: 1.5 }}>
+          Mostra o log viewer, o detector de PHP mailers, os gráficos históricos
+          elaborados, o badge de papel (admin/viewer) e os atalhos de teclado do
+          Painel clássico (R/L). Desligado por padrão — a Triagem é a tela pra
+          uso do dia a dia.
+        </p>
       </div>
 
       {links.length > 0 && (
