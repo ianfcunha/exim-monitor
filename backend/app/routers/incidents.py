@@ -37,6 +37,20 @@ router = APIRouter(prefix="/api/incidents", tags=["incidents"])
 PLAN_MAX_AGE_SECONDS = 300  # mesmo valor de routers/actions.py — mesma garantia de frescor
 OPEN_STATUSES = ("aberto", "em_observacao", "mitigado")
 
+# "como reverter" — descrição genérica por tipo de ação, mostrada já no
+# preview do plan() (o id real da quarentena só existe depois do apply,
+# mas o MECANISMO de reversão é conhecido de antemão). Tela de Triagem
+# (T6) mostra isto junto do preview antes de qualquer coisa acontecer.
+_REVERT_DESCRIPTIONS = {
+    "clean-frozen":  "Reversível — as mensagens vão para quarentena antes de remover; restaure em Configurações → Manutenção.",
+    "clean-bounces": "Reversível — as mensagens vão para quarentena antes de remover; restaure em Configurações → Manutenção.",
+    "clean-sender":  "Reversível — as mensagens vão para quarentena antes de remover; restaure em Configurações → Manutenção.",
+    "clean-auth":    "Reversível — as mensagens vão para quarentena antes de remover; restaure em Configurações → Manutenção.",
+    "block-ip":      "Reversível — desbloqueie o IP a qualquer momento (bloqueio já tem TTL automático).",
+    "block-sender":  "Sem reversão de um clique — remover exige editar /etc/exim4/spammer_sender manualmente no servidor.",
+    "retry-queue":   "Nada a reverter — só força reprocessamento, não remove nem bloqueia nada.",
+}
+
 
 # ── Helpers de escopo/serialização ──────────────────────────────────────────
 
@@ -224,7 +238,11 @@ def plan_incident_fix(incident_id: int, db: Session = Depends(get_db), current_u
         action=action, param=param, preview=result,
     ))
     db.commit()
-    return {"plan_id": plan_id, "expires_in_seconds": PLAN_MAX_AGE_SECONDS, "preview": result, "action": action, "param": param}
+    return {
+        "plan_id": plan_id, "expires_in_seconds": PLAN_MAX_AGE_SECONDS, "preview": result,
+        "action": action, "param": param,
+        "revert_description": _REVERT_DESCRIPTIONS.get(action, "Mecanismo de reversão não documentado para esta ação."),
+    }
 
 
 class ApplyFixRequest(BaseModel):
@@ -267,7 +285,12 @@ def apply_incident_fix(incident_id: int, body: ApplyFixRequest, db: Session = De
         )
         raise HTTPException(503, str(exc))
 
-    revert_hint = f"restore-quarantine:{result['quarantine_incident']}" if result.get("quarantine_incident") else None
+    if result.get("quarantine_incident"):
+        revert_hint = f"restore-quarantine:{result['quarantine_incident']}"
+    elif action == "block-ip" and param:
+        revert_hint = f"unblock-ip:{param}"
+    else:
+        revert_hint = None
     record_action_history(
         db, server_id=incident.server_id, actor=current_user.username, action=action,
         param=param, success=result.get("success", False), message=result.get("message"),

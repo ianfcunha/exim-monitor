@@ -160,4 +160,42 @@ export const testWeeklyReport   = (serverId = null) =>
 export const testWebhook        = (serverId = null) =>
   api.post('/settings/test/webhook', null, { params: serverId ? { server_id: serverId } : {} }).then(r => r.data)
 
+// ── Incidentes (Sessão 2) ──────────────────────────────────────────────────
+// Sem server_id: cross-fleet por padrão (a Triagem lista todos os
+// servidores juntos) — mesma convenção "sem filtro = tudo que o usuário
+// vê" do resto da API (ex.: fetchActionHistory).
+export const fetchIncidents = (params = {}) =>
+  api.get('/incidents', { params }).then(r => r.data)
+
+export const fetchIncidentsSummary = () =>
+  api.get('/incidents/summary').then(r => r.data)
+
+export const fetchIncident = (id) =>
+  api.get(`/incidents/${id}`).then(r => r.data)
+
+export const ackIncident = (id) =>
+  api.post(`/incidents/${id}/ack`).then(r => r.data)
+
+export const silenceIncident = (id, minutes = 60) =>
+  api.post(`/incidents/${id}/silence`, { minutes }).then(r => r.data)
+
+export const resolveIncident = (id, resolution = 'manual') =>
+  api.post(`/incidents/${id}/resolve`, { resolution }).then(r => r.data)
+
+// plan()/apply() — mesmo fluxo de duas fases da Sessão 1 (ver
+// planAction/runAction acima), aplicado à correção sugerida do
+// incidente em vez de uma ação escolhida manualmente no ActionPanel.
+export const planIncidentFix = (id) =>
+  api.post(`/incidents/${id}/fix/plan`).then(r => r.data)
+
+export const applyIncidentFix = (id, planId, snapshot = true) =>
+  api.post(`/incidents/${id}/fix/apply`, { plan_id: planId, snapshot }).then(r => r.data)
+
+// ── Thresholds de detector (formulário simples, não uma aba "Regras") ──────
+export const fetchIncidentConfig = (serverId) =>
+  api.get(`/incidents/config/${serverId}`).then(r => r.data)
+
+export const saveIncidentConfig = (serverId, type, thresholds) =>
+  api.put(`/incidents/config/${serverId}/${type}`, { thresholds }).then(r => r.data)
+
 export default api

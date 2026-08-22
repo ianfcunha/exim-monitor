@@ -110,6 +110,12 @@ function SettingsControls({ onLogout }) {
   const navigate = useNavigate()
   return (
     <>
+      {/* Sessão 2, T6: este painel virou a aba secundária — a Triagem
+          (/triage) é a tela inicial agora. */}
+      <HBtn onClick={() => navigate('/triage')} title="Ir para a Triagem de incidentes">
+        <Inbox size={12} />
+        <span className="hidden sm:inline">Triagem</span>
+      </HBtn>
       <HBtn onClick={() => navigate('/settings')} title="Configurações">
         <Settings size={12} />
         <span className="hidden sm:inline">Configurações</span>
