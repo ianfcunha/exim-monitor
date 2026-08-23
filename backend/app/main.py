@@ -33,7 +33,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Versão atual do schema — atualizar junto com cada nova migration
-_SCHEMA_VERSION = "022"
+_SCHEMA_VERSION = "023"
 
 _DDL_ALEMBIC_VERSION = """
     CREATE TABLE IF NOT EXISTS alembic_version (
@@ -744,6 +744,37 @@ def run_migrations() -> None:
             )
             logger.info("Migration 022 aplicada com sucesso")
             current = {"022"}
+
+        if "022" in current and "023" not in current:
+            logger.info("Aplicando migration 022 → 023 (canal de alerta global com override por servidor, Sessão 4 T10)...")
+            for column in ("email_override", "telegram_override", "webhook_override"):
+                conn.execute(text(f"""
+                    ALTER TABLE alert_settings
+                        ADD COLUMN IF NOT EXISTS {column} BOOLEAN NOT NULL DEFAULT FALSE
+                """))
+
+            # Quem já tinha canal configurado direto no servidor não pode
+            # perder o alerta ao ligar a herança: esses registros nascem
+            # com o override do canal correspondente LIGADO, preservando
+            # exatamente o que já disparava. A herança do global passa a
+            # valer só para servidor que nunca teve aquele canal
+            # configurado — e para os que vierem depois.
+            promoted = conn.execute(text("""
+                UPDATE alert_settings SET
+                    email_override    = (email_enabled OR email_to <> '' OR smtp_password <> '' OR resend_api_key <> ''),
+                    telegram_override = (telegram_enabled OR telegram_bot_token <> '' OR telegram_chat_id <> ''),
+                    webhook_override  = (webhook_url <> '')
+                WHERE server_id IS NOT NULL
+                RETURNING server_id
+            """)).fetchall()
+
+            conn.execute(text("DELETE FROM alembic_version"))
+            conn.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
+                {"v": "023"},
+            )
+            logger.info("Migration 023 aplicada com sucesso (%d config(s) por servidor avaliada(s))", len(promoted))
+            current = {"023"}
 
         logger.info("Banco de dados pronto (schema %s)", _SCHEMA_VERSION)
 

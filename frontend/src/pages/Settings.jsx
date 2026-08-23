@@ -8,8 +8,15 @@ import { fetchAlertHistory, fetchAlertSettings, saveAlertSettings, testEmail, te
 import { Select as SelectPrimitive, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { useServer } from '../contexts/ServerContext'
+import { severityLabel } from '../lib/severity'
 
-const SEVERITY_OPTIONS = ['HIGH', 'CRITICAL']
+// O VALOR continua sendo o da escala do script (é como o diagnóstico
+// classifica); o RÓTULO é o vocabulário único da interface (Sessão 4,
+// T10) — ver frontend/src/lib/severity.js.
+const SEVERITY_OPTIONS = [
+  { value: 'HIGH',     label: 'Crítico e atenção' },
+  { value: 'CRITICAL', label: 'Apenas crítico' },
+]
 const MASK = '••••••••'
 
 const inputStyle = {
@@ -20,16 +27,19 @@ const inputStyle = {
 }
 
 /* ── Primitivos ── */
-function Section({ title, children }) {
+function Section({ title, aside, children }) {
   return (
     <div style={{
       background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12,
       padding: '20px 20px 16px', marginBottom: 12,
       boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
     }}>
-      <p style={{ fontSize: 10, letterSpacing: '0.30em', textTransform: 'uppercase', color: 'var(--sky)', fontWeight: 700, marginBottom: 16 }}>
-        {title}
-      </p>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
+        <p style={{ fontSize: 10, letterSpacing: '0.30em', textTransform: 'uppercase', color: 'var(--sky)', fontWeight: 700 }}>
+          {title}
+        </p>
+        {aside}
+      </div>
       {children}
     </div>
   )
@@ -113,8 +123,97 @@ function GhostBtn({ onClick, children }) {
   )
 }
 
+/* ── Estado de um canal (Sessão 4, T10) ──
+   Ligar o interruptor não é o mesmo que estar alertando. O backend
+   devolve, por canal, {enabled, configured, missing[], active} — sempre
+   calculado sobre a configuração EFETIVA (herança já resolvida), porque
+   é ela que dispara. Um canal ligado e incompleto avisa o que falta e
+   NÃO aparece como ativo. */
+function ChannelBadge({ status }) {
+  if (!status) return null
+  const look = status.active
+    ? { label: 'Ativo', color: 'var(--ok)', bg: 'var(--ok-bg)', border: 'var(--ok-border)' }
+    : status.enabled
+      ? { label: 'Ligado, mas incompleto', color: 'var(--warn)', bg: 'var(--warn-bg)', border: 'var(--warn-border)' }
+      : { label: 'Desligado', color: 'var(--dim)', bg: 'var(--surface)', border: 'var(--border)' }
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap',
+      borderRadius: 999, padding: '3px 10px', fontSize: 10.5, fontWeight: 700,
+      background: look.bg, border: `1px solid ${look.border}`, color: look.color,
+    }}>
+      <span style={{ width: 5, height: 5, borderRadius: 999, background: look.color }} />
+      {look.label}
+    </span>
+  )
+}
+
+function IncompleteWarning({ status }) {
+  if (!status?.enabled || status.configured) return null
+  return (
+    <div style={{
+      marginTop: 12, borderRadius: 8, padding: '9px 12px', fontSize: 11.5, lineHeight: 1.5,
+      background: 'var(--warn-bg)', border: '1px solid var(--warn-border)', color: 'var(--warn)',
+    }}>
+      Este canal está ligado mas <strong>não vai alertar</strong>: falta {status.missing.join(' e ')}.
+      Até isso ser preenchido ele não conta como canal ativo.
+    </div>
+  )
+}
+
+/* ── Herança de canal (Sessão 4, T10) ──
+   O canal vive no registro da frota; o servidor só o substitui quando
+   quer. Repetir bot token e chat ID em cada servidor não sobrevive a
+   uma frota de doze. */
+function InheritanceControl({ isGlobal, overridden, onChange, inEffect }) {
+  if (isGlobal) return null
+  return (
+    <div style={{
+      marginBottom: 14, borderRadius: 10, padding: '12px 14px',
+      background: 'var(--surface)', border: '1px solid var(--border)',
+    }}>
+      <Toggle
+        checked={!overridden}
+        onChange={v => onChange(!v)}
+        label="Usar a configuração deste canal para toda a frota"
+      />
+      <p style={{ fontSize: 11, color: 'var(--dim)', marginTop: 7, lineHeight: 1.5 }}>
+        {overridden
+          ? 'Este servidor tem a própria configuração deste canal — a da frota não se aplica aqui.'
+          : <>Em vigor agora, vindo da frota: <strong style={{ color: 'var(--muted)' }}>{inEffect}</strong>. Para mudar, abra os alertas sem servidor selecionado.</>}
+      </p>
+    </div>
+  )
+}
+
+// Descrição em uma linha do que está EM VIGOR num canal herdado — a
+// tela não pode obrigar a abrir a configuração da frota para saber se
+// vai chegar mensagem. Segredo herdado nunca vem do backend: só a
+// informação de que ele existe.
+function describeEmail(eff) {
+  if (!eff?.enabled) return 'alertas por e-mail desligados na frota'
+  if (!eff.email_to) return 'ligado, mas sem destinatário na frota'
+  return `envia para ${eff.email_to}${eff.has_credential ? (eff.via_resend ? ' via Resend' : ' via SMTP') : ', sem credencial configurada'}`
+}
+
+function describeTelegram(eff) {
+  if (!eff?.enabled) return 'alertas por Telegram desligados na frota'
+  if (!eff.chat_id) return 'ligado, mas sem chat ID na frota'
+  return `envia para o chat ${eff.chat_id}${eff.has_token ? '' : ', sem bot token configurado'}`
+}
+
+function describeWebhook(eff) {
+  if (!eff?.url) return 'nenhuma URL de webhook na frota'
+  return `${eff.url}${eff.has_secret ? ' (assinado)' : ''}`
+}
+
 /* ── Histórico de Alertas ── */
-const SEV_COLOR = { CRITICAL: 'var(--danger)', HIGH: 'var(--warn)', MEDIUM: 'var(--sky)', LOW: 'var(--muted)', OK: 'var(--ok)' }
+const SEV_COLOR = {
+  CRITICAL: 'var(--danger)', HIGH: 'var(--warn)', MEDIUM: 'var(--sky)', LOW: 'var(--muted)', OK: 'var(--ok)',
+  // O histórico mistura as duas origens: alertas do diagnóstico do
+  // script (escala acima) e notificações de incidente (critico/atencao).
+  critico: 'var(--danger)', atencao: 'var(--warn)',
+}
 const CH_LABEL  = { email: '✉ E-mail', telegram: '✈ Telegram', webhook: '🔗 Webhook' }
 
 function AlertHistorySection() {
@@ -198,7 +297,7 @@ function AlertHistorySection() {
                       color: SEV_COLOR[r.severity] ?? 'var(--dim)',
                       border: `1px solid color-mix(in srgb, ${SEV_COLOR[r.severity] ?? 'var(--dim)'} 40%, transparent)`,
                     }}>
-                      {r.severity}
+                      {severityLabel(r.severity)}
                     </span>
                   </td>
                   <td style={{ padding: '7px 8px', color: 'var(--text)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
@@ -246,6 +345,12 @@ export default function Settings() {
 
   const set = key => val => setCfg(prev => ({ ...prev, [key]: val }))
 
+  // Sessão 4, T10 — o registro da frota é sempre dono dos próprios
+  // canais; um servidor só edita o canal que decidiu substituir. Sem
+  // isso a tela ofereceria campos cuja edição não teria efeito nenhum.
+  const isGlobal = cfg?.is_global ?? !serverId
+  const ownsChannel = channel => isGlobal || !!cfg?.[`${channel}_override`]
+
   const handleSave = async () => {
     setSaving(true); setSaveMsg('')
     try {
@@ -292,14 +397,21 @@ export default function Settings() {
         <span style={{ fontSize: 12, color: activeServer ? 'var(--accent-fg)' : 'var(--muted)' }}>
           {activeServer
             ? <>Configurando alertas para: <strong>{activeServer.name}</strong></>
-            : 'Configurando alertas padrão (nenhum servidor selecionado)'}
+            : <>Configurando os alertas <strong>de toda a frota</strong> — é daqui que cada servidor herda seus canais.</>}
         </span>
       </div>
 
       {/* E-mail */}
-      <Section title="Alertas por E-mail">
+      <Section title="Alertas por E-mail" aside={<ChannelBadge status={cfg.channels?.email} />}>
+        <InheritanceControl
+          isGlobal={isGlobal} overridden={!!cfg.email_override} onChange={set('email_override')}
+          inEffect={describeEmail(cfg.in_effect?.email)}
+        />
+        {ownsChannel('email') && (
         <Toggle checked={!!cfg.email_enabled} onChange={set('email_enabled')} label="Ativar alertas por e-mail" />
-        {cfg.email_enabled && (
+        )}
+        <IncompleteWarning status={cfg.channels?.email} />
+        {ownsChannel('email') && cfg.email_enabled && (
           <div style={{ marginTop: 16 }}>
             <Field label="Destinatário" hint="Endereço que receberá os alertas">
               <Input value={cfg.email_to} onChange={set('email_to')} placeholder="admin@empresa.com" />
@@ -345,18 +457,30 @@ export default function Settings() {
               <Toggle checked={!!cfg.smtp_tls} onChange={set('smtp_tls')} label="Usar STARTTLS (recomendado)" />
             </div>
 
-            <div style={{ marginTop: 14 }}>
-              <GhostBtn onClick={() => runTest('email')}>Enviar e-mail de teste</GhostBtn>
-              <Feedback msg={testMsg.email?.text} isError={testMsg.email?.err} />
-            </div>
+          </div>
+        )}
+        {/* Fora do bloco de edição de propósito: um canal HERDADO também
+            precisa poder ser testado — é como se confere que este
+            servidor de fato alerta, sem ter que copiar a configuração. */}
+        {cfg.channels?.email?.active && (
+          <div style={{ marginTop: 14 }}>
+            <GhostBtn onClick={() => runTest('email')}>Enviar e-mail de teste</GhostBtn>
+            <Feedback msg={testMsg.email?.text} isError={testMsg.email?.err} />
           </div>
         )}
       </Section>
 
       {/* Telegram */}
-      <Section title="Alertas por Telegram">
+      <Section title="Alertas por Telegram" aside={<ChannelBadge status={cfg.channels?.telegram} />}>
+        <InheritanceControl
+          isGlobal={isGlobal} overridden={!!cfg.telegram_override} onChange={set('telegram_override')}
+          inEffect={describeTelegram(cfg.in_effect?.telegram)}
+        />
+        {ownsChannel('telegram') && (
         <Toggle checked={!!cfg.telegram_enabled} onChange={set('telegram_enabled')} label="Ativar alertas por Telegram" />
-        {cfg.telegram_enabled && (
+        )}
+        <IncompleteWarning status={cfg.channels?.telegram} />
+        {ownsChannel('telegram') && cfg.telegram_enabled && (
           <div style={{ marginTop: 16 }}>
             <Field label="Bot Token" hint="Obtenha em @BotFather no Telegram — /newbot">
               <Input value={cfg.telegram_bot_token === MASK ? '' : cfg.telegram_bot_token} onChange={set('telegram_bot_token')} type="password"
@@ -365,20 +489,29 @@ export default function Settings() {
             <Field label="Chat ID" hint="Envie /start ao seu bot e consulte api.telegram.org/bot<TOKEN>/getUpdates">
               <Input value={cfg.telegram_chat_id} onChange={set('telegram_chat_id')} placeholder="-1001234567890" />
             </Field>
-            <div style={{ marginTop: 14 }}>
-              <GhostBtn onClick={() => runTest('telegram')}>Enviar mensagem de teste</GhostBtn>
-              <Feedback msg={testMsg.telegram?.text} isError={testMsg.telegram?.err} />
-            </div>
+          </div>
+        )}
+        {cfg.channels?.telegram?.active && (
+          <div style={{ marginTop: 14 }}>
+            <GhostBtn onClick={() => runTest('telegram')}>Enviar mensagem de teste</GhostBtn>
+            <Feedback msg={testMsg.telegram?.text} isError={testMsg.telegram?.err} />
           </div>
         )}
       </Section>
 
       {/* Webhook */}
-      <Section title="Webhook Genérico">
+      <Section title="Webhook Genérico" aside={<ChannelBadge status={cfg.channels?.webhook} />}>
+        <InheritanceControl
+          isGlobal={isGlobal} overridden={!!cfg.webhook_override} onChange={set('webhook_override')}
+          inEffect={describeWebhook(cfg.in_effect?.webhook)}
+        />
+        {ownsChannel('webhook') && (
         <Field label="URL do webhook" hint="Recebe um POST em JSON (severidade, problema, servidor, timestamp) a cada alerta — deixe em branco para desativar">
           <Input value={cfg.webhook_url} onChange={set('webhook_url')} placeholder="https://seu-endpoint.com/webhook" />
         </Field>
-        {cfg.webhook_url && (
+        )}
+        <IncompleteWarning status={cfg.channels?.webhook} />
+        {ownsChannel('webhook') && cfg.webhook_url && (
           <>
             <Field label="Secret (opcional)" hint="Assina o payload em HMAC-SHA256 — header X-EximMonitor-Signature">
               <Input
@@ -387,19 +520,21 @@ export default function Settings() {
                 placeholder={cfg.webhook_secret === MASK ? 'Secret salvo — altere para trocar' : 'opcional'}
               />
             </Field>
-            <div style={{ marginTop: 14 }}>
-              <GhostBtn onClick={() => runTest('webhook')}>Enviar webhook de teste</GhostBtn>
-              <Feedback msg={testMsg.webhook?.text} isError={testMsg.webhook?.err} />
-            </div>
           </>
+        )}
+        {cfg.channels?.webhook?.active && (
+          <div style={{ marginTop: 14 }}>
+            <GhostBtn onClick={() => runTest('webhook')}>Enviar webhook de teste</GhostBtn>
+            <Feedback msg={testMsg.webhook?.text} isError={testMsg.webhook?.err} />
+          </div>
         )}
       </Section>
 
       {/* Thresholds */}
       <Section title="Condições de disparo">
-        <Field label="Severidade mínima para alerta" hint="HIGH = alto risco e crítico. CRITICAL = apenas crítico.">
+        <Field label="Severidade mínima para alerta" hint="Escolha se apenas o que for crítico dispara alerta, ou também o que for atenção.">
           <Select value={cfg.severity_threshold} onChange={set('severity_threshold')}>
-            {SEVERITY_OPTIONS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+            {SEVERITY_OPTIONS.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
           </Select>
         </Field>
         <Field label="Alerta se fila ultrapassar (0 = desabilitado)" hint="Dispara mesmo que a severidade ainda não tenha mudado.">

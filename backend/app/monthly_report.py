@@ -20,7 +20,10 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from .alerts import _send_raw_email
-from .database import ActionHistory, AlertSettings, Incident, Server, SessionLocal, Snapshot, get_alert_settings
+from .database import (
+    ActionHistory, AlertSettings, Incident, Server, SessionLocal, Snapshot,
+    get_alert_settings, get_effective_alert_settings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -244,11 +247,13 @@ async def _send(cfg: AlertSettings, title: str, data: Dict[str, Any]) -> bool:
 async def send_monthly_report(server_id: int, server_name: str, mark_sent: bool = True) -> bool:
     db = SessionLocal()
     try:
+        # `cfg` é o registro gravável (mark_sent escreve nele); o envio
+        # usa a config de canal já resolvida contra o global (T10).
         cfg = get_alert_settings(db, server_id=server_id)
         if not cfg.monthly_report_enabled:
             return False
         data = build_monthly_report(db, server_id)
-        sent = await _send(cfg, server_name, data)
+        sent = await _send(get_effective_alert_settings(db, server_id=server_id), server_name, data)
         if sent and mark_sent:
             cfg.monthly_report_last_sent_at = datetime.utcnow()
             db.commit()

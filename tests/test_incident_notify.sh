@@ -21,11 +21,13 @@ import threading, http.server, json, time
 from datetime import datetime, timedelta
 
 received = []
+received_paths = []
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         received.append(json.loads(self.rfile.read(length)))
+        received_paths.append(self.path)
         self.send_response(200)
         self.end_headers()
     def log_message(self, *a): pass
@@ -49,8 +51,11 @@ cfg = get_alert_settings(db, server_id=sid)
 saved = {c: getattr(cfg, c) for c in (
     "webhook_url", "webhook_secret", "email_enabled", "telegram_enabled",
     "incident_notify_critical", "incident_notify_atencao", "muted_incident_types",
-    "night_silence_start", "night_silence_end",
+    "night_silence_start", "night_silence_end", "webhook_override",
 )}
+# Sessão 4, T10: canal configurado no registro DO SERVIDOR só vale com o
+# override daquele canal ligado — sem isso o servidor usa o canal global.
+cfg.webhook_override = True
 cfg.webhook_url = "http://127.0.0.1:18765/hook"
 cfg.webhook_secret = ""
 cfg.email_enabled = False
@@ -112,6 +117,49 @@ inc.severity = "critico"; db.commit()
 notify_incident_event(inc, "opened")
 time.sleep(0.2)
 check(len(received) == 1, "severidade crítica ignora a janela de silêncio noturno")
+
+# ── Sessão 4, T10: canal global, override por servidor ──────────────────
+# Repetir bot token e chat ID em cada servidor não sobrevive a uma frota
+# de doze — o canal vive no registro global e o servidor só o substitui
+# quando quer. As duas metades precisam valer: herdar quando não há
+# override, e o override ganhar do global quando há.
+global_cfg = get_alert_settings(db, server_id=None)
+saved_global = {c: getattr(global_cfg, c) for c in ("webhook_url", "webhook_secret")}
+
+received.clear()
+cfg.night_silence_start = ""; cfg.night_silence_end = ""
+cfg.webhook_override = False
+cfg.webhook_url = ""
+global_cfg.webhook_url = "http://127.0.0.1:18765/hook"
+global_cfg.webhook_secret = ""
+db.commit()
+notify_incident_event(inc, "opened")
+time.sleep(0.2)
+check(len(received) == 1, f"servidor sem override herda o canal global (recebeu {len(received)})")
+
+received.clear()
+cfg.webhook_override = True
+cfg.webhook_url = "http://127.0.0.1:18765/hook?override=1"
+db.commit()
+notify_incident_event(inc, "opened")
+time.sleep(0.2)
+check(
+    len(received) == 1 and received_paths[-1] == "/hook?override=1",
+    f"com override, o canal do servidor ganha do global (caminho: {received_paths[-1] if received_paths else 'nenhum'})",
+)
+
+received.clear()
+cfg.webhook_override = False
+cfg.webhook_url = "http://127.0.0.1:18765/hook?override=1"
+global_cfg.webhook_url = ""
+db.commit()
+notify_incident_event(inc, "opened")
+time.sleep(0.2)
+check(len(received) == 0, "override desligado ignora o que está gravado no servidor — nada é enviado se o global está vazio")
+
+for k, v in saved_global.items():
+    setattr(global_cfg, k, v)
+db.commit()
 
 # restaura config original e limpa dados de teste
 for k, v in saved.items():

@@ -29,9 +29,11 @@ import urllib.request
 from datetime import datetime, time as dt_time
 from typing import Optional
 
-from .alerts import _send_raw_email
+from .alerts import _send_raw_email, telegram_post
 from .config import settings
-from .database import AlertHistory, AlertSettings, Incident, Server, SessionLocal, get_alert_settings
+from .database import (
+    AlertHistory, AlertSettings, Incident, Server, SessionLocal, get_effective_alert_settings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -130,12 +132,7 @@ def _send_incident_telegram(cfg: AlertSettings, incident: Incident, event_type: 
     safe = _build_text(incident, event_type, server_name)
     for ch, esc in (("&", "&amp;"), ("<", "&lt;"), (">", "&gt;")):
         safe = safe.replace(ch, esc)
-    payload = json.dumps({"chat_id": cfg.telegram_chat_id, "text": f"{icon} {safe}", "parse_mode": "HTML"}).encode()
-    req = urllib.request.Request(
-        f"https://api.telegram.org/bot{cfg.telegram_bot_token}/sendMessage",
-        data=payload, headers={"Content-Type": "application/json"},
-    )
-    urllib.request.urlopen(req, timeout=10)
+    telegram_post(cfg, f"{icon} {safe}")
 
 
 def _send_incident_webhook(cfg: AlertSettings, incident: Incident, event_type: str, server_name: str) -> None:
@@ -186,7 +183,7 @@ def notify_incident_event(incident: Incident, event_type: str) -> None:
     """
     db = SessionLocal()
     try:
-        cfg = get_alert_settings(db, server_id=incident.server_id)
+        cfg = get_effective_alert_settings(db, server_id=incident.server_id)
         server = db.get(Server, incident.server_id)
         server_name = server.name if server else f"servidor {incident.server_id}"
 

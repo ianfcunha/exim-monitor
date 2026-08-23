@@ -38,6 +38,7 @@ import TopTable from '../components/TopTable'
 import { useAuth } from '../contexts/AuthContext'
 import { useServer } from '../contexts/ServerContext'
 import { useFullStatus, useQuickStatus } from '../hooks/useStatus'
+import { severityLabel } from '../lib/severity'
 
 // ── Formatação de números ────────────────────────────────────────────────────
 function fmt(n) {
@@ -144,7 +145,7 @@ export default function Dashboard({ advanced = false }) {
     const icon  = icons[sev] ?? ''
     document.title = (sev === 'OK' || sev === 'LOW' || sev === 'UNKNOWN')
       ? 'Mail IQ — AVILI'
-      : `${icon} ${sev} — Mail IQ`
+      : `${icon} ${severityLabel(sev)} — Mail IQ`
     return () => { document.title = 'Mail IQ — AVILI' }
   }, [diag.severity])
 

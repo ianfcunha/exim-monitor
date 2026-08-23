@@ -9,6 +9,7 @@ Modelos:
 """
 import logging
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Optional
 
 from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text, create_engine, func
@@ -215,6 +216,17 @@ class AlertSettings(Base):
     telegram_enabled   = Column(Boolean,     default=False, nullable=False)
     telegram_bot_token = Column(String(500), default="", nullable=False)
     telegram_chat_id   = Column(String(100), default="", nullable=False)
+
+    # ── Herança de canal (Sessão 4, T10) ─────────────────────────────────
+    # A configuração de canal (token do bot, chat, credencial de e-mail,
+    # URL de webhook) vive no registro global — repetir o mesmo token em
+    # cada servidor não sobrevive a uma frota de doze. Um registro por
+    # servidor só substitui um canal quando o override daquele canal está
+    # ligado; desligado, TODOS os campos daquele canal vêm do global,
+    # inclusive o liga/desliga. Ver get_effective_alert_settings().
+    email_override    = Column(Boolean, default=False, nullable=False)
+    telegram_override = Column(Boolean, default=False, nullable=False)
+    webhook_override  = Column(Boolean, default=False, nullable=False)
 
     # ── Thresholds ───────────────────────────────────────────────────────
     # Severidade minima para disparar alerta: "HIGH" ou "CRITICAL"
@@ -826,6 +838,46 @@ def get_alert_settings(db, server_id: Optional[int] = None) -> AlertSettings:
         db.commit()
         db.refresh(cfg)
     return cfg
+
+
+# Campos que compõem cada canal — a unidade de herança é o CANAL inteiro,
+# nunca um campo solto: herdar o token do global mas o chat_id do servidor
+# produziria uma combinação que ninguém configurou.
+EMAIL_CHANNEL_FIELDS = (
+    "email_enabled", "email_to", "smtp_host", "smtp_port", "smtp_user",
+    "smtp_password", "smtp_from", "smtp_tls", "resend_api_key",
+)
+TELEGRAM_CHANNEL_FIELDS = ("telegram_enabled", "telegram_bot_token", "telegram_chat_id")
+WEBHOOK_CHANNEL_FIELDS = ("webhook_url", "webhook_secret")
+
+
+def get_effective_alert_settings(db, server_id: Optional[int] = None):
+    """
+    Configuração de alertas de um servidor COM os canais já resolvidos
+    contra o registro global (Sessão 4, T10) — é isto que todo caminho de
+    DISPARO deve consultar. Quem EDITA continua usando
+    get_alert_settings(), que devolve o registro daquele servidor.
+
+    Devolve um objeto só de leitura (SimpleNamespace com os mesmos
+    atributos de AlertSettings) justamente para não haver como gravar por
+    engano num valor herdado e materializar no servidor uma cópia do
+    global que depois não acompanha mais as mudanças dele.
+    """
+    own = get_alert_settings(db, server_id=server_id)
+    if server_id is None:
+        return own
+
+    global_cfg = get_alert_settings(db, server_id=None)
+    effective = SimpleNamespace(**{c.name: getattr(own, c.name) for c in AlertSettings.__table__.columns})
+    for overridden, fields in (
+        (own.email_override, EMAIL_CHANNEL_FIELDS),
+        (own.telegram_override, TELEGRAM_CHANNEL_FIELDS),
+        (own.webhook_override, WEBHOOK_CHANNEL_FIELDS),
+    ):
+        if not overridden:
+            for field in fields:
+                setattr(effective, field, getattr(global_cfg, field))
+    return effective
 
 
 def create_tables() -> None:

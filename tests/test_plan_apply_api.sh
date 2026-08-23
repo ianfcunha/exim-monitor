@@ -46,7 +46,12 @@ fi
 
 SERVER_ID="${MAILIQ_TEST_SERVER_ID:-}"
 if [ -z "$SERVER_ID" ]; then
-    SERVER_ID=$(curl -s "$API_URL/api/servers" -H "Authorization: Bearer $TOKEN" | jq -r '.[0].id // empty')
+    # Estes testes removem mensagens de verdade e conferem a quarentena
+    # — precisam de um servidor que SAIBA fazer isso. Pegar `.[0]` cegamente
+    # fazia o teste falhar como se o produto estivesse quebrado quando o
+    # primeiro servidor da frota não tem a capacidade.
+    SERVER_ID=$(curl -s "$API_URL/api/servers" -H "Authorization: Bearer $TOKEN" \
+        | jq -r 'map(select(.capabilities.cap_remove_messages and .capabilities.cap_quarantine)) | .[0].id // empty')
 fi
 if [ -z "$SERVER_ID" ]; then
     echo "Nenhum servidor cadastrado — pulando."

@@ -13,10 +13,13 @@ from typing import Optional
 
 from fastapi import Query
 
-from ..alerts import send_test_email, send_test_telegram, send_test_webhook
+from ..alerts import (
+    TelegramError, channel_status, send_test_email, send_test_telegram, send_test_webhook,
+)
 from ..auth import get_current_user, require_admin
 from ..database import (
-    AlertHistory, AlertSettings, Server, User, get_alert_settings, get_db, to_utc_iso,
+    AlertHistory, AlertSettings, Server, User, get_alert_settings,
+    get_effective_alert_settings, get_db, to_utc_iso,
 )
 from ..monthly_report import send_fleet_monthly_report, send_monthly_report
 from ..reports import send_weekly_report
@@ -44,6 +47,11 @@ class AlertSettingsSchema(BaseModel):
     telegram_enabled:   bool = False
     telegram_bot_token: str  = ""
     telegram_chat_id:   str  = ""
+    # Herança de canal (Sessão 4, T10) — só tem efeito num registro de
+    # servidor; no registro global é sempre ignorado (o global é a origem).
+    email_override:    bool = False
+    telegram_override: bool = False
+    webhook_override:  bool = False
     # Thresholds
     severity_threshold: str = "HIGH"
     queue_threshold:    int = Field(0, ge=0)
@@ -64,9 +72,46 @@ class AlertSettingsSchema(BaseModel):
         from_attributes = True
 
 
-def _to_response(cfg: AlertSettings) -> dict:
-    """Converte modelo para dict, mascarando campos sensiveis."""
+def _to_response(cfg: AlertSettings, effective=None, server_id: Optional[int] = None) -> dict:
+    """
+    Converte modelo para dict, mascarando campos sensiveis.
+
+    `cfg` são os valores GRAVADOS neste registro — é o que o formulário
+    edita. `effective` é a config depois de resolver a herança de canal
+    contra o registro global (Sessão 4, T10): é sobre ela que o status
+    de cada canal é calculado, porque é ela que vai disparar. Os dois
+    coincidem no registro global.
+    """
+    eff = effective if effective is not None else cfg
     return {
+        "is_global":         server_id is None,
+        "email_override":    cfg.email_override,
+        "telegram_override": cfg.telegram_override,
+        "webhook_override":  cfg.webhook_override,
+        # Ligado E completo — ligar o interruptor sozinho não conta como
+        # canal ativo; `missing` nomeia o que falta para o aviso na tela.
+        "channels": channel_status(eff),
+        # O que está EM VIGOR neste servidor, para a tela mostrar o valor
+        # herdado sem o usuário ter que abrir a configuração global.
+        # Segredo herdado nunca viaja: só "tem" ou "não tem".
+        "in_effect": {
+            "email": {
+                "enabled":        eff.email_enabled,
+                "email_to":       eff.email_to,
+                "smtp_from":      eff.smtp_from,
+                "has_credential": bool(eff.resend_api_key or eff.smtp_password),
+                "via_resend":     bool(eff.resend_api_key),
+            },
+            "telegram": {
+                "enabled":   eff.telegram_enabled,
+                "chat_id":   eff.telegram_chat_id,
+                "has_token": bool(eff.telegram_bot_token),
+            },
+            "webhook": {
+                "url":        eff.webhook_url,
+                "has_secret": bool(eff.webhook_secret),
+            },
+        },
         "resend_api_key":      MASK if cfg.resend_api_key else "",
         "email_enabled":       cfg.email_enabled,
         "email_to":            cfg.email_to,
@@ -101,7 +146,11 @@ def get_settings(
     db: Session = Depends(get_db),
     _: str = Depends(get_current_user),
 ):
-    return _to_response(get_alert_settings(db, server_id=server_id))
+    return _to_response(
+        get_alert_settings(db, server_id=server_id),
+        effective=get_effective_alert_settings(db, server_id=server_id),
+        server_id=server_id,
+    )
 
 
 @router.put("/alerts", summary="Salva configuracao de alertas")
@@ -112,6 +161,14 @@ def update_settings(
     _: User = Depends(require_admin),
 ):
     cfg = get_alert_settings(db, server_id=server_id)
+
+    # O registro global é a ORIGEM da herança — não faz sentido ele
+    # "sobrescrever" a si mesmo, e gravar True ali deixaria a flag
+    # aparecendo na tela sem efeito nenhum.
+    if server_id is not None:
+        cfg.email_override    = payload.email_override
+        cfg.telegram_override = payload.telegram_override
+        cfg.webhook_override  = payload.webhook_override
 
     cfg.email_enabled      = payload.email_enabled
     cfg.email_to           = payload.email_to
@@ -143,7 +200,11 @@ def update_settings(
 
     db.commit()
     db.refresh(cfg)
-    return _to_response(cfg)
+    return _to_response(
+        cfg,
+        effective=get_effective_alert_settings(db, server_id=server_id),
+        server_id=server_id,
+    )
 
 
 @router.post("/test/email", summary="Envia e-mail de teste")
@@ -152,9 +213,10 @@ async def test_email(
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    cfg = get_alert_settings(db, server_id=server_id)
-    if not cfg.email_to or (not cfg.resend_api_key and not cfg.smtp_password):
-        raise HTTPException(400, "Configure e-mail e Resend API key (ou senha SMTP) antes de testar.")
+    cfg = get_effective_alert_settings(db, server_id=server_id)
+    missing = channel_status(cfg)["email"]["missing"]
+    if missing:
+        raise HTTPException(400, f"Configure {' e '.join(missing)} antes de testar.")
     try:
         await send_test_email(cfg)
     except Exception as exc:
@@ -204,8 +266,10 @@ async def test_weekly_report(
     cfg = get_alert_settings(db, server_id=server_id)
     if not cfg.weekly_report_enabled:
         raise HTTPException(400, "Ative o relatório semanal antes de testar.")
-    if not cfg.email_to or (not cfg.resend_api_key and not cfg.smtp_password):
-        raise HTTPException(400, "Configure e-mail e Resend API key (ou senha SMTP) antes de testar.")
+    channels = get_effective_alert_settings(db, server_id=server_id)
+    missing = channel_status(channels)["email"]["missing"]
+    if missing:
+        raise HTTPException(400, f"Configure {' e '.join(missing)} antes de testar.")
 
     server_name = "servidor padrão"
     if server_id is not None:
@@ -215,7 +279,7 @@ async def test_weekly_report(
     sent = await send_weekly_report(server_id, server_name, mark_sent=False)
     if not sent:
         raise HTTPException(502, "Falha ao enviar o relatório de teste — veja os logs do backend.")
-    return {"ok": True, "message": f"Relatório semanal de teste enviado para {cfg.email_to}"}
+    return {"ok": True, "message": f"Relatório semanal de teste enviado para {channels.email_to}"}
 
 
 @router.post("/test/monthly-report", summary="Dispara o relatório mensal imediatamente (teste)")
@@ -231,8 +295,10 @@ async def test_monthly_report(
     cfg = get_alert_settings(db, server_id=server_id)
     if not cfg.monthly_report_enabled:
         raise HTTPException(400, "Ative o relatório mensal antes de testar.")
-    if not cfg.email_to or (not cfg.resend_api_key and not cfg.smtp_password):
-        raise HTTPException(400, "Configure e-mail e Resend API key (ou senha SMTP) antes de testar.")
+    channels = get_effective_alert_settings(db, server_id=server_id)
+    missing = channel_status(channels)["email"]["missing"]
+    if missing:
+        raise HTTPException(400, f"Configure {' e '.join(missing)} antes de testar.")
 
     if server_id is not None:
         server = db.get(Server, server_id)
@@ -242,7 +308,7 @@ async def test_monthly_report(
 
     if not sent:
         raise HTTPException(502, "Falha ao enviar o relatório de teste — veja os logs do backend.")
-    return {"ok": True, "message": f"Relatório mensal de teste enviado para {cfg.email_to}"}
+    return {"ok": True, "message": f"Relatório mensal de teste enviado para {channels.email_to}"}
 
 
 @router.post("/test/telegram", summary="Envia mensagem de teste no Telegram")
@@ -251,13 +317,19 @@ async def test_telegram(
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    cfg = get_alert_settings(db, server_id=server_id)
-    if not cfg.telegram_bot_token or not cfg.telegram_chat_id:
-        raise HTTPException(400, "Configure bot token e chat ID antes de testar.")
+    cfg = get_effective_alert_settings(db, server_id=server_id)
+    missing = channel_status(cfg)["telegram"]["missing"]
+    if missing:
+        raise HTTPException(400, f"Configure {' e '.join(missing)} antes de testar.")
     try:
         await send_test_telegram(cfg)
+    except TelegramError as exc:
+        # O motivo vem da própria API do Telegram ("chat not found",
+        # "Unauthorized") — é o que diz se o erro foi no chat ID ou no
+        # token. Antes só chegava "HTTP Error 400: Bad Request".
+        raise HTTPException(502, f"O Telegram recusou a mensagem: {exc}")
     except Exception as exc:
-        raise HTTPException(502, f"Falha ao enviar Telegram: {exc}")
+        raise HTTPException(502, f"Falha ao falar com o Telegram: {exc}")
     return {"ok": True, "message": f"Mensagem enviada ao chat {cfg.telegram_chat_id}"}
 
 
@@ -267,9 +339,12 @@ async def test_webhook(
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    cfg = get_alert_settings(db, server_id=server_id)
+    cfg = get_effective_alert_settings(db, server_id=server_id)
     if not cfg.webhook_url:
         raise HTTPException(400, "Configure a URL do webhook antes de testar.")
+    missing = channel_status(cfg)["webhook"]["missing"]
+    if missing:
+        raise HTTPException(400, f"Configure {' e '.join(missing)} antes de testar.")
 
     server_name = None
     if server_id is not None:

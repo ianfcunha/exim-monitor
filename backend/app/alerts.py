@@ -21,13 +21,16 @@ import hmac
 import json
 import logging
 import smtplib
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Dict, Optional
 
-from .database import AlertHistory, AlertSettings, Server, SessionLocal, get_alert_settings
+from .database import (
+    AlertHistory, AlertSettings, Server, SessionLocal, get_effective_alert_settings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +42,79 @@ _SEV_RANK = {"OK": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
 # tem seu proprio "ultima severidade"/cooldown — severidade de um servidor
 # nao deve afetar o debounce de outro.
 _state: Dict[Optional[int], dict] = {}
+
+
+class TelegramError(Exception):
+    """Erro devolvido pela própria API do Telegram (não de rede)."""
+
+
+def telegram_post(cfg: AlertSettings, text: str) -> None:
+    """
+    POST em sendMessage devolvendo o erro REAL do Telegram (Sessão 4, T10).
+
+    urlopen levanta HTTPError com a mensagem genérica do status ("HTTP
+    Error 400: Bad Request") e o motivo fica no CORPO da resposta, que
+    ninguém lia — então "Enviar mensagem de teste" dizia apenas que
+    falhou, quando o Telegram tinha respondido exatamente o que estava
+    errado ("chat not found", "bot was blocked by the user",
+    "Unauthorized"). Sem isso, quem configura não tem como saber se
+    errou o chat ID ou o token.
+    """
+    payload = json.dumps({"chat_id": cfg.telegram_chat_id, "text": text, "parse_mode": "HTML"}).encode()
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{cfg.telegram_bot_token}/sendMessage",
+        data=payload, headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = json.loads(resp.read().decode("utf-8", "replace") or "{}")
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        try:
+            detail = json.loads(exc.read().decode("utf-8", "replace")).get("description", "")
+        except Exception:
+            pass
+        raise TelegramError(detail or f"HTTP {exc.code} sem detalhe no corpo da resposta") from exc
+
+    # 200 com ok=false não acontece na prática hoje, mas o campo `ok` é o
+    # contrato documentado da Bot API — confiar só no status HTTP seria
+    # reportar sucesso a partir de algo que não foi verificado.
+    if not body.get("ok", True):
+        raise TelegramError(body.get("description") or "o Telegram respondeu ok=false sem descrição")
+
+
+# ── Estado de configuração dos canais (Sessão 4, T10) ──────────────────────
+# "Canal ativado sem configuração completa exibe aviso e NÃO conta como
+# ativo": ligar o interruptor não é o mesmo que estar alertando. Um canal
+# só está ativo quando está ligado E tem tudo que o envio exige — o que
+# falta é nomeado, para o aviso poder dizer o que preencher.
+
+def channel_status(cfg) -> Dict[str, dict]:
+    email_missing = []
+    if not cfg.email_to:
+        email_missing.append("destinatário")
+    if not cfg.resend_api_key and not cfg.smtp_password:
+        email_missing.append("Resend API key ou senha SMTP")
+
+    telegram_missing = []
+    if not cfg.telegram_bot_token:
+        telegram_missing.append("bot token")
+    if not cfg.telegram_chat_id:
+        telegram_missing.append("chat ID")
+
+    webhook_missing = []
+    if cfg.webhook_url and not cfg.webhook_url.startswith(("http://", "https://")):
+        webhook_missing.append("URL começando com http:// ou https://")
+
+    channels = {
+        "email":    {"enabled": bool(cfg.email_enabled),    "missing": email_missing},
+        "telegram": {"enabled": bool(cfg.telegram_enabled), "missing": telegram_missing},
+        "webhook":  {"enabled": bool(cfg.webhook_url),      "missing": webhook_missing},
+    }
+    for status in channels.values():
+        status["configured"] = not status["missing"]
+        status["active"] = status["enabled"] and status["configured"]
+    return channels
 
 
 def _server_state(server_id: Optional[int]) -> dict:
@@ -153,17 +229,7 @@ def _send_telegram_sync(cfg: AlertSettings, severity: str, problem: str,
         f"<b>Hora:</b> {datetime.utcnow().strftime('%d/%m/%Y %H:%M')} UTC\n\n"
         f"Acesse o dashboard para corrigir."
     )
-    url = f"https://api.telegram.org/bot{cfg.telegram_bot_token}/sendMessage"
-    payload = json.dumps({
-        "chat_id": cfg.telegram_chat_id,
-        "text": text,
-        "parse_mode": "HTML",
-    }).encode()
-    req = urllib.request.Request(
-        url, data=payload,
-        headers={"Content-Type": "application/json"},
-    )
-    urllib.request.urlopen(req, timeout=10)
+    telegram_post(cfg, text)
     logger.info("Alerta Telegram enviado para chat %s", cfg.telegram_chat_id)
 
 
@@ -234,7 +300,7 @@ async def check_and_alert(severity: str, problem: str, queue_total: int,
     """
     db = SessionLocal()
     try:
-        cfg = get_alert_settings(db, server_id=server_id)
+        cfg = get_effective_alert_settings(db, server_id=server_id)
         state = _server_state(server_id)
         now = datetime.utcnow()
         cooldown = timedelta(minutes=cfg.cooldown_minutes)
@@ -259,7 +325,11 @@ async def check_and_alert(severity: str, problem: str, queue_total: int,
             return
 
         # ── E-mail ────────────────────────────────────────────────────
-        if cfg.email_enabled and cfg.email_to and cfg.smtp_password:
+        # Exigir smtp_password aqui deixava o Resend sem disparar nunca:
+        # _send_raw_email() prefere o Resend e nem toca em SMTP, mas quem
+        # configurava só a API key não passava por esta porta. A condição
+        # é a mesma de incident_notify.py — qualquer uma das credenciais.
+        if cfg.email_enabled and cfg.email_to and (cfg.resend_api_key or cfg.smtp_password):
             last = state["email_sent_at"]
             if last is None or (now - last) >= cooldown:
                 try:

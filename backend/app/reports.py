@@ -18,7 +18,7 @@ from typing import Optional
 from .alerts import _send_raw_email
 from .database import (
     ActionHistory, AlertHistory, Server, SessionLocal, Snapshot,
-    get_alert_settings,
+    get_alert_settings, get_effective_alert_settings,
 )
 
 logger = logging.getLogger(__name__)
@@ -181,17 +181,21 @@ async def send_weekly_report(server_id: Optional[int], server_name: str,
     """
     db = SessionLocal()
     try:
+        # `cfg` é o registro gravável deste servidor (mark_sent escreve
+        # nele); `channels` é a config de canal já resolvida contra o
+        # global (T10) e serve só para enviar.
         cfg = get_alert_settings(db, server_id=server_id)
         if not cfg.weekly_report_enabled:
             return False
-        if not cfg.email_to or not (cfg.resend_api_key or cfg.smtp_password):
+        channels = get_effective_alert_settings(db, server_id=server_id)
+        if not channels.email_to or not (channels.resend_api_key or channels.smtp_password):
             logger.warning("Relatório semanal habilitado mas e-mail não configurado (server_id=%s)", server_id)
             return False
 
         data = build_weekly_report(db, server_id)
         html = _report_email_html(server_name, data)
         subject = f"[EXIM Monitor] Relatório semanal — {server_name}"
-        await asyncio.to_thread(_send_raw_email, cfg, subject, html)
+        await asyncio.to_thread(_send_raw_email, channels, subject, html)
 
         if mark_sent:
             cfg.weekly_report_last_sent_at = datetime.utcnow()
