@@ -18,6 +18,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { SEVERITY_STYLE, STATUS_LABELS, STATUS_STYLE, applyLabel, incidentTitle } from './incidentLabels'
 import ThresholdEditor from './ThresholdEditor'
 import { useToast } from '../../contexts/ToastContext'
+import { useServer } from '../../contexts/ServerContext'
 
 function fmtDateTime(iso) {
   if (!iso) return '—'
@@ -174,6 +175,7 @@ function ImpactSection({ impact }) {
 
 export default function IncidentDetail({ incident, onChanged }) {
   const toast = useToast()
+  const { servers } = useServer()
   const [busy, setBusy]           = useState(null) // 'ack' | 'silence' | 'resolve' | null
   const [plan, setPlan]           = useState(null)
   const [planning, setPlanning]   = useState(false)
@@ -196,6 +198,17 @@ export default function IncidentDetail({ incident, onChanged }) {
   const st  = STATUS_STYLE[incident.status] ?? STATUS_STYLE.aberto
   const fixAction = incident.suggested_fix?.action
   const isResolved = incident.status === 'resolvido'
+
+  // Sessão 4, T12: no painel avançado a ação já nascia desabilitada com o
+  // motivo (ActionPanel.jsx); aqui na Triagem — a tela que se abre
+  // primeiro — o botão ainda oferecia a correção e só falhava com 409
+  // depois do clique. A recusa continua sendo do backend; isto é o aviso
+  // honesto antes de gastar o clique. A Triagem é cross-fleet, então o
+  // servidor vem do incidente, não do seletor.
+  const incidentServer = servers.find(s => s.id === incident.server_id)
+  const observationReason = incidentServer?.observation_mode
+    ? `${incidentServer.name} está em modo observação — o painel diagnostica, mas não executa ações que alterem o servidor. Desligue o modo em Configurações → Servidores para aplicar esta correção.`
+    : null
 
   const requestPlan = async () => {
     setPlanning(true)
@@ -366,7 +379,14 @@ export default function IncidentDetail({ incident, onChanged }) {
           <p style={{ fontSize: 11, color: 'var(--dim)' }}>
             Esta correção é manual — não há uma ação executável de um clique para este caso.
           </p>
-        ) : isResolved ? null : !plan ? (
+        ) : isResolved ? null : observationReason ? (
+          <div style={{
+            borderRadius: 10, padding: '10px 12px', fontSize: 11.5, lineHeight: 1.5,
+            background: 'var(--warn-bg)', border: '1px solid var(--warn-border)', color: 'var(--warn)',
+          }}>
+            {observationReason}
+          </div>
+        ) : !plan ? (
           <Button size="sm" onClick={requestPlan} disabled={planning}>
             {planning ? 'Gerando preview…' : 'Aplicar correção sugerida'}
           </Button>
