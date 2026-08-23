@@ -148,30 +148,74 @@ def _evidence_html(incident) -> str:
     return f'<pre class="evidence">{escaped}</pre>'
 
 
+def _esc(value: Any) -> str:
+    return str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _value_row(label: str, field: Optional[Dict[str, Any]], format=str) -> str:
+    """Sessão 4, T6 — todo valor de impacto chega como
+    {estimable: True, value, basis} ou {estimable: False, reason}
+    (ver incident_impact.py). O relatório segue a mesma regra da Triagem:
+    um valor não estimável NÃO vira número, vira "não estimável" com o
+    motivo — quem recebe o documento precisa poder distinguir "medimos e
+    deu zero" de "não dá pra medir isso aqui"."""
+    if not isinstance(field, dict):
+        return ""
+    if not field.get("estimable"):
+        return (
+            f'<tr><td class="muted">{_esc(label)}</td>'
+            f'<td><span class="na">não estimável</span>'
+            f'<div class="basis">{_esc(field.get("reason", ""))}</div></td></tr>'
+        )
+    row = f'<tr><td class="muted">{_esc(label)}</td><td><strong>{_esc(format(field["value"]))}</strong>'
+    if field.get("basis"):
+        row += f'<div class="basis">{_esc(field["basis"])}</div>'
+    return row + "</td></tr>"
+
+
+def _reputation_rows(detail: Optional[Dict[str, Any]]) -> str:
+    if not detail:
+        return ""
+    return (
+        _value_row("Tempo listado", detail.get("listed_minutes"), lambda m: _fmt_duration(m * 60))
+        + _value_row("Zonas com listagem", detail.get("zones_listed"),
+                     lambda z: ", ".join(z) if isinstance(z, list) else z)
+        + _value_row("Zonas consultadas", detail.get("zones_checked"))
+        + _value_row("Maior volume para um destino", detail.get("messages_to_top_destination"),
+                     lambda v: f'{v["count"]} para {v["domain"]}')
+    )
+
+
 def _impact_html(impact: Optional[Dict[str, Any]]) -> str:
     if not impact:
         return ""
     entities = [*(impact.get("accounts_affected") or []), *(impact.get("domains_affected") or [])]
-    rows = [
-        ("Mensagens afetadas", str(impact.get("messages_affected", 0))),
-        ("Tempo total em aberto", _fmt_duration(impact.get("total_open_seconds"))),
-    ]
-    if impact.get("stuck_over_4h"):
-        rows.append(("Mensagens presas há mais de 4h", str(impact["stuck_over_4h"])))
-    if impact.get("delivery_rate_impact_pct") is not None:
-        pct = impact["delivery_rate_impact_pct"]
-        rows.append(("Impacto na taxa de entrega", f"{'queda' if pct > 0 else 'sem queda relevante' if pct == 0 else 'melhora'} de {abs(pct)} pontos percentuais"))
-    if entities:
-        rows.append(("Contas/domínios de cliente afetados", ", ".join(entities)))
 
-    rows_html = "".join(f'<tr><td class="muted">{k}</td><td><strong>{v}</strong></td></tr>' for k, v in rows)
+    rows_html = _value_row("Mensagens afetadas", impact.get("messages_affected"))
+    rows_html += (
+        f'<tr><td class="muted">Tempo total em aberto</td>'
+        f'<td><strong>{_fmt_duration(impact.get("total_open_seconds"))}</strong></td></tr>'
+    )
+    stuck = impact.get("stuck_over_4h")
+    if isinstance(stuck, dict) and stuck.get("estimable"):
+        rows_html += _value_row("Mensagens presas há mais de 4h", stuck)
+    rows_html += _value_row(
+        "Queda na taxa de entrega", impact.get("delivery_rate_impact_pct"),
+        lambda v: f"-{v} pontos percentuais" if v > 0 else "sem queda",
+    )
+    rows_html += _reputation_rows(impact.get("reputation"))
+    if entities:
+        rows_html += (
+            f'<tr><td class="muted">Contas/domínios de cliente afetados</td>'
+            f'<td><strong>{_esc(", ".join(entities))}</strong></td></tr>'
+        )
 
     cost_html = ""
     cost = impact.get("cost_estimate")
     if cost:
         cost_html = (
             f'<p class="cost"><strong>Custo estimado: R$ {cost["total_brl"]:.2f}</strong> '
-            f'({cost["label"]}) — {cost["basis"]}</p>'
+            f'({_esc(cost["label"])}) — {_esc(cost["basis"])}</p>'
         )
 
     return f'<table class="kv">{rows_html}</table>{cost_html}'
@@ -197,8 +241,12 @@ _CSS = """
   p { font-size: 14px; line-height: 1.6; margin: 0 0 8px; }
   .muted { color: var(--muted); font-size: 13px; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  table.kv td { padding: 6px 0; border-bottom: 1px solid var(--border); }
+  table.kv td { padding: 6px 0; border-bottom: 1px solid var(--border); vertical-align: top; }
+  table.kv td:first-child { width: 42%; padding-right: 16px; }
   table.kv td:last-child { text-align: right; }
+  .na { color: var(--muted); font-weight: 600; font-style: italic; }
+  .basis { font-size: 11px; color: var(--muted); font-weight: 400; font-style: normal;
+           margin-top: 3px; line-height: 1.45; text-align: right; }
   table.actions th, table.actions td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); font-size: 12.5px; }
   table.actions th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; }
   .ok { color: var(--ok); font-weight: 600; }

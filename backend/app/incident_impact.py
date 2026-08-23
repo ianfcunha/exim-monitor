@@ -290,6 +290,57 @@ def compute_impact(db, incident: Incident) -> Dict[str, Any]:
     return impact
 
 
+def normalize_impact(impact: Optional[Dict[str, Any]], incident_type: str) -> Optional[Dict[str, Any]]:
+    """Impactos congelados antes da T6 guardam números soltos
+    (`"messages_affected": 1`) em vez de `{estimable, value, basis}`.
+    Eles estão no banco e continuam sendo lidos por incidentes já
+    resolvidos, então quem consome impacto passa por aqui primeiro.
+
+    A conversão aplica a MESMA regra do cálculo novo, não um
+    empacotamento cego do número velho: um valor que hoje não seria
+    estimável para aquele tipo não vira número só por estar congelado.
+    """
+    if not impact:
+        return impact
+    out = dict(impact)
+    out.setdefault("incident_type", incident_type)
+
+    if not isinstance(out.get("messages_affected"), dict):
+        value = out.get("messages_affected")
+        if incident_type not in _MESSAGE_COUNT_KEYS_BY_TYPE:
+            out["messages_affected"] = not_estimable(
+                "reputação não tem um lote de mensagens próprio — o IP ou domínio afeta "
+                "toda a saída do servidor, não um conjunto identificável de mensagens"
+            )
+        elif isinstance(value, (int, float)) and not isinstance(value, bool):
+            out["messages_affected"] = estimable(int(value), "valor congelado no fechamento deste incidente")
+        else:
+            out["messages_affected"] = not_estimable("a coleta deste incidente não registrou uma contagem de mensagens")
+
+    if not isinstance(out.get("stuck_over_4h"), dict):
+        value = out.get("stuck_over_4h")
+        if incident_type != "queue_stuck":
+            out["stuck_over_4h"] = not_estimable("só se aplica a incidentes de fila travada")
+        elif isinstance(value, (int, float)) and not isinstance(value, bool):
+            out["stuck_over_4h"] = estimable(int(value), "valor congelado no fechamento deste incidente")
+        else:
+            out["stuck_over_4h"] = not_estimable("nenhuma coleta completa cobriu a janela deste incidente")
+
+    # O número antigo era a variação da taxa de entrega do SERVIDOR na
+    # janela, sem checar incidentes simultâneos e sem descartar variação
+    # positiva — os dois defeitos que a T6 corrigiu. Recalcular exigiria
+    # os snapshots da época; afirmar o número velho seria repetir o
+    # defeito. Fica não estimável, com o motivo.
+    if not isinstance(out.get("delivery_rate_impact_pct"), dict):
+        out["delivery_rate_impact_pct"] = not_estimable(
+            "incidente fechado antes da revisão de impacto: o valor congelado era a variação "
+            "da taxa de entrega do servidor inteiro na janela, que não é atribuível a um "
+            "incidente específico"
+        )
+
+    return out
+
+
 def freeze_impact(db, incident: Incident) -> None:
     """Congela o impacto no fechamento — única gravação em Incident.impact.
     Chamar SEMPRE depois de setar status/resolved_at (usa

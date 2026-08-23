@@ -76,6 +76,80 @@ else
     ok "nenhuma referência a recurso externo (CSS/JS/imagem) — autocontido"
 fi
 
+echo "$REPORT" | grep -q "Mensagens afetadas" && ok "impacto no formato novo renderiza o valor estimável" || fail "impacto estimável não apareceu"
+
+# ── Sessão 4: impacto congelado no formato ANTIGO ───────────────────────────
+# A T6 trocou os números soltos de impacto por {estimable,value,basis} /
+# {estimable,reason}, mas o relatório continuou lendo o formato antigo e
+# devolvia HTTP 500. Os impactos JÁ CONGELADOS no banco seguem no formato
+# velho — este é o impact literal do INC-57 (reputação, resolvido), o dado
+# real que quebrou a rota:
+#   messages_affected: 1     → o "1 mensagem afetada" que reputação nunca
+#                              teve como contar (era o defeito nº 3 da T6)
+#   delivery_rate_impact_pct: -0.4 → variação POSITIVA (a entrega melhorou)
+#                              exibida como impacto de um incidente crítico
+echo
+echo "── Sessão 4: relatório de impacto congelado no formato antigo ─"
+
+LEGACY_ID=$($COMPOSE exec -T backend sh -c "PYTHONPATH=/app python3" <<PYEOF
+from app.database import SessionLocal, Incident
+from datetime import datetime, timedelta
+db = SessionLocal()
+now = datetime.utcnow()
+inc = Incident(
+    server_id=$SERVER_ID, type="reputation", severity="critico", status="resolvido",
+    fingerprint="reputation:$SERVER_ID:__test_legacy_impact__", entity="ip:190.102.43.248",
+    first_seen=now - timedelta(hours=2), last_seen=now - timedelta(hours=1),
+    resolved_at=now - timedelta(hours=1), resolution="resolvida",
+    metrics={"blocklists_listed": ["zen.spamhaus.org"], "zones_checked": 4},
+    suggested_fix={"description": "IP listado em zen.spamhaus.org."},
+    evidence={"lines": []},
+    impact={
+        "computed_at": "2026-08-23T00:41:59.749907Z",
+        "stuck_over_4h": 0,
+        "domains_affected": [],
+        "accounts_affected": [],
+        "messages_affected": 1,
+        "total_open_seconds": 7708,
+        "delivery_rate_impact_pct": -0.4,
+    },
+)
+db.add(inc); db.commit(); db.refresh(inc)
+print(inc.id)
+db.close()
+PYEOF
+)
+LEGACY_ID=$(echo "$LEGACY_ID" | tail -1)
+
+CODE=$(curl -s -o /tmp/legacy_report.html -w '%{http_code}' "$API/incidents/$LEGACY_ID/report" "${AUTH[@]}")
+[ "$CODE" = "200" ] && ok "relatório de impacto congelado no formato antigo responde 200 (era 500)" \
+                    || fail "impacto no formato antigo devolveu HTTP $CODE"
+
+LEGACY_REPORT=$(cat /tmp/legacy_report.html)
+echo "$LEGACY_REPORT" | grep -q "não estimável" \
+    && ok "campo sem valor confiável vira 'não estimável', igual à Triagem" \
+    || fail "não apareceu 'não estimável' no relatório"
+
+echo "$LEGACY_REPORT" | grep -q "não tem um lote de mensagens próprio" \
+    && ok "o motivo do 'não estimável' aparece — não é um rótulo mudo" \
+    || fail "'não estimável' apareceu sem o motivo"
+
+echo "$LEGACY_REPORT" | grep -qE "Mensagens afetadas</td><td><strong>1<" \
+    && fail "ainda exibe '1 mensagem afetada' para reputação — o número enganoso voltou" \
+    || ok "reputação não exibe mais o '1' de mensagens afetadas"
+
+echo "$LEGACY_REPORT" | grep -qi "melhora de 0.4" \
+    && fail "ainda exibe a variação positiva como impacto de um incidente crítico" \
+    || ok "variação positiva da entrega não vira 'impacto'"
+
+$COMPOSE exec -T backend sh -c "PYTHONPATH=/app python3" >/dev/null <<PYEOF
+from app.database import SessionLocal, Incident
+db = SessionLocal()
+for i in db.query(Incident).filter(Incident.fingerprint.like("%__test_legacy_impact__")).all():
+    db.delete(i)
+db.commit(); db.close()
+PYEOF
+
 echo
 echo "Resultado: $PASS ok, $FAIL falha(s)"
 [ "$FAIL" -eq 0 ]

@@ -746,9 +746,18 @@ def get_servers_for_user(db, user: User):
     """
     Admin: retorna seus próprios servidores.
     Viewer: retorna os servidores do admin que o convidou.
+
+    Ordem fixa por id: sem ORDER BY o Postgres devolvia a frota em ordem
+    variável entre chamadas, o que trocava o servidor pré-selecionado no
+    `?server=` a cada recarga da interface.
     """
     owner_id = user.id if user.role == "admin" else user.invited_by
-    return db.query(Server).filter(Server.owner_id == owner_id, Server.is_enabled == True).all()
+    return (
+        db.query(Server)
+        .filter(Server.owner_id == owner_id, Server.is_enabled == True)
+        .order_by(Server.id)
+        .all()
+    )
 
 
 def get_server_owned_by(db, server_id: int, user: User):

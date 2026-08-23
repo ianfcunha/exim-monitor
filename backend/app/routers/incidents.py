@@ -33,7 +33,7 @@ from ..database import (
 )
 from ..detectors import DEFAULT_THRESHOLDS
 from ..health import compute_fleet_health
-from ..incident_impact import compute_impact, freeze_impact
+from ..incident_impact import compute_impact, freeze_impact, normalize_impact
 from ..incident_notify import notify_incident_event
 from ..incident_report import render_incident_report_html
 from ..ssh import SSHError, run_action
@@ -83,6 +83,7 @@ def _incident_to_dict(
     impact = incident.impact
     if impact is None and db is not None:
         impact = compute_impact(db, incident)
+    impact = normalize_impact(impact, incident.type)
 
     d = {
         "id": incident.id,
@@ -156,7 +157,7 @@ def _render_report(db: Session, incident: Incident) -> str:
         .order_by(ActionHistory.executed_at.asc())
         .all()
     )
-    impact = incident.impact or compute_impact(db, incident)
+    impact = normalize_impact(incident.impact or compute_impact(db, incident), incident.type)
     return render_incident_report_html(
         incident, server_name=server.name if server else f"servidor #{incident.server_id}",
         actions=actions, impact=impact,
