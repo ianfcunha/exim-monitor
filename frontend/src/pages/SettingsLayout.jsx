@@ -1,12 +1,14 @@
 /**
- * SettingsLayout — casca única para todas as telas de configuração
- * (Geral, Alertas, Servidores, Usuários, Histórico), com navegação
- * lateral interna em vez de páginas soltas por trás do dropdown do
- * header. Cada seção é uma rota aninhada de /settings, renderizada
- * via <Outlet/>.
+ * SettingsLayout — navegação interna das telas de configuração
+ * (Geral, Alertas, Servidores, Usuários, Histórico, Manutenção). Cada
+ * seção é uma rota aninhada de /settings, renderizada via <Outlet/>.
+ *
+ * Sessão 4, T8: o cabeçalho (logo, seletor de servidor, navegação
+ * principal, usuário) saiu daqui e vive na casca única — AppShell.jsx.
+ * Este arquivo cuida só da coluna lateral desta seção.
  */
-import { AlertTriangle, ArrowLeft, Bell, History, Home, Server, Users } from 'lucide-react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { AlertTriangle, Bell, History, Home, Server, Users } from 'lucide-react'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
 const NAV_ITEMS = [
@@ -19,49 +21,24 @@ const NAV_ITEMS = [
 ]
 
 export default function SettingsLayout() {
-  const navigate = useNavigate()
+  const { search } = useLocation()
   const { isAdmin } = useAuth()
   const items = NAV_ITEMS.filter(i => !i.adminOnly || isAdmin)
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--surface)' }}>
-      <header style={{
-        position: 'sticky', top: 0, zIndex: 10,
-        padding: '0 24px', background: 'var(--card)',
-        borderBottom: '1px solid var(--border)',
-        boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
-      }}>
-        <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 14, height: 56 }}>
-          <button
-            onClick={() => navigate('/dashboard')}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              fontSize: 12, color: 'var(--dim)', background: 'none', border: 'none', cursor: 'pointer', padding: 0,
-              transition: 'color 0.15s',
-            }}
-            onMouseEnter={e => e.currentTarget.style.color = 'var(--sky)'}
-            onMouseLeave={e => e.currentTarget.style.color = 'var(--dim)'}
-          >
-            <ArrowLeft size={14} /> Dashboard
-          </button>
-          <span style={{ color: 'var(--border)' }}>|</span>
-          <span style={{ fontSize: 10, letterSpacing: '0.28em', textTransform: 'uppercase', color: 'var(--sky)', fontWeight: 700 }}>
-            Configurações
-          </span>
-        </div>
-      </header>
+    <div style={{ background: 'var(--surface)', width: '100%' }}>
 
       <div className="settings-shell" style={{
         maxWidth: 1100, margin: '0 auto', padding: '20px 24px',
         display: 'flex', gap: 24, alignItems: 'flex-start',
       }}>
         <nav className="settings-nav" style={{
-          flexShrink: 0, width: 180, position: 'sticky', top: 76,
+          flexShrink: 0, width: 180, position: 'sticky', top: 96,
           display: 'flex', flexDirection: 'column', gap: 2,
         }}>
           {items.map(({ to, end, label, Icon }) => (
             <NavLink
-              key={to} to={to} end={end}
+              key={to} to={`${to}${search}`} end={end}
               style={({ isActive }) => ({
                 display: 'flex', alignItems: 'center', gap: 9,
                 padding: '8px 12px', borderRadius: 8,

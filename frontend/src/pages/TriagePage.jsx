@@ -1,32 +1,35 @@
 /**
- * Sessão 2, Tarefa 6 — Tela de Triagem. "O dashboard não é o produto...
- * O produto é o incidente." Esta é a tela inicial do app agora
- * (Dashboard vira aba secundária — ver App.jsx e o link "Painel clássico"
- * no cabeçalho abaixo).
+ * Tela de Triagem — a tela inicial do app. "O dashboard não é o
+ * produto. O produto é o incidente."
  *
- * Layout: lista cross-fleet à esquerda, detalhe (métricas/correção
- * sugerida/mensagens afetadas) no meio, painel de evidência sempre
- * visível à direita — nunca atrás de aba ou clique extra.
+ * Layout: lista à esquerda, detalhe no meio, evidência sempre visível à
+ * direita — nunca atrás de aba ou clique extra.
  *
- * Aceite da tarefa: alguém que nunca viu o sistema abre o incidente
- * pelo link do Telegram e entende a causa em <60s — cabeçalho, "por
- * que isto virou incidente" e evidência ficam todos visíveis de
- * primeira, sem navegação adicional.
+ * Sessão 4:
+ *   T5 — o cabeçalho de estado vem de /incidents/summary, que é a mesma
+ *        função do backend que alimenta o painel clássico.
+ *   T8 — o cabeçalho próprio (sem logo, sem seletor de servidor, sem
+ *        acesso a Configurações) saiu; esta tela vive dentro da casca
+ *        única e respeita o escopo global de servidor, incluindo a
+ *        opção "Toda a frota".
  */
-import { LayoutGrid, RefreshCw, ShieldCheck } from 'lucide-react'
+import { RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { fetchIncident, fetchIncidents, fetchIncidentsSummary, resolveIncident, silenceIncident } from '../api/client'
 import { Button } from '@/components/ui/button'
+import HealthSeal from '../components/HealthSeal'
 import EvidencePanel from '../components/incidents/EvidencePanel'
 import IncidentDetail from '../components/incidents/IncidentDetail'
 import IncidentList from '../components/incidents/IncidentList'
+import { useServer } from '../contexts/ServerContext'
 
 const OPEN_STATUSES = new Set(['aberto', 'em_observacao', 'mitigado'])
 
 export default function TriagePage() {
   const navigate = useNavigate()
   const { id: routeId, displayId } = useParams()
+  const { activeServer, isFleet } = useServer()
 
   const [status, setStatus]     = useState('open')
   const [severity, setSeverity] = useState('all')
@@ -38,23 +41,26 @@ export default function TriagePage() {
   const listRef = useRef(incidents)
   listRef.current = incidents
 
+  const scopeId = isFleet ? null : activeServer?.id ?? null
+
   const load = useCallback(() => {
     setLoading(true)
     const params = {}
     if (status !== 'open' && status !== 'all') params.status = status
     if (severity !== 'all') params.severity = severity
-    Promise.all([fetchIncidents(params), fetchIncidentsSummary()])
+    if (scopeId) params.server_id = scopeId
+    Promise.all([fetchIncidents(params), fetchIncidentsSummary(scopeId)])
       .then(([rows, sum]) => {
         const filtered = status === 'open' ? rows.filter(r => OPEN_STATUSES.has(r.status)) : rows
         setIncidents(filtered)
         setSummary(sum)
         // Mantém a seleção se ainda existir na lista; senão seleciona o
-        // primeiro item — a Triagem nunca fica "em branco" com incidentes na lista.
+        // primeiro item — a Triagem nunca fica em branco com incidentes na lista.
         setSelectedId(prev => (filtered.some(r => r.id === prev) ? prev : (filtered[0]?.id ?? null)))
       })
       .catch(() => { setIncidents([]); setSummary(null) })
       .finally(() => setLoading(false))
-  }, [status, severity])
+  }, [status, severity, scopeId])
 
   useEffect(load, [load])
 
@@ -66,7 +72,7 @@ export default function TriagePage() {
     if (!displayId) return
     fetchIncidents({}).then(rows => {
       const match = rows.find(r => r.display_id === displayId)
-      if (match) { setSelectedId(match.id); navigate(`/triage/${match.id}`, { replace: true }) }
+      if (match) { setSelectedId(match.id); navigate(`/triage/${match.id}${window.location.search}`, { replace: true }) }
     }).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [displayId])
@@ -82,7 +88,7 @@ export default function TriagePage() {
     if (selectedId == null) { setDetail(null); return }
     let alive = true
     fetchIncident(selectedId).then(d => { if (alive) setDetail(d) }).catch(() => { if (alive) setDetail(null) })
-    navigate(`/triage/${selectedId}`, { replace: true })
+    navigate(`/triage/${selectedId}${window.location.search}`, { replace: true })
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId])
@@ -114,37 +120,21 @@ export default function TriagePage() {
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [selectedId, load])
 
-  const headline = summary?.headline ?? (loading ? 'Carregando estado da frota…' : 'Entrega normal — nenhum incidente ativo')
-  const isDegraded = (summary?.open_critico ?? 0) > 0
-
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--surface)', display: 'flex', flexDirection: 'column' }}>
-      <header style={{
-        padding: '14px 24px', background: 'var(--card)', borderBottom: '1px solid var(--border)',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{
-            width: 9, height: 9, borderRadius: '50%', flexShrink: 0,
-            background: isDegraded ? 'var(--danger)' : (summary?.open_atencao ? 'var(--warn)' : 'var(--ok)'),
-          }} />
-          <h1 style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)', margin: 0 }}>{headline}</h1>
-        </div>
-        <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={load} disabled={loading}>
-            <RefreshCw size={12} style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} /> Atualizar
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => navigate('/reputation')}>
-            <ShieldCheck size={12} /> Reputação
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => navigate('/dashboard')}>
-            <LayoutGrid size={12} /> Painel clássico
-          </Button>
-        </div>
-      </header>
-
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       <div style={{
-        flex: 1, display: 'grid', gridTemplateColumns: 'minmax(260px, 320px) minmax(0, 1fr) minmax(280px, 380px)',
+        padding: '12px 16px 0', display: 'flex', alignItems: 'center',
+        justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
+      }}>
+        <HealthSeal health={summary} />
+        <Button size="sm" variant="outline" onClick={load} disabled={loading}>
+          <RefreshCw size={12} style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} /> Atualizar
+        </Button>
+      </div>
+
+      <div className="triage-grid" style={{
+        flex: 1, display: 'grid',
+        gridTemplateColumns: 'minmax(300px, 360px) minmax(0, 1fr) minmax(300px, 400px)',
         gap: 14, padding: 16, minHeight: 0,
       }}>
         <div style={{ minHeight: 0 }}>
@@ -152,7 +142,7 @@ export default function TriagePage() {
             incidents={incidents} selectedId={selectedId} onSelect={setSelectedId}
             status={status} onStatusChange={setStatus}
             severity={severity} onSeverityChange={setSeverity}
-            loading={loading}
+            loading={loading} showServerName={isFleet}
           />
         </div>
         <div style={{ minHeight: 0 }}>
@@ -162,6 +152,12 @@ export default function TriagePage() {
           <EvidencePanel incident={detail} />
         </div>
       </div>
+
+      <style>{`
+        @media (max-width: 1100px) {
+          .triage-grid { grid-template-columns: minmax(0, 1fr); }
+        }
+      `}</style>
     </div>
   )
 }

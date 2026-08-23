@@ -13,6 +13,7 @@ POST /api/incidents/{id}/fix/plan  — reusa plan() da Sessão 1 (T3)
 POST /api/incidents/{id}/fix/apply — reusa apply() da Sessão 1 (T3)
 GET/PUT /api/incidents/config      — threshold por tipo, formulário simples (não uma aba "Regras")
 """
+import secrets
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional
@@ -25,7 +26,8 @@ from sqlalchemy.orm import Session
 from ..auth import get_current_user, require_admin
 from ..crypto import SecretDecryptionError
 from ..database import (
-    ActionHistory, ActionPlan, DetectorConfig, Incident, IncidentEvent, User, build_server_cfg, get_db,
+    ActionHistory, ActionPlan, DetectorConfig, Incident, IncidentEvent, ReportShare, User,
+    build_server_cfg, get_db,
     get_detector_config_overrides, get_server_owned_by, get_servers_for_user, record_action_history,
     record_incident_event, save_detector_config_overrides, to_utc_iso,
 )
@@ -113,6 +115,24 @@ def _incident_to_dict(
     return d
 
 
+def _reject_if_observation_mode(db: Session, incident: Incident, actor: str, action: str) -> None:
+    """Sessão 4, T12 — a correção sugerida de um incidente é uma ação
+    como qualquer outra: um servidor em modo observação a recusa, e a
+    tentativa fica registrada."""
+    server = incident.server
+    if not server or not server.observation_mode:
+        return
+    reason = (f"O servidor '{server.name}' está em modo observação — o painel diagnostica "
+              f"mas não executa ações que alterem o servidor. Desligue o modo em "
+              f"Configurações → Servidores para liberar.")
+    record_action_history(
+        db, server_id=incident.server_id, actor=actor, action=action,
+        param=None, success=False, message=f"Tentativa negada — {reason}",
+        incident_id=incident.id,
+    )
+    raise HTTPException(409, reason)
+
+
 def _server_cfg_for(db: Session, incident: Incident):
     server = incident.server
     if not server:
@@ -123,6 +143,24 @@ def _server_cfg_for(db: Session, incident: Incident):
         server.ssh_status, server.ssh_error_msg = "credential_error", str(exc)[:500]
         db.commit()
         raise HTTPException(503, str(exc)) from exc
+
+
+def _render_report(db: Session, incident: Incident) -> str:
+    """Renderização única do relatório — consumida tanto pela rota com
+    login quanto pelo link de leitura por token (T9), para as duas nunca
+    divergirem no conteúdo."""
+    server = incident.server
+    actions = (
+        db.query(ActionHistory)
+        .filter(ActionHistory.incident_id == incident.id)
+        .order_by(ActionHistory.executed_at.asc())
+        .all()
+    )
+    impact = incident.impact or compute_impact(db, incident)
+    return render_incident_report_html(
+        incident, server_name=server.name if server else f"servidor #{incident.server_id}",
+        actions=actions, impact=impact,
+    )
 
 
 # ── Listagem ─────────────────────────────────────────────────────────────
@@ -172,6 +210,22 @@ def incidents_summary(
     return compute_fleet_health(db, servers)
 
 
+@router.get("/shared/{token}", summary="Relatório por link de leitura — sem login",
+            response_class=HTMLResponse)
+def get_shared_report(token: str, db: Session = Depends(get_db)):
+    """
+    Única rota da API sem autenticação. Serve exatamente um relatório, o
+    da linha em report_shares, e só enquanto o token não expirou.
+    """
+    share = db.get(ReportShare, token)
+    if not share or share.expires_at < datetime.utcnow():
+        raise HTTPException(404, "Este link de relatório não existe ou já expirou.")
+    incident = db.get(Incident, share.incident_id)
+    if not incident:
+        raise HTTPException(404, "O incidente deste relatório não existe mais.")
+    return HTMLResponse(content=_render_report(db, incident))
+
+
 @router.get("/{incident_id}", summary="Detalhe do incidente (com histórico de eventos)")
 def get_incident(incident_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     incident = _get_incident_or_404(db, incident_id, current_user)
@@ -188,19 +242,32 @@ def get_incident_report(incident_id: int, db: Session = Depends(get_db), current
     pra cá — ver TriagePage/IncidentDetail), não uma URL compartilhável
     sem login."""
     incident = _get_incident_or_404(db, incident_id, current_user)
-    server = incident.server
-    actions = (
-        db.query(ActionHistory)
-        .filter(ActionHistory.incident_id == incident.id)
-        .order_by(ActionHistory.executed_at.asc())
-        .all()
-    )
-    impact = incident.impact or compute_impact(db, incident)
-    html = render_incident_report_html(
-        incident, server_name=server.name if server else f"servidor #{incident.server_id}",
-        actions=actions, impact=impact,
-    )
-    return HTMLResponse(content=html)
+    return HTMLResponse(content=_render_report(db, incident))
+
+
+class ShareReportRequest(BaseModel):
+    hours: int = 168  # 7 dias
+
+
+@router.post("/{incident_id}/report/share", summary="Gera link de leitura do relatório, com validade (admin only)")
+def share_incident_report(incident_id: int, body: ShareReportRequest = ShareReportRequest(),
+                          db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    """
+    Sessão 4, Tarefa 9 — o relatório é o artefato que o dono do host
+    encaminha ao cliente dele, e o cliente não tem conta no painel. Um
+    token de leitura com validade resolve isso sem inventar um sistema
+    de convites: dá acesso a UM relatório e expira sozinho.
+    """
+    if not 1 <= body.hours <= 720:
+        raise HTTPException(422, "A validade deve ficar entre 1 hora e 30 dias.")
+    incident = _get_incident_or_404(db, incident_id, current_user)
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.utcnow() + timedelta(hours=body.hours)
+    db.add(ReportShare(token=token, incident_id=incident.id,
+                       created_by=current_user.username, expires_at=expires_at))
+    db.commit()
+    return {"token": token, "path": f"/api/incidents/shared/{token}",
+            "expires_at": to_utc_iso(expires_at)}
 
 
 # ── Transições manuais ──────────────────────────────────────────────────────
@@ -261,6 +328,7 @@ def plan_incident_fix(incident_id: int, db: Session = Depends(get_db), current_u
         raise HTTPException(400, "Este incidente não tem uma correção executável — a orientação é manual (ver suggested_fix.description).")
 
     action, param = action_spec["action"], action_spec.get("param")
+    _reject_if_observation_mode(db, incident, current_user.username, action)
     server_cfg = _server_cfg_for(db, incident)
 
     try:
@@ -294,6 +362,7 @@ def apply_incident_fix(incident_id: int, body: ApplyFixRequest, db: Session = De
     if not action_spec or not action_spec.get("action"):
         raise HTTPException(400, "Este incidente não tem uma correção executável.")
     action, param = action_spec["action"], action_spec.get("param")
+    _reject_if_observation_mode(db, incident, current_user.username, action)
 
     plan = db.get(ActionPlan, body.plan_id)
     if not plan:

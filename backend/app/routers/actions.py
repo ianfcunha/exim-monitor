@@ -68,6 +68,12 @@ ACTIONS_REQUIRING_PARAM = frozenset({
 # antes de apply() — só check-deliverability é isenta, por ser
 # somente-leitura (não faz sentido "planejar" uma consulta).
 PLAN_EXEMPT_ACTIONS = frozenset({"check-deliverability"})
+
+# Sessão 4, T12 — modo observação: o painel lê e diagnostica, mas nenhuma
+# ação que ALTERA o servidor é executada. Só as checagens somente-leitura
+# passam. A recusa acontece aqui, no backend, e não só escondendo o botão
+# — a interface desabilitar o controle é conveniência; a garantia é esta.
+OBSERVATION_ALLOWED_ACTIONS = frozenset({"check-deliverability"})
 PLAN_MAX_AGE_SECONDS = 300  # 5 minutos
 
 
@@ -197,6 +203,29 @@ def _require_admin_logged(db: Session, current_user: User, action: str, server_i
     )
 
 
+def _reject_if_observation_mode(db: Session, server_id: Optional[int], current_user: User,
+                                action: str) -> None:
+    """
+    T12: um servidor em modo observação recusa qualquer ação que o
+    altere, registrando a tentativa (mesma regra das tentativas negadas
+    por falta de permissão — uma recusa sem rastro é um buraco na
+    auditoria).
+    """
+    if server_id is None or action in OBSERVATION_ALLOWED_ACTIONS:
+        return
+    server = get_server_owned_by(db, server_id, current_user)
+    if not server or not server.observation_mode:
+        return
+    reason = (f"O servidor '{server.name}' está em modo observação — o painel diagnostica "
+              f"mas não executa ações que alterem o servidor. Desligue o modo em "
+              f"Configurações → Servidores para liberar.")
+    record_action_history(
+        db, server_id=server_id, actor=current_user.username, action=action,
+        param=None, success=False, message=f"Tentativa negada — {reason}",
+    )
+    raise HTTPException(status_code=409, detail=reason)
+
+
 def _resolve_server_cfg(db: Session, server_id: Optional[int], current_user: User) -> Optional[dict]:
     if server_id is None:
         return None
@@ -245,6 +274,7 @@ def plan_action(
     if action in ACTIONS_REQUIRING_PARAM and not body.param:
         raise HTTPException(422, f"A ação '{action}' requer o campo 'param' no body.")
 
+    _reject_if_observation_mode(db, server_id, current_user, action)
     server_cfg = _resolve_server_cfg(db, server_id, current_user)
 
     try:
@@ -333,6 +363,8 @@ def execute_action(
             status_code=422,
             detail=f"A ação '{action}' requer o campo 'param' no body.",
         )
+
+    _reject_if_observation_mode(db, server_id, current_user, action)
 
     # T3: rate limit por servidor-alvo — além do @limiter.limit por IP
     # de origem acima, que sozinho não impede um único actor de bater

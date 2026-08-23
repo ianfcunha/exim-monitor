@@ -25,13 +25,20 @@ const SNAPSHOT_ACTIONS = new Set([
   'clean-frozen', 'clean-bounces', 'clean-sender', 'clean-auth', 'block-ip', 'block-sender',
 ])
 
+// Sessão 4, T12 — hierarquia visual em três níveis. "leitura" é o resto
+// do painel (métricas, diagnóstico); aqui ficam os outros dois:
+//   segura     — não remove nem bloqueia nada, só reprocessa
+//   destrutiva — remove mensagens ou corta tráfego; tratamento visual
+//                distinto e sempre passando por preview
+// T11 — os rótulos deixaram de usar o vocabulário do código: "frozen"
+// virou "congeladas", "bounces" virou "devoluções".
 const ACTIONS = [
-  { id: 'retry-queue',   label: 'Reprocessar fila',   Icon: RotateCcw,      color: 'sky',    confirm: true, param: null, requiredCaps: [] },
-  { id: 'clean-frozen',  label: 'Remover frozen',      Icon: Snowflake,      color: 'amber',  confirm: true, param: null, requiredCaps: ['cap_remove_messages', 'cap_quarantine'] },
-  { id: 'clean-bounces', label: 'Limpar bounces',      Icon: CornerDownLeft, color: 'orange', confirm: true, param: null, requiredCaps: ['cap_remove_messages', 'cap_quarantine'] },
-  { id: 'clean-sender',  label: 'Limpar remetente',    Icon: Search,         color: 'purple', confirm: true, param: 'email', placeholder: 'remetente@dominio.com', requiredCaps: ['cap_remove_messages', 'cap_quarantine'] },
-  { id: 'block-ip',      label: 'Bloquear IP',         Icon: Shield,         color: 'rose',   confirm: true, param: 'ip',    placeholder: '192.168.0.1', requiredCaps: ['cap_manage_firewall'] },
-  { id: 'block-sender',  label: 'Bloquear remetente',  Icon: Ban,            color: 'red',    confirm: true, param: 'email', placeholder: 'spam@dominio.com', requiredCaps: ['cap_write_blacklist'] },
+  { id: 'retry-queue',   tier: 'segura',     label: 'Reprocessar fila',           Icon: RotateCcw,      color: 'sky',    confirm: true, param: null, requiredCaps: [] },
+  { id: 'clean-frozen',  tier: 'destrutiva', label: 'Remover mensagens congeladas', Icon: Snowflake,    color: 'amber',  confirm: true, param: null, requiredCaps: ['cap_remove_messages', 'cap_quarantine'] },
+  { id: 'clean-bounces', tier: 'destrutiva', label: 'Remover devoluções',         Icon: CornerDownLeft, color: 'orange', confirm: true, param: null, requiredCaps: ['cap_remove_messages', 'cap_quarantine'] },
+  { id: 'clean-sender',  tier: 'destrutiva', label: 'Remover de um remetente',    Icon: Search,         color: 'purple', confirm: true, param: 'email', placeholder: 'remetente@dominio.com', requiredCaps: ['cap_remove_messages', 'cap_quarantine'] },
+  { id: 'block-ip',      tier: 'destrutiva', label: 'Bloquear IP',                Icon: Shield,         color: 'rose',   confirm: true, param: 'ip',    placeholder: '192.168.0.1', requiredCaps: ['cap_manage_firewall'] },
+  { id: 'block-sender',  tier: 'destrutiva', label: 'Bloquear remetente',         Icon: Ban,            color: 'red',    confirm: true, param: 'email', placeholder: 'spam@dominio.com', requiredCaps: ['cap_write_blacklist'] },
 ]
 
 // T4 (Sessão 1, pós-auditoria): "permissão faltando vira informação
@@ -46,6 +53,16 @@ const CAP_LABELS = {
   cap_manage_firewall: 'bloquear IP',
   cap_write_blacklist: 'bloquear remetente',
   cap_quarantine:      'quarentenar mensagens antes de remover',
+}
+
+// Sessão 4, T12: um servidor em modo observação recusa toda ação que o
+// altere — o botão nasce desabilitado com o motivo visível, em vez de
+// deixar o clique falhar com um 409 depois. A garantia de verdade está
+// no backend (routers/actions.py::_reject_if_observation_mode); isto
+// aqui é o aviso honesto na interface.
+function observationReason(server) {
+  if (!server?.observation_mode) return null
+  return `${server.name} está em modo observação — o painel diagnostica, mas não executa ações que alterem o servidor. Desligue o modo em Configurações → Servidores para liberar.`
 }
 
 function missingCapReason(action, capabilities) {
@@ -187,13 +204,17 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
         )}
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {ACTIONS.map((action) => {
+      {/* T12: hierarquia visual em três níveis — leitura (o resto do
+          painel), ação segura e ação destrutiva. As destrutivas ficam
+          separadas, com aviso, e sempre passam pelo preview. */}
+      <div className="flex flex-wrap gap-2" style={{ marginBottom: 10 }}>
+        {ACTIONS.filter(a => a.tier === 'segura').map((action) => {
           const { Icon } = action
           const c = COLOR_MAP[action.color]
           const isRunning     = pending === action.id
           const isRecommended = recommendedActions.includes(action.id)
-          const capReason      = missingCapReason(action, activeServer?.capabilities)
+          const obsReason      = observationReason(activeServer)
+          const capReason      = obsReason || missingCapReason(action, activeServer?.capabilities)
           const isCapBlocked   = !!capReason
           const isDisabled     = !!pending || isCapBlocked
           return (
@@ -228,7 +249,7 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
                   padding: '1px 5px', borderRadius: 999,
                   background: 'var(--dim)', color: '#fff', pointerEvents: 'none',
                 }}>
-                  Só leitura
+                  {obsReason ? 'Observação' : 'Só leitura'}
                 </span>
               )}
               {isRecommended && !isRunning && !isCapBlocked && (
@@ -244,6 +265,75 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
             </div>
           )
         })}
+      </div>
+      <div style={{
+        borderTop: '1px solid var(--border)', paddingTop: 10,
+        display: 'flex', flexDirection: 'column', gap: 8,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10,
+                      color: 'var(--danger)', fontWeight: 700, textTransform: 'uppercase',
+                      letterSpacing: '0.06em' }}>
+          <AlertTriangle size={11} /> Ações que alteram o servidor
+        </div>
+        <div className="flex flex-wrap gap-2">
+        {ACTIONS.filter(a => a.tier === 'destrutiva').map((action) => {
+          const { Icon } = action
+          const c = COLOR_MAP[action.color]
+          const isRunning     = pending === action.id
+          const isRecommended = recommendedActions.includes(action.id)
+          const obsReason      = observationReason(activeServer)
+          const capReason      = obsReason || missingCapReason(action, activeServer?.capabilities)
+          const isCapBlocked   = !!capReason
+          const isDisabled     = !!pending || isCapBlocked
+          return (
+            <div key={action.id} style={{ position: 'relative' }}>
+              <button
+                disabled={isDisabled}
+                title={capReason || undefined}
+                onClick={() => !isCapBlocked && requestAction(action)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  borderRadius: 8,
+                  border: isRecommended ? '2px solid var(--sky)' : `1px solid ${c.border}`,
+                  padding: isRecommended ? '5px 11px' : '6px 12px',
+                  fontSize: 11, fontWeight: isRecommended ? 600 : 500,
+                  color: isRecommended ? 'var(--accent-fg)' : c.text,
+                  background: isRecommended ? 'var(--accent-bg)' : c.bg,
+                  cursor: isDisabled ? 'not-allowed' : 'pointer',
+                  transition: 'background 0.15s, opacity 0.15s',
+                  opacity: isDisabled && !isRunning ? 0.45 : 1,
+                  boxShadow: isRecommended ? '0 0 0 3px rgba(14,165,233,0.12)' : 'none',
+                }}
+                onMouseEnter={e => { if (!isDisabled) e.currentTarget.style.background = isRecommended ? 'color-mix(in srgb, var(--sky) 22%, var(--card))' : c.hoverBg }}
+                onMouseLeave={e => { e.currentTarget.style.background = isRecommended ? 'var(--accent-bg)' : c.bg }}
+              >
+                <Icon size={12} style={{ animation: isRunning ? 'spin 1s linear infinite' : undefined }} />
+                {isRunning ? 'Executando…' : action.label}
+              </button>
+              {isCapBlocked && !isRunning && (
+                <span style={{
+                  position: 'absolute', top: -7, right: -4,
+                  fontSize: 8, fontWeight: 700, letterSpacing: '0.05em',
+                  padding: '1px 5px', borderRadius: 999,
+                  background: 'var(--dim)', color: '#fff', pointerEvents: 'none',
+                }}>
+                  {obsReason ? 'Observação' : 'Só leitura'}
+                </span>
+              )}
+              {isRecommended && !isRunning && !isCapBlocked && (
+                <span style={{
+                  position: 'absolute', top: -7, right: -4,
+                  fontSize: 8, fontWeight: 700, letterSpacing: '0.05em',
+                  padding: '1px 5px', borderRadius: 999,
+                  background: 'var(--sky)', color: '#fff', pointerEvents: 'none',
+                }}>
+                  Sugerido
+                </span>
+              )}
+            </div>
+          )
+        })}
+      </div>
       </div>
 
       {confirmAction && (

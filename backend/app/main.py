@@ -33,7 +33,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Versão atual do schema — atualizar junto com cada nova migration
-_SCHEMA_VERSION = "021"
+_SCHEMA_VERSION = "022"
 
 _DDL_ALEMBIC_VERSION = """
     CREATE TABLE IF NOT EXISTS alembic_version (
@@ -718,6 +718,32 @@ def run_migrations() -> None:
             )
             logger.info("Migration 021 aplicada com sucesso (%d incidente(s) invalidado(s))", len(invalidated))
             current = {"021"}
+
+        if "021" in current and "022" not in current:
+            logger.info("Aplicando migration 021 → 022 (link de leitura do relatório + modo observação, Sessão 4 T9/T12)...")
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS report_shares (
+                    token       VARCHAR(64) PRIMARY KEY,
+                    incident_id INTEGER NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+                    created_by  VARCHAR(100) NOT NULL,
+                    created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+                    expires_at  TIMESTAMP NOT NULL
+                )
+            """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS ix_report_shares_incident ON report_shares (incident_id)
+            """))
+            conn.execute(text("""
+                ALTER TABLE servers
+                    ADD COLUMN IF NOT EXISTS observation_mode BOOLEAN NOT NULL DEFAULT FALSE
+            """))
+            conn.execute(text("DELETE FROM alembic_version"))
+            conn.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
+                {"v": "022"},
+            )
+            logger.info("Migration 022 aplicada com sucesso")
+            current = {"022"}
 
         logger.info("Banco de dados pronto (schema %s)", _SCHEMA_VERSION)
 

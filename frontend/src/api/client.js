@@ -63,6 +63,13 @@ export const fetchFullStatus = (serverId = null) =>
 export const refreshStatus = (serverId = null) =>
   api.post('/status/refresh', null, { params: serverId ? { server_id: serverId } : {} }).then(r => r.data)
 
+// Sessão 4, T5 — fonte única do estado de saúde. Devolve exatamente o
+// mesmo objeto de /incidents/summary?server_id=N (ambos chamam
+// health.py no backend); é o que impede a Triagem e o painel clássico
+// de mostrarem selos diferentes para o mesmo servidor no mesmo instante.
+export const fetchServerHealth = (serverId = null) =>
+  api.get('/status/health', { params: serverId ? { server_id: serverId } : {} }).then(r => r.data)
+
 // ── Acoes (com server_id) ──────────────────────────────────────────────────
 // T3 (Sessão 1, pós-auditoria): toda ação destrutiva agora é plan() depois
 // apply() — planAction() não altera nada no servidor, só retorna um
@@ -169,8 +176,8 @@ export const testWebhook        = (serverId = null) =>
 export const fetchIncidents = (params = {}) =>
   api.get('/incidents', { params }).then(r => r.data)
 
-export const fetchIncidentsSummary = () =>
-  api.get('/incidents/summary').then(r => r.data)
+export const fetchIncidentsSummary = (serverId = null) =>
+  api.get('/incidents/summary', { params: serverId ? { server_id: serverId } : {} }).then(r => r.data)
 
 export const fetchIncident = (id) =>
   api.get(`/incidents/${id}`).then(r => r.data)
@@ -211,5 +218,10 @@ export const fetchReputation = (serverId = null) =>
 // exportLogMessages/exportActionHistory.
 export const fetchIncidentReportHtml = (id) =>
   api.get(`/incidents/${id}/report`, { responseType: 'blob' })
+
+// Sessão 4, T9 — link de leitura com validade, para encaminhar o
+// relatório a quem não tem conta no painel.
+export const shareIncidentReport = (id, hours = 168) =>
+  api.post(`/incidents/${id}/report/share`, { hours }).then(r => r.data)
 
 export default api

@@ -55,6 +55,9 @@ class ServerUpdate(BaseModel):
     ssh_secret:    Optional[str] = Field(None, description="Novo segredo — deixe vazio para manter o atual")
     script_path:   Optional[str] = Field(None, max_length=500)
     is_enabled:    Optional[bool] = None
+    # Sessão 4, T12: modo observação — o painel lê e diagnostica, mas
+    # nenhuma ação que altera o servidor é executada.
+    observation_mode: Optional[bool] = None
     reset_host_key: Optional[bool] = Field(
         None, description="true = esquece o fingerprint pinado; próxima conexão fixa um novo"
     )
@@ -81,6 +84,10 @@ def _to_response(s: Server, include_secret: bool = False) -> dict:
         # no momento do cadastro.
         "is_root":          s.ssh_user == "root",
         "capabilities":     s.capabilities,
+        # T12: o modo precisa viajar com o servidor para a interface
+        # poder desabilitar as ações COM O MOTIVO, em vez de deixar o
+        # clique falhar depois.
+        "observation_mode": s.observation_mode,
         "last_connected_at": to_utc_iso(s.last_connected_at),
         "created_at":       to_utc_iso(s.created_at),
     }
@@ -198,6 +205,7 @@ def update_server(
     if payload.ssh_auth_type is not None: server.ssh_auth_type = payload.ssh_auth_type
     if payload.script_path   is not None: server.script_path   = payload.script_path
     if payload.is_enabled    is not None: server.is_enabled    = payload.is_enabled
+    if payload.observation_mode is not None: server.observation_mode = payload.observation_mode
     if payload.reset_host_key:
         server.ssh_host_key_fingerprint = None
 

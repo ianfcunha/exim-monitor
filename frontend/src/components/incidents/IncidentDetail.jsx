@@ -11,10 +11,11 @@
  */
 import { AlertTriangle, Check, CheckCircle2, FileText, Settings2, ShieldOff } from 'lucide-react'
 import { useState } from 'react'
-import { ackIncident, applyIncidentFix, fetchIncidentReportHtml, planIncidentFix, resolveIncident, silenceIncident } from '../../api/client'
+import { Link } from 'react-router-dom'
+import { ackIncident, applyIncidentFix, planIncidentFix, resolveIncident, silenceIncident } from '../../api/client'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { SEVERITY_STYLE, STATUS_LABELS, STATUS_STYLE, TYPE_LABELS, applyLabel } from './incidentLabels'
+import { SEVERITY_STYLE, STATUS_LABELS, STATUS_STYLE, applyLabel, incidentTitle } from './incidentLabels'
 import ThresholdEditor from './ThresholdEditor'
 import { useToast } from '../../contexts/ToastContext'
 
@@ -74,6 +75,56 @@ function fmtDuration(seconds) {
   return `${h}h${m > 0 ? ` ${m}min` : ''}`
 }
 
+// Sessão 4, Tarefa 6 — impacto honesto. Todo valor vem do backend como
+// {estimable: true, value, basis} ou {estimable: false, reason}. Um
+// valor não estimável NÃO vira um número: vira "não estimável para este
+// tipo de incidente" com o motivo em uma linha.
+function ValueStat({ label, field, format = String }) {
+  if (!field) return null
+  if (!field.estimable) {
+    return (
+      <div style={{
+        padding: '8px 10px', borderRadius: 8, border: '1px dashed var(--border)',
+        background: 'var(--surface)', minWidth: 0, gridColumn: 'span 2',
+      }}>
+        <div style={{ fontSize: 9.5, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>
+          {label}
+        </div>
+        <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--muted)', marginBottom: 2 }}>
+          não estimável para este tipo de incidente
+        </div>
+        <div style={{ fontSize: 10.5, color: 'var(--dim)', lineHeight: 1.4 }}>{field.reason}</div>
+      </div>
+    )
+  }
+  return (
+    <div style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', minWidth: 0 }}>
+      <div style={{ fontSize: 9.5, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{format(field.value)}</div>
+      {field.basis && (
+        <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 3, lineHeight: 1.4 }}>{field.basis}</div>
+      )}
+    </div>
+  )
+}
+
+function ReputationImpact({ detail }) {
+  if (!detail) return null
+  const top = detail.messages_to_top_destination
+  return (
+    <>
+      <ValueStat label="Tempo listado" field={detail.listed_minutes} format={m => fmtDuration(m * 60)} />
+      <ValueStat label="Zonas com listagem" field={detail.zones_listed}
+                 format={z => Array.isArray(z) ? z.length : z} />
+      <ValueStat label="Zonas consultadas" field={detail.zones_checked} />
+      <ValueStat label="Maior volume para um destino" field={top}
+                 format={v => `${v.count} para ${v.domain}`} />
+    </>
+  )
+}
+
 function ImpactSection({ impact }) {
   if (!impact) return null
   const entities = [...(impact.accounts_affected || []), ...(impact.domains_affected || [])]
@@ -82,14 +133,26 @@ function ImpactSection({ impact }) {
       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
         Impacto
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 8, marginBottom: entities.length ? 8 : 0 }}>
-        <Stat label="Mensagens afetadas" value={impact.messages_affected} />
-        {impact.stuck_over_4h > 0 && <Stat label="Presas há +4h" value={impact.stuck_over_4h} />}
-        <Stat label="Tempo em aberto" value={fmtDuration(impact.total_open_seconds)} />
-        <Stat
-          label="Impacto na entrega"
-          value={impact.delivery_rate_impact_pct == null ? 'sem baseline' : `${impact.delivery_rate_impact_pct > 0 ? '-' : '+'}${Math.abs(impact.delivery_rate_impact_pct)} p.p.`}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 8, marginBottom: entities.length ? 8 : 0 }}>
+        <ValueStat label="Mensagens afetadas" field={impact.messages_affected} />
+        <div style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', minWidth: 0 }}>
+          <div style={{ fontSize: 9.5, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>
+            Tempo em aberto
+          </div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{fmtDuration(impact.total_open_seconds)}</div>
+        </div>
+        {impact.stuck_over_4h?.estimable && impact.stuck_over_4h.value > 0 && (
+          <ValueStat label="Presas há mais de 4h" field={impact.stuck_over_4h} />
+        )}
+        {/* Nunca uma variação positiva como "impacto" de um incidente
+            crítico: 0 significa "não houve queda", e o motivo fica no
+            texto de base logo abaixo do número. */}
+        <ValueStat
+          label="Queda na taxa de entrega"
+          field={impact.delivery_rate_impact_pct}
+          format={v => (v > 0 ? `-${v} p.p.` : 'sem queda')}
         />
+        <ReputationImpact detail={impact.reputation} />
       </div>
       {entities.length > 0 && (
         <p style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: impact.cost_estimate ? 8 : 0 }}>
@@ -116,7 +179,6 @@ export default function IncidentDetail({ incident, onChanged }) {
   const [planning, setPlanning]   = useState(false)
   const [applying, setApplying]   = useState(false)
   const [thresholdsOpen, setThresholdsOpen] = useState(false)
-  const [reportLoading, setReportLoading] = useState(false)
 
   if (!incident) {
     return (
@@ -162,25 +224,6 @@ export default function IncidentDetail({ incident, onChanged }) {
     }
   }
 
-  // Sessão 3, T2 — busca o HTML como blob (a rota exige o mesmo Bearer
-  // token de toda a API, então uma navegação direta <a href> quebraria)
-  // e abre numa aba nova; de lá o próprio usuário usa Ctrl+P/"Salvar
-  // como" do navegador pra imprimir ou gerar o arquivo autocontido que
-  // encaminha ao cliente dele.
-  const openReport = async () => {
-    setReportLoading(true)
-    try {
-      const res = await fetchIncidentReportHtml(incident.id)
-      const url = window.URL.createObjectURL(res.data)
-      window.open(url, '_blank')
-      setTimeout(() => window.URL.revokeObjectURL(url), 60_000)
-    } catch (err) {
-      toast({ type: 'err', msg: err?.response?.data?.detail || err.message || 'Erro ao gerar relatório.' })
-    } finally {
-      setReportLoading(false)
-    }
-  }
-
   const doAck = async () => {
     setBusy('ack')
     try { await ackIncident(incident.id); onChanged?.() }
@@ -223,7 +266,7 @@ export default function IncidentDetail({ incident, onChanged }) {
             fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 999,
             border: `1px solid ${sev.border}`, background: sev.bg, color: sev.text, textTransform: 'uppercase',
           }}>
-            {incident.severity}
+            {sev.label ?? incident.severity}
           </span>
           <span style={{
             fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 999,
@@ -232,25 +275,39 @@ export default function IncidentDetail({ incident, onChanged }) {
             {STATUS_LABELS[incident.status] ?? incident.status}
           </span>
         </div>
-        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
-          {TYPE_LABELS[incident.type] ?? incident.type} — <span style={{ fontWeight: 500 }}>{incident.entity}</span>
+        {/* T11: o título diz o fato, não a chave interna. */}
+        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', marginBottom: 4, lineHeight: 1.3 }}>
+          {incidentTitle(incident)}
         </div>
         <div style={{ fontSize: 11.5, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <span>
-            {incident.server_name ?? `servidor #${incident.server_id}`} · desde {fmtDateTime(incident.first_seen)}
-            {' · '}última vez {fmtDateTime(incident.last_seen)}
+            {incident.server_name ?? `servidor #${incident.server_id}`} · aberto em {fmtDateTime(incident.first_seen)}
+            {' · '}confirmado pela última vez em {fmtDateTime(incident.last_seen)}
           </span>
-          {/* Sessão 3, T2 — o documento que o dono do host encaminha ao cliente dele */}
-          <button
-            onClick={openReport} disabled={reportLoading}
-            style={{
-              fontSize: 11, color: 'var(--sky)', fontWeight: 600, background: 'none', border: 'none',
-              padding: 0, cursor: reportLoading ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4,
-            }}
+          {/* T9: rota real, com endereço permanente e link copiável — no
+              lugar do blob: em aba nova, que não dava para voltar nem
+              compartilhar. */}
+          <Link
+            to={`/incidents/${incident.id}/report`}
+            style={{ fontSize: 11, color: 'var(--sky)', fontWeight: 600, textDecoration: 'none',
+                     display: 'inline-flex', alignItems: 'center', gap: 4 }}
           >
-            <FileText size={11} /> {reportLoading ? 'Gerando relatório…' : 'Ver relatório →'}
-          </button>
+            <FileText size={11} /> Ver relatório →
+          </Link>
         </div>
+
+        {/* T1: um incidente cuja verificação parou de responder não pode
+            seguir afirmando que está confirmado agora. */}
+        {incident.unverified_since && (
+          <div style={{
+            marginTop: 8, padding: '8px 10px', borderRadius: 8, fontSize: 11.5, lineHeight: 1.45,
+            background: 'var(--surface)', border: '1px dashed var(--border)', color: 'var(--muted)',
+          }}>
+            Não foi possível reverificar este incidente desde{' '}
+            <strong style={{ color: 'var(--text)' }}>{fmtDateTime(incident.unverified_since)}</strong> —
+            ele continua aberto porque não há como confirmar que terminou, não porque foi confirmado de novo.
+          </div>
+        )}
       </div>
 
       {/* ── Ações de estado ── */}
@@ -260,10 +317,10 @@ export default function IncidentDetail({ incident, onChanged }) {
             <Check size={12} /> {busy === 'ack' ? 'Confirmando…' : 'Confirmar ciência'}
           </Button>
           <Button size="sm" variant="outline" onClick={doSilence} disabled={!!busy}>
-            <ShieldOff size={12} /> {busy === 'silence' ? 'Silenciando…' : 'Silenciar (60min) — S'}
+            <ShieldOff size={12} /> {busy === 'silence' ? 'Silenciando…' : 'Silenciar por 60min'}
           </Button>
           <Button size="sm" variant="outline" onClick={doResolve} disabled={!!busy}>
-            <CheckCircle2 size={12} /> {busy === 'resolve' ? 'Resolvendo…' : 'Resolver — E'}
+            <CheckCircle2 size={12} /> {busy === 'resolve' ? 'Resolvendo…' : 'Resolver'}
           </Button>
         </div>
       )}

@@ -134,6 +134,12 @@ class Server(Base):
     # cap_*) — persistida a cada /test, pra o painel desabilitar botão
     # de ação com o motivo visível em vez de deixar a ação falhar calada.
     capabilities    = Column(JSONB, nullable=True)
+    # Sessão 4, T12 — modo observação: o painel continua coletando e
+    # diagnosticando este servidor, mas recusa qualquer ação que o
+    # altere. A recusa acontece no backend (routers/actions.py e
+    # routers/incidents.py); a interface desabilitar o botão com o motivo
+    # é conveniência, não a garantia.
+    observation_mode = Column(Boolean, default=False, nullable=False)
     created_at      = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at      = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -532,6 +538,33 @@ def record_incident_event(db, incident: "Incident", event_type: str, actor: str 
     ev = IncidentEvent(incident_id=incident.id, event_type=event_type, actor=actor, detail=detail)
     db.add(ev)
     return ev
+
+
+class ReportShare(Base):
+    """
+    Sessão 4, Tarefa 9 — link de leitura para o relatório de um
+    incidente, com validade.
+
+    O relatório é o artefato que o dono do host encaminha ao cliente
+    dele; o cliente não tem conta no painel. Um token de leitura resolve
+    isso sem inventar um sistema de convites: dá acesso a UM relatório,
+    expira, e pode ser revogado apagando a linha.
+
+    O token é o identificador — não há segredo separado, então ele é
+    gerado com secrets.token_urlsafe (não com um contador ou um uuid1
+    previsível) e o link só deve ser compartilhado com quem pode ler o
+    incidente.
+    """
+    __tablename__ = "report_shares"
+    __table_args__ = (
+        Index("ix_report_shares_incident", "incident_id"),
+    )
+
+    token       = Column(String(64), primary_key=True)
+    incident_id = Column(Integer, ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False)
+    created_by  = Column(String(100), nullable=False)
+    created_at  = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at  = Column(DateTime, nullable=False)
 
 
 class CheckResult(Base):

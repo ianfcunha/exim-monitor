@@ -2,10 +2,11 @@
  * ServersPage — CRUD de servidores EXIM.
  * Apenas admins acessam esta página.
  */
-import { AlertTriangle, CheckCircle, Edit2, KeyRound, Plus, RefreshCw, Server, Trash2, WifiOff, X, XCircle, Zap } from 'lucide-react'
+import { AlertTriangle, CheckCircle, Edit2, Eye, KeyRound, Plus, RefreshCw, Server, Trash2, WifiOff, X, XCircle, Zap } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { createServer, deleteServer, fetchServers, testServerConn, updateServer } from '../api/client'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useServer } from '../contexts/ServerContext'
 
@@ -294,6 +295,20 @@ export default function ServersPage() {
     }
   }
 
+  // Sessão 4, T12 — modo observação por servidor. O painel continua
+  // coletando e diagnosticando; o que ele deixa de fazer é executar
+  // qualquer ação que altere o servidor (a recusa é garantida no
+  // backend, ver routers/actions.py::_reject_if_observation_mode).
+  const handleToggleObservation = async (server) => {
+    try {
+      await updateServer(server.id, { observation_mode: !server.observation_mode })
+      await load()
+      await refreshCtx()
+    } catch (err) {
+      setError(err?.response?.data?.detail || 'Não foi possível alterar o modo de observação.')
+    }
+  }
+
   const handleForgetHostKey = async (id) => {
     if (!confirm(
       'Isso esquece a chave do host conhecida. Só faça isso se você reinstalou ' +
@@ -415,6 +430,16 @@ export default function ServersPage() {
                         <AlertTriangle size={10} /> root
                       </span>
                     )}
+                    {s.observation_mode && (
+                      <span title="O painel diagnostica este servidor, mas não executa nenhuma ação que o altere."
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 4,
+                          fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 999,
+                          background: 'var(--warn-bg)', color: 'var(--warn)', border: '1px solid var(--warn-border)',
+                        }}>
+                        <Eye size={10} /> Modo observação
+                      </span>
+                    )}
                     {!s.is_enabled && (
                       <span style={{ fontSize: 10, padding: '1px 7px', borderRadius: 999, background: 'var(--surface)', color: 'var(--dim)', fontWeight: 600 }}>
                         Desativado
@@ -494,6 +519,32 @@ export default function ServersPage() {
                       SSH conectou, mas não foi possível validar o script: {tr.check_error}
                     </div>
                   )}
+
+                  {/* Sessão 4, T12 — o modo observação precisa ser
+                      escolhido em algum lugar visível, não ficar só como
+                      uma coluna no banco. */}
+                  <label style={{
+                    display: 'flex', alignItems: 'center', gap: 9, marginTop: 10,
+                    padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
+                    border: `1px solid ${s.observation_mode ? 'var(--warn-border)' : 'var(--border)'}`,
+                    background: s.observation_mode ? 'var(--warn-bg)' : 'var(--surface)',
+                  }}>
+                    <Switch
+                      checked={!!s.observation_mode}
+                      onCheckedChange={() => handleToggleObservation(s)}
+                    />
+                    <span style={{ minWidth: 0 }}>
+                      <span style={{ display: 'block', fontSize: 11.5, fontWeight: 600,
+                                     color: s.observation_mode ? 'var(--warn)' : 'var(--text)' }}>
+                        Modo observação
+                      </span>
+                      <span style={{ display: 'block', fontSize: 10.5, color: 'var(--muted)', lineHeight: 1.4 }}>
+                        {s.observation_mode
+                          ? 'Ligado — o painel coleta e diagnostica, mas nenhuma ação que altere este servidor é executada.'
+                          : 'Desligado — ações de correção podem ser executadas neste servidor, sempre com preview antes.'}
+                      </span>
+                    </span>
+                  </label>
                 </div>
 
                 <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>

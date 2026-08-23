@@ -17,13 +17,11 @@
  */
 import {
   CheckCircle, Clock, FileText, History, Inbox,
-  LogOut, MailOpen, RefreshCw, Settings, XCircle,
+  MailOpen, RefreshCw, XCircle,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { refreshStatus } from '../api/client'
 import { Button } from '@/components/ui/button'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import ActionPanel from '../components/ActionPanel'
 import DeliverabilityCard from '../components/DeliverabilityCard'
@@ -35,7 +33,7 @@ import LogViewerDrawer from '../components/LogViewerDrawer'
 import MessagesDrawer from '../components/MessagesDrawer'
 import MetricCard from '../components/MetricCard'
 import PhpMailersCard from '../components/PhpMailersCard'
-import ServerSelector from '../components/ServerSelector'
+import HealthSeal from '../components/HealthSeal'
 import TopTable from '../components/TopTable'
 import { useAuth } from '../contexts/AuthContext'
 import { useServer } from '../contexts/ServerContext'
@@ -63,18 +61,7 @@ function useStaleness(ts) {
   return               { color: 'var(--danger)', dot: 'var(--danger)', label: `${Math.floor(diffS/60)}min · desatualizado`, pulse: true  }
 }
 
-// ── Logo SVG AVILI ───────────────────────────────────────────────────────────
-function LogoMark({ size = 20 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 60 60" fill="none" aria-hidden>
-      <path d="M10 46 L30 16 L50 46" fill="none" stroke="var(--text)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
-      <path d="M18 36 L30 26 L42 36" fill="none" stroke="var(--sky)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
-      <circle cx="30" cy="16" r="2.5" fill="var(--cyan)"/>
-    </svg>
-  )
-}
-
-// ── Botão do header ──────────────────────────────────────────────────────────
+// ── Botão da barra da página ─────────────────────────────────────────────────
 function HBtn({ onClick, disabled, title, children }) {
   return (
     <Tooltip>
@@ -88,49 +75,7 @@ function HBtn({ onClick, disabled, title, children }) {
   )
 }
 
-// ── StatusPill clicável ──────────────────────────────────────────────────────
-function StatusPill({ color, label, children }) {
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          className="flex flex-shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold outline-none focus-visible:ring-1 focus-visible:ring-primary"
-          style={{ border: `1px solid ${color}25`, background: `${color}0f`, color }}
-        >
-          <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full" style={{ background: color }} />
-          {label}
-        </button>
-      </PopoverTrigger>
-      <PopoverContent>{children}</PopoverContent>
-    </Popover>
-  )
-}
 
-// ── Configurações + Sair ────────────────────────────────────────────────────
-// Antes era um dropdown com 4 destinos + tema + sair — agora que
-// /settings tem navegação própria (sidebar em SettingsLayout), o dropdown
-// só duplicava a mesma lista. Um botão simples leva pra lá; o tema mudou
-// pra Configurações → Geral.
-function SettingsControls({ onLogout }) {
-  const navigate = useNavigate()
-  return (
-    <>
-      {/* Sessão 2, T6: este painel virou a aba secundária — a Triagem
-          (/triage) é a tela inicial agora. */}
-      <HBtn onClick={() => navigate('/triage')} title="Ir para a Triagem de incidentes">
-        <Inbox size={12} />
-        <span className="hidden sm:inline">Triagem</span>
-      </HBtn>
-      <HBtn onClick={() => navigate('/settings')} title="Configurações">
-        <Settings size={12} />
-        <span className="hidden sm:inline">Configurações</span>
-      </HBtn>
-      <HBtn onClick={onLogout} title="Sair">
-        <LogOut size={12} />
-      </HBtn>
-    </>
-  )
-}
 
 // ── Tooltips por métrica ─────────────────────────────────────────────────────
 const METRIC_TOOLTIPS = {
@@ -142,8 +87,8 @@ const METRIC_TOOLTIPS = {
 }
 
 // ── Componente principal ─────────────────────────────────────────────────────
-export default function Dashboard({ onLogout, advanced = false }) {
-  const { isAdmin, username } = useAuth()
+export default function Dashboard({ advanced = false }) {
+  const { isAdmin } = useAuth()
   const { activeServer }      = useServer()
   const quick                 = useQuickStatus()
   const full                  = useFullStatus()
@@ -263,173 +208,37 @@ export default function Dashboard({ onLogout, advanced = false }) {
     q.top_auth_user && { label: q.top_auth_user, count: q.top_auth_count ?? 0, tag: 'auth' },
   ].filter(Boolean).filter(r => r.label).sort((a, b) => b.count - a.count)
 
-  // ── Cor do badge de role ──────────────────────────────────────────────────
-  const roleStyle = isAdmin
-    ? { bg: 'var(--accent-bg)', border: 'var(--accent-border)', color: 'var(--accent-fg)', label: 'Admin' }
-    : { bg: 'var(--surface)', border: 'var(--border)', color: 'var(--muted)', label: 'Viewer' }
-
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--surface)' }}>
+    <div style={{ background: 'var(--surface)' }}>
 
-      {/* ── Header ── */}
-      <header style={{
-        position: 'sticky', top: 0, zIndex: 10,
-        padding: '0 24px', background: 'var(--card)',
-        borderBottom: '1px solid var(--border)',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-      }}>
-        <div style={{
-          maxWidth: 1280, margin: '0 auto',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          gap: 12, height: 54,
-        }}>
-
-          {/* ── Esquerda ── */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, overflow: 'hidden' }}>
-
-            {/* Logo */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-              <div style={{ width: 34, height: 34, borderRadius: 9, background: 'var(--accent-bg)', border: '1px solid var(--accent-border)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <LogoMark size={19} />
-              </div>
-              <div className="hidden sm:block" style={{ lineHeight: 1.2 }}>
-                <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: '-0.01em' }}>
-                  <span style={{ color: 'var(--text)' }}>Mail </span><span style={{ color: 'var(--sky)' }}>IQ</span>
-                </div>
-                <div style={{ fontSize: 8.5, letterSpacing: '0.18em', textTransform: 'uppercase', fontWeight: 600, color: 'var(--dim)' }}>
-                  by <span style={{ color: 'var(--sky)' }}>AVILI</span>
-                </div>
-              </div>
+      {/* ── Barra da página ──
+          Sessão 4, T8: o cabeçalho (logo, seletor de servidor,
+          navegação, usuário) vive agora na casca única — AppShell.jsx.
+          Aqui fica só o que é específico desta aba: o selo de saúde
+          (mesma fonte da Triagem, T5) e os controles da coleta. */}
+      <div style={{ maxWidth: 1280, margin: '0 auto', padding: '16px 24px 0', width: '100%' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <HealthSeal />
+          {staleness && (
+            <div className="hidden sm:flex items-center gap-1.5" style={{ fontSize: 11, color: staleness.color }}>
+              <span style={{ width: 5, height: 5, borderRadius: '50%', background: staleness.dot }} />
+              {staleness.label}
             </div>
-
-            <span style={{ width: 1, height: 18, background: 'var(--border)', flexShrink: 0 }} />
-
-            <ServerSelector />
-
-            {/* Badge EXIM */}
-            {(() => {
-              // T6 (Sessão 1, pós-auditoria): default era 'OK' — antes do
-              // primeiro dado chegar, o pill mostrava verde "EXIM" como se
-              // já tivesse confirmado saúde. UNKNOWN fica neutro (--dim),
-              // nunca verde; DEGRADED (log não reconhecido) fica vermelho
-              // igual CRITICAL — as métricas não são confiáveis, não é só
-              // um "não sei ainda".
-              const sev   = diag.severity ?? 'UNKNOWN'
-              const ok    = sev === 'OK' || sev === 'LOW'
-              const color = ok ? 'var(--ok)'
-                : sev === 'UNKNOWN' ? 'var(--dim)'
-                : (sev === 'MEDIUM' || sev === 'HIGH') ? 'var(--warn)'
-                : 'var(--danger)'
-              return (
-                <StatusPill color={color} label={ok ? 'EXIM' : sev}>
-                  <div style={{ fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>Diagnóstico EXIM</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />
-                    <span style={{ color, fontWeight: 600 }}>{sev}</span>
-                  </div>
-                  {diag.problem && diag.problem !== 'NORMAL' && (
-                    <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 4 }}>{diag.problem}</div>
-                  )}
-                </StatusPill>
-              )
-            })()}
-
-            {/* Badge SSH */}
-            {activeServer && (() => {
-              const ok    = activeServer.ssh_status === 'ok'
-              const color = ok ? 'var(--ok)' : activeServer.ssh_status === 'unknown' ? 'var(--dim)' : 'var(--danger)'
-              return (
-                <StatusPill color={color} label="SSH">
-                  <div style={{ fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>Conexão SSH</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />
-                    <span style={{ color, fontWeight: 600 }}>
-                      {{ ok: 'Conectado', error: 'Erro', timeout: 'Timeout', unknown: 'Desconhecido' }[activeServer.ssh_status]}
-                    </span>
-                  </div>
-                  {activeServer.ssh_error_msg && (
-                    <div style={{ color: 'var(--danger)', fontSize: 11, marginTop: 4, wordBreak: 'break-word' }}>
-                      {activeServer.ssh_error_msg}
-                    </div>
-                  )}
-                  {activeServer.last_connected_at && (
-                    <div style={{ color: 'var(--dim)', fontSize: 11, marginTop: 4 }}>
-                      Último contato: {new Date(activeServer.last_connected_at).toLocaleString('pt-BR')}
-                    </div>
-                  )}
-                </StatusPill>
-              )
-            })()}
-
-            {/* Staleness */}
-            {staleness && (
-              <div className="hidden sm:flex items-center gap-1.5" style={{ fontSize: 11, color: staleness.color, flexShrink: 0 }}>
-                <span style={{ width: 5, height: 5, borderRadius: '50%', background: staleness.dot, flexShrink: 0 }} />
-                {staleness.label}
-              </div>
-            )}
-          </div>
-
-          {/* ── Direita ── */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-
-            {/* Badge usuário + role — Sessão 3, T6: complexidade de papel
-                (admin/viewer) fica fora do caminho principal por padrão */}
-            {advanced && username && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div
-                    className="hidden md:flex items-center gap-1.5"
-                    style={{
-                      fontSize: 11, fontWeight: 600,
-                      padding: '3px 9px', borderRadius: 999,
-                      background: roleStyle.bg,
-                      border: `1px solid ${roleStyle.border}`,
-                      color: roleStyle.color,
-                      flexShrink: 0, whiteSpace: 'nowrap',
-                    }}
-                  >
-                    <span style={{ opacity: 0.7, fontWeight: 400 }}>{username}</span>
-                    <span style={{ opacity: 0.35 }}>·</span>
-                    <span>{roleStyle.label}</span>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent>Logado como {username}</TooltipContent>
-              </Tooltip>
-            )}
-
-            {/* Hint de atalhos — só faz sentido com os atalhos ligados (modo avançado) */}
-            {advanced && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span
-                    className="hidden lg:inline"
-                    style={{ fontSize: 9, color: 'var(--border)', userSelect: 'none', letterSpacing: '0.05em' }}
-                  >
-                    [R] refresh · [L] logs
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>Atalhos de teclado disponíveis</TooltipContent>
-              </Tooltip>
-            )}
-
-            <HBtn onClick={handleRefresh} disabled={refreshing} title="Forçar atualização">
+          )}
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+            <HBtn onClick={handleRefresh} disabled={refreshing} title="Forçar uma nova coleta agora">
               <RefreshCw size={12} style={{ animation: refreshing ? 'spin 1s linear infinite' : undefined }} />
-              <span className="hidden sm:inline">{refreshing ? 'Atualizando…' : 'Refresh'}</span>
+              <span className="hidden sm:inline">{refreshing ? 'Atualizando…' : 'Atualizar'}</span>
             </HBtn>
-
-            {/* Log viewer — Sessão 3, T6: fica atrás do modo avançado (ver useAdvancedMode) */}
             {advanced && (
-              <HBtn onClick={() => setLogViewer(true)} title="Visualizador de log">
+              <HBtn onClick={() => setLogViewer(true)} title="Abrir o visualizador de log">
                 <FileText size={12} />
                 <span className="hidden sm:inline">Logs</span>
               </HBtn>
             )}
-
-            <SettingsControls onLogout={onLogout} />
           </div>
         </div>
-      </header>
+      </div>
 
       {/* ── Banner de erro ── */}
       {(quick.error || full.error) && (
