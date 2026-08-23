@@ -437,10 +437,18 @@ class Incident(Base):
     severity  = Column(String(20), nullable=False)  # critico | atencao
     status    = Column(String(20), default="aberto", nullable=False)  # aberto | em_observacao | mitigado | resolvido
 
-    # tipo + servidor + entidade (conta, IP ou domínio de destino) — chave
-    # estável de deduplicação. `entity` fica também em coluna própria
-    # (não só embutida na string) porque o motor de evidência
-    # (evidence.py) precisa dela isolada para filtrar linhas de log.
+    # Sessão 4, T4: subtipo distingue problemas genuinamente diferentes
+    # do mesmo tipo sobre a mesma entidade — o IP de saída listado numa
+    # blocklist e o certificado daquele host vencendo são incidentes
+    # distintos, e sem isto se fundiriam ao normalizar a entidade.
+    subtype   = Column(String(30), nullable=False, default="")
+
+    # tipo + subtipo + servidor + entidade NORMALIZADA — chave estável de
+    # deduplicação (ver detectors.py::make_fingerprint). A normalização
+    # existe porque um IPv4 chegava rotulado ora como "ip:", ora como
+    # "domain:", gerando dois incidentes críticos para o mesmo endereço.
+    # `entity` fica também em coluna própria (não só embutida na string)
+    # porque a interface agrupa incidentes por entidade e servidor.
     fingerprint = Column(String(300), nullable=False)
     entity      = Column(String(300), nullable=False)
 
@@ -463,6 +471,13 @@ class Incident(Base):
     # fingerprint — motor de resolução automática (RESOLVE_AFTER_CLEAN_CYCLES
     # em incident_engine.py). Zera a cada reaparecimento.
     consecutive_clean = Column(Integer, default=0, nullable=False)
+
+    # Sessão 4, T1/T3: desde quando a checagem que sustenta este incidente
+    # não pode mais ser feita. Um incidente nessa situação NÃO é resolvido
+    # automaticamente (não sabemos que acabou) e NÃO fica exibido como se
+    # ainda estivesse confirmado — a interface mostra "não foi possível
+    # reverificar desde X". NULL = a checagem está respondendo normalmente.
+    unverified_since = Column(DateTime, nullable=True)
 
     # Sessão 3, Tarefa 1: impacto do incidente — mensagens/contas/domínios
     # afetados, tempo em aberto, queda na taxa de entrega e (só se
@@ -517,6 +532,90 @@ def record_incident_event(db, incident: "Incident", event_type: str, actor: str 
     ev = IncidentEvent(incident_id=incident.id, event_type=event_type, actor=actor, detail=detail)
     db.add(ev)
     return ev
+
+
+class CheckResult(Base):
+    """
+    Sessão 4, Tarefas 1/3/7 — o registro de CADA verificação feita, e não
+    só das que viraram incidente.
+
+    Existe por três motivos que se sustentam mutuamente:
+
+    1. O quarto estado (T1). Uma checagem que não pôde ser feita precisa
+       de um lugar para existir. Ela não é um incidente (não abre nada) e
+       não é ausência de problema (não pode contar como saudável) — é uma
+       linha aqui com status "desconhecido" e o motivo, que a interface
+       mostra como "não foi possível verificar — X".
+
+    2. Histerese (T3). Decidir "listado" a partir de uma única amostra foi
+       o que produziu um IP entrando e saindo da mesma blocklist doze
+       vezes em doze horas. Abrir exige N leituras positivas consecutivas
+       e fechar exige M negativas — o que só é possível com o histórico
+       das leituras persistido, independente de haver incidente aberto.
+
+    3. Evidência por tipo (T7). Para um incidente de reputação a
+       evidência nunca vai estar no mainlog: ela é a zona consultada, a
+       resposta bruta, o resolver e o horário de cada uma das últimas N
+       checagens. É exatamente o que `detail` guarda.
+
+    Append-only; a poda é por idade (ver run_retention em database.py).
+    """
+    __tablename__ = "check_results"
+    __table_args__ = (
+        Index("ix_check_results_lookup", "server_id", "check_key", "observed_at"),
+    )
+
+    id         = Column(Integer, primary_key=True)
+    server_id  = Column(Integer, ForeignKey("servers.id", ondelete="CASCADE"), nullable=False)
+    check_key  = Column(String(100), nullable=False)   # ex.: "reputation.blocklist", "reputation.cert"
+    label      = Column(String(120), nullable=False)   # rótulo legível, pt-BR
+    status     = Column(String(20),  nullable=False)   # ok | alerta | critico | desconhecido
+    reason     = Column(Text, nullable=False, default="")
+    detail     = Column(JSONB, nullable=True)
+    observed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+def record_check_result(db, server_id: int, outcome: dict) -> "CheckResult":
+    """Grava uma checagem. Não commita — o motor de incidentes fecha a
+    transação junto com as mudanças de estado do mesmo ciclo."""
+    row = CheckResult(
+        server_id=server_id,
+        check_key=outcome["key"],
+        label=outcome.get("label") or outcome["key"],
+        status=outcome["status"],
+        reason=(outcome.get("reason") or "")[:2000],
+        detail=outcome.get("detail") or None,
+    )
+    db.add(row)
+    return row
+
+
+def get_latest_check_results(db, server_id: int) -> list:
+    """A leitura mais recente de cada check_key deste servidor — o que a
+    interface mostra como "estado das verificações"."""
+    rows = (
+        db.query(CheckResult)
+        .filter(CheckResult.server_id == server_id)
+        .order_by(CheckResult.observed_at.desc(), CheckResult.id.desc())
+        .limit(200)
+        .all()
+    )
+    latest = {}
+    for r in rows:
+        latest.setdefault(r.check_key, r)
+    return list(latest.values())
+
+
+def get_check_history(db, server_id: int, check_key: str, limit: int = 12) -> list:
+    """Últimas N leituras de uma checagem — base da histerese (T3) e da
+    evidência de incidentes de reputação (T7)."""
+    return (
+        db.query(CheckResult)
+        .filter(CheckResult.server_id == server_id, CheckResult.check_key == check_key)
+        .order_by(CheckResult.observed_at.desc(), CheckResult.id.desc())
+        .limit(limit)
+        .all()
+    )
 
 
 class DetectorConfig(Base):

@@ -14,6 +14,7 @@ from ..auth import get_current_user
 from ..collector import _cache, _empty_cache_entry, _save_snapshot, get_full, get_quick
 from ..crypto import decrypt_secret
 from ..database import User, get_db, get_server_owned_by, get_servers_for_user
+from ..health import compute_server_health
 from ..limiter import limiter
 from ..ssh import SSHError, run_full as ssh_run_full
 
@@ -111,3 +112,27 @@ def refresh(
         return data
     except SSHError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+
+
+@router.get("/health", summary="Estado de saúde do servidor — mesma fonte da Triagem (Sessão 4, T5)")
+def status_health(
+    server_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Sessão 4, Tarefa 5 — uma fonte de verdade.
+
+    O painel clássico exibia "DIAGNÓSTICO ● OK" em verde lendo o campo
+    `severity` do último snapshot de coleta, enquanto a Triagem, no mesmo
+    instante e para o mesmo servidor, dizia "Entrega degradada — 2
+    incidentes ativos". Este endpoint devolve exatamente o mesmo objeto
+    que GET /api/incidents/summary, porque ambos chamam health.py — o
+    painel passa a exibir o selo da triagem e os incidentes que o
+    causaram, em vez de um segundo cálculo próprio.
+    """
+    sid = _resolve_server_id(server_id, db, current_user)
+    if sid is None:
+        raise HTTPException(400, "Nenhum servidor configurado.")
+    server = get_server_owned_by(db, sid, current_user)
+    return compute_server_health(db, sid, server.name if server else None)

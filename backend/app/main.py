@@ -33,7 +33,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Versão atual do schema — atualizar junto com cada nova migration
-_SCHEMA_VERSION = "019"
+_SCHEMA_VERSION = "021"
 
 _DDL_ALEMBIC_VERSION = """
     CREATE TABLE IF NOT EXISTS alembic_version (
@@ -624,6 +624,100 @@ def run_migrations() -> None:
             )
             logger.info("Migration 019 aplicada com sucesso")
             current = {"019"}
+
+        if "019" in current and "020" not in current:
+            logger.info("Aplicando migration 019 → 020 (check_results + subtipo no incidente, Sessão 4 T1/T3/T4)...")
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS check_results (
+                    id          SERIAL PRIMARY KEY,
+                    server_id   INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+                    check_key   VARCHAR(100) NOT NULL,
+                    label       VARCHAR(120) NOT NULL,
+                    status      VARCHAR(20)  NOT NULL,
+                    reason      TEXT NOT NULL DEFAULT '',
+                    detail      JSONB,
+                    observed_at TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+            """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS ix_check_results_lookup
+                    ON check_results (server_id, check_key, observed_at)
+            """))
+            conn.execute(text("""
+                ALTER TABLE incidents ADD COLUMN IF NOT EXISTS subtype VARCHAR(30) NOT NULL DEFAULT ''
+            """))
+            # T4: fingerprints antigos eram "tipo:servidor:entidade", sem
+            # subtipo e com a entidade no rótulo textual em que o detector
+            # a produziu (um IPv4 aparecia ora como "ip:", ora como
+            # "domain:"). Reescrever os que ainda estão abertos evita que
+            # o próximo ciclo os trate como incidentes novos e abra
+            # duplicatas ao lado dos originais.
+            rows = conn.execute(text("""
+                SELECT id, type, entity, server_id, triggered_by
+                  FROM incidents
+                 WHERE status IN ('aberto', 'em_observacao', 'mitigado')
+            """)).fetchall()
+            from .detectors import make_fingerprint
+            _SUBTYPE_BY_RULE = {
+                "reputation.blocklist": "blocklist",
+                "reputation.dns_auth_missing": "dns_auth",
+                "reputation.cert_expiring": "cert",
+                "reputation.cert_expired": "cert",
+                "queue_stuck.consecutive_growth": "fila",
+                "queue_stuck.frozen_growth": "frozen",
+                "dest_deferral.share_of_total": "destino",
+            }
+            for row in rows:
+                rule = (row[4] or {}).get("rule", "")
+                subtype = _SUBTYPE_BY_RULE.get(rule, "conta" if row[1] == "auth_abuse" else "")
+                conn.execute(
+                    text("UPDATE incidents SET subtype = :s, fingerprint = :f WHERE id = :i"),
+                    {"s": subtype, "f": make_fingerprint(row[1], subtype, row[3], row[2]), "i": row[0]},
+                )
+            conn.execute(text("DELETE FROM alembic_version"))
+            conn.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
+                {"v": "020"},
+            )
+            logger.info("Migration 020 aplicada com sucesso (%d incidentes abertos re-impressos)", len(rows))
+            current = {"020"}
+
+        if "020" in current and "021" not in current:
+            logger.info("Aplicando migration 020 → 021 (incidente não reverificável + invalidação dos abertos por bug, Sessão 4 T1)...")
+            conn.execute(text("""
+                ALTER TABLE incidents ADD COLUMN IF NOT EXISTS unverified_since TIMESTAMP
+            """))
+            # Incidentes abertos cuja métrica de abertura é implausível só
+            # podem ter vindo do defeito que esta sessão corrigiu — o
+            # INC-58 foi aberto com observed = -20687 dias (~56 anos de
+            # certificado vencido). Não é um incidente que se resolveu:
+            # é um que nunca deveria ter existido. Fecha com resolução
+            # própria ("invalidada") em vez de sumir com a linha, para o
+            # histórico continuar contando o que aconteceu.
+            invalidated = conn.execute(text("""
+                UPDATE incidents
+                   SET status = 'resolvido',
+                       resolved_at = NOW(),
+                       resolution = 'invalidada'
+                 WHERE status IN ('aberto', 'em_observacao', 'mitigado')
+                   AND (triggered_by->>'observed') ~ '^-?[0-9]+$'
+                   AND ((triggered_by->>'observed')::numeric < -3650
+                     OR (triggered_by->>'observed')::numeric > 3650)
+                RETURNING id
+            """)).fetchall()
+            for row in invalidated:
+                conn.execute(text("""
+                    INSERT INTO incident_events (incident_id, event_type, at, actor, detail)
+                    VALUES (:i, 'resolved', NOW(), 'system',
+                            '{"motivo": "aberto com uma métrica implausível, fora da faixa de sanidade de datas — defeito corrigido na Sessão 4, T1"}'::jsonb)
+                """), {"i": row[0]})
+            conn.execute(text("DELETE FROM alembic_version"))
+            conn.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
+                {"v": "021"},
+            )
+            logger.info("Migration 021 aplicada com sucesso (%d incidente(s) invalidado(s))", len(invalidated))
+            current = {"021"}
 
         logger.info("Banco de dados pronto (schema %s)", _SCHEMA_VERSION)
 

@@ -30,6 +30,7 @@ from ..database import (
     record_incident_event, save_detector_config_overrides, to_utc_iso,
 )
 from ..detectors import DEFAULT_THRESHOLDS
+from ..health import compute_fleet_health
 from ..incident_impact import compute_impact, freeze_impact
 from ..incident_notify import notify_incident_event
 from ..incident_report import render_incident_report_html
@@ -87,6 +88,7 @@ def _incident_to_dict(
         "server_id": incident.server_id,
         "server_name": server_name,
         "type": incident.type,
+        "subtype": incident.subtype,
         "severity": incident.severity,
         "status": incident.status,
         "entity": incident.entity,
@@ -100,6 +102,7 @@ def _incident_to_dict(
         "suggested_fix": incident.suggested_fix,
         "triggered_by": incident.triggered_by,
         "silenced_until": to_utc_iso(incident.silenced_until),
+        "unverified_since": to_utc_iso(incident.unverified_since),
         "impact": impact,
     }
     if include_events:
@@ -150,31 +153,23 @@ def list_incidents(
     return [_incident_to_dict(r, server_name=names.get(r.server_id)) for r in rows]
 
 
-@router.get("/summary", summary="Frase de estado da frota (cabeçalho da Triagem)")
-def incidents_summary(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    visible_ids = _visible_server_ids(db, current_user)
-    open_rows = (
-        db.query(Incident)
-        .filter(Incident.server_id.in_(visible_ids), Incident.status.in_(OPEN_STATUSES))
-        .all()
-    )
-    n_critico = sum(1 for i in open_rows if i.severity == "critico")
-    n_atencao = sum(1 for i in open_rows if i.severity == "atencao")
-    servers_affected = len({i.server_id for i in open_rows})
-
-    if n_critico == 0 and n_atencao == 0:
-        headline = "Entrega normal — nenhum incidente ativo"
-    elif n_critico > 0:
-        headline = f"Entrega degradada — {n_critico + n_atencao} incidente{'s' if (n_critico + n_atencao) != 1 else ''} ativo{'s' if (n_critico + n_atencao) != 1 else ''}"
-    else:
-        headline = f"Sob observação — {n_atencao} incidente{'s' if n_atencao != 1 else ''} de atenção"
-
-    return {
-        "headline": headline,
-        "open_critico": n_critico,
-        "open_atencao": n_atencao,
-        "servers_affected": servers_affected,
-    }
+@router.get("/summary", summary="Estado da frota ou de um servidor — fonte única (Sessão 4, T5)")
+def incidents_summary(
+    server_id: Optional[int] = Query(None, description="omitido = toda a frota"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Sessão 4, Tarefa 5: este endpoint NÃO calcula nada — delega a
+    health.py, o mesmo módulo que o painel clássico consome via
+    GET /api/status/health. É o que impede as duas telas de divergirem.
+    """
+    servers = get_servers_for_user(db, current_user)
+    if server_id is not None:
+        servers = [s for s in servers if s.id == server_id]
+        if not servers:
+            raise HTTPException(404, f"Servidor {server_id} não encontrado.")
+    return compute_fleet_health(db, servers)
 
 
 @router.get("/{incident_id}", summary="Detalhe do incidente (com histórico de eventos)")
