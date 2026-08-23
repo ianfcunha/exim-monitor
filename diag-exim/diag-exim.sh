@@ -49,6 +49,33 @@
 #        --snapshot=0    desativa o before_snapshot das ações destrutivas
 #                          acima (ligado por padrão — ver Changelog v5.7)
 # ============================================================
+# Changelog v5.18:
+#   - Fix (Sessão 4, T3): DNSBL tratava a faixa 127.255.255.0/24 como
+#           listagem. Essa faixa é a forma que a Spamhaus usa para
+#           RECUSAR a consulta (resolver público/sem permissão) — o
+#           resultado era um IP limpo aparecendo como listado e
+#           "entrando e saindo" da lista conforme o nameserver sorteado
+#           em /etc/resolv.conf. Agora: resolver escolhido por sondagem
+#           contra o ponto de teste oficial, retentativa nos demais
+#           resolvers antes de desistir, recusa → "desconhecido", e cada
+#           entrada carrega zona, resposta bruta, resolver e motivo.
+#   - Fix (Sessão 4, T3): a classificação casava "127." contra a saída
+#           inteira do dig, inclusive o diagnóstico de erro em stderr
+#           (";; communications error to 127.0.0.1#53") — falha de
+#           resolver virava "listado". Só endereços de resposta contam.
+#   - Fix (Sessão 4, T2): check_cert_json() validava o certificado
+#           contra _detect_domain(), que num servidor sem tráfego cai no
+#           domínio do host ou num IP. Agora descobre o hostname de
+#           correio de verdade (banner SMTP → DNS reverso → MX) e usa
+#           esse valor como SNI; sem hostname confiável o resultado é
+#           "desconhecido", nunca um palpite.
+#   - Fix (Sessão 4, T1): o JSON do certificado não afirma mais duas
+#           coisas contraditórias ("valid": true junto de vencimento
+#           negativo). Campos independentes (parsed/expired/status) e
+#           sanidade obrigatória: days_remaining fora de [-3650, 3650]
+#           ou data não interpretável → "desconhecido" com o notAfter
+#           bruto no motivo, nunca "expirado há 56 anos".
+# ============================================================
 # Changelog v5.17:
 #   - Novo (Sessão 3, T1): "queue.age.over_4h" no JSON completo —
 #           contagem de mensagens na fila há mais de 4h (todo o bucket
@@ -349,7 +376,7 @@
 # exiqgrep etc. costumam morar) sejam encontrados mesmo assim.
 export PATH="$PATH:/usr/sbin:/sbin:/usr/local/sbin"
 
-VERSION="5.17"
+VERSION="5.18"
 LOG_PATH="/var/log/exim4/mainlog"
 # Lista única de candidatos a mainlog — consumida por collect() (quick e
 # completo) e run_check(). Debian/exim4, Debian/exim genérico, cPanel/WHM
@@ -3230,22 +3257,170 @@ check_dkim_spf() {
 # a resposta de output_action_json(). Reaproveitam _detect_public_ip e
 # _detect_domain acima — mesma lógica de detecção da versão interativa.
 # ============================================================
+# ============================================================
+# DNSBL — consulta com resolver verificado
+#
+# Contexto (Sessão 4, T3): a Spamhaus (e outras DNSBLs públicas) RECUSA
+# consultas vindas de resolvers públicos compartilhados (8.8.8.8,
+# 1.1.1.1, resolvers de datacenter acima da cota gratuita). A recusa não
+# vem como erro: vem como uma resposta A na faixa 127.255.255.0/24, que
+# é sintaticamente indistinguível de um "listado" (127.0.0.x) para quem
+# só faz `grep 127.`. Era exatamente esse o bug — um IP limpo aparecendo
+# como listado, e "entrando e saindo" da lista conforme o resolver
+# sorteado em /etc/resolv.conf a cada consulta.
+#
+# Por isso, aqui:
+#   - 127.255.255.0/24  → status "desconhecido" (consulta recusada),
+#                          NUNCA "listado" nem "limpo";
+#   - o resolver usado é escolhido por sondagem contra o ponto de teste
+#     oficial da Spamhaus (2.0.0.127.zen.spamhaus.org, que TEM que
+#     responder 127.0.0.x em qualquer resolver que possa consultá-la);
+#   - cada entrada carrega zona consultada, resposta bruta e resolver,
+#     porque é isso que permite auditar a decisão depois.
+# ============================================================
+DNSBL_ZONES=(zen.spamhaus.org bl.spamcop.net dnsbl.sorbs.net b.barracudacentral.org)
+
+# Faixa reservada pela Spamhaus para sinalizar erro de uso da consulta
+# (resolver público, excesso de volume, zona errada) — ver
+# https://www.spamhaus.org/faq/section/DNSBL%20Usage#200
+_dnsbl_is_refused() {
+    _dnsbl_answers "$1" | grep -qE '^127\.255\.255\.[0-9]+$'
+}
+
+# Extrai SÓ os endereços de resposta da saída bruta. Existe porque `dig`
+# escreve diagnósticos em stderr que contêm o próprio IP do resolver
+# (";; communications error to 127.0.0.1#53: connection refused") —
+# casar "127." contra a saída inteira transforma uma falha de resolver
+# em "listado", que é a mesma família de bug que esta tarefa existe para
+# matar. Só conta linha que é um endereço puro (dig +short) ou o alvo de
+# "has address" (host).
+_dnsbl_answers() {
+    printf '%s\n' "$1" | sed -nE \
+        -e 's/^([0-9]{1,3}(\.[0-9]{1,3}){3})[[:space:]]*$/\1/p' \
+        -e 's/.*[[:space:]]has address[[:space:]]+([0-9]{1,3}(\.[0-9]{1,3}){3})[[:space:]]*$/\1/p'
+}
+
+# Saída que indica falha de transporte/resolver — não é resposta da zona
+# e por isso nunca pode virar "limpo".
+_dnsbl_has_error() {
+    printf '%s' "$1" | grep -qiE '^;;|communications error|connection refused|timed out|no servers could be reached|SERVFAIL|REFUSED'
+}
+
+_dnsbl_query() {
+    # $1 = nome completo a consultar, $2 = resolver ("" = padrão do sistema)
+    local name="$1" resolver="$2"
+    if command -v dig &>/dev/null; then
+        if [ -n "$resolver" ]; then
+            timeout 8 dig +short +tries=1 +time=3 A "$name" "@${resolver}" 2>&1
+        else
+            timeout 8 dig +short +tries=1 +time=3 A "$name" 2>&1
+        fi
+    else
+        # host(1) como fallback; sem dig o resolver explícito ainda funciona
+        if [ -n "$resolver" ]; then
+            timeout 8 host -t A "$name" "$resolver" 2>&1
+        else
+            timeout 8 host -t A "$name" 2>&1
+        fi
+    fi
+}
+
+# Resolvers candidatos, em ordem de preferência: override explícito →
+# resolver local (recursivo próprio, o caminho recomendado pela própria
+# Spamhaus) → nameservers de /etc/resolv.conf.
+_dnsbl_candidates() {
+    [ -n "$EXIM_DNSBL_RESOLVER" ] && printf '%s\n' "$EXIM_DNSBL_RESOLVER"
+    printf '127.0.0.1\n'
+    grep '^nameserver' /etc/resolv.conf 2>/dev/null | awk '{print $2}'
+}
+
+_dnsbl_resolver_source() {
+    if [ "$1" = "$EXIM_DNSBL_RESOLVER" ]; then printf 'env'
+    elif [ "$1" = "127.0.0.1" ];         then printf 'local'
+    else printf 'resolv.conf'
+    fi
+}
+
+# Filtra os candidatos que de fato conseguem consultar uma DNSBL, usando
+# o ponto de teste oficial da Spamhaus (2.0.0.127.zen.spamhaus.org, que
+# TEM que responder 127.0.0.x em qualquer resolver autorizado). Um
+# resolver bloqueado devolve 127.255.255.x ou nada — e é justamente o
+# "nada" que precisa ser descartado aqui: sem esta sondagem ele
+# passaria por um NXDOMAIN legítimo e o IP apareceria como limpo.
+_dnsbl_usable_resolvers() {
+    local c probe
+    while read -r c; do
+        [ -z "$c" ] && continue
+        probe=$(_dnsbl_query "2.0.0.127.zen.spamhaus.org" "$c")
+        _dnsbl_is_refused "$probe" && continue
+        _dnsbl_answers "$probe" | grep -qE '^127\.0\.0\.[0-9]+$' && printf '%s\n' "$c"
+    done < <(_dnsbl_candidates)
+}
+
 check_blacklists_json() {
     local ip
     if ! ip=$(_detect_public_ip); then
-        printf '"ip": null, "ip_error": "nao foi possivel determinar o IP publico do servidor"'
+        printf '"ip": null, "ip_error": "nao foi possivel determinar o IP publico do servidor", "blocklists": [], "blocklist_resolver": null, "blocklist_status": "desconhecido", "blocklist_reason": "sem IP publico determinado, nao ha o que consultar"'
         return 1
     fi
     local rev_ip; rev_ip=$(echo "$ip" | awk -F. '{print $4"."$3"."$2"."$1}')
-    local entries="" first=1 bl hit listed
-    for bl in zen.spamhaus.org bl.spamcop.net dnsbl.sorbs.net b.barracudacentral.org; do
-        hit=$(host -t A "${rev_ip}.${bl}" 2>/dev/null | grep -c "127\.")
-        listed="false"; [ "$hit" -gt 0 ] && listed="true"
+
+    local usable; usable=$(_dnsbl_usable_resolvers)
+    local first_resolver; first_resolver=$(printf '%s' "$usable" | head -1)
+
+    local entries="" first=1 bl raw status listed reason raw_esc reason_esc
+    local used_resolver used_src r answers
+    for bl in "${DNSBL_ZONES[@]}"; do
+        raw=""; status="desconhecido"; listed="null"
+        used_resolver=""; used_src="none"
+        reason="nenhum resolver disponivel consegue consultar DNSBLs (todos falharam o ponto de teste da Spamhaus) — configure um resolver recursivo proprio no servidor ou defina EXIM_DNSBL_RESOLVER"
+
+        # Percorre os resolvers utilizáveis até um responder de forma
+        # conclusiva. Uma recusa (127.255.255.x) não encerra a checagem:
+        # é o resolver que está barrado, não o IP que está sujo.
+        while read -r r; do
+            [ -z "$r" ] && continue
+            raw=$(_dnsbl_query "${rev_ip}.${bl}" "$r")
+            used_resolver="$r"; used_src=$(_dnsbl_resolver_source "$r")
+            answers=$(_dnsbl_answers "$raw")
+            if _dnsbl_is_refused "$raw"; then
+                status="desconhecido"; listed="null"
+                reason="consulta recusada pela zona (resposta na faixa 127.255.255.0/24) — este resolver nao tem permissao para consultar esta DNSBL"
+                continue
+            elif printf '%s' "$answers" | grep -qE '^127\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+                status="listado"; listed="true"
+                reason="resposta na faixa 127.0.0.0/8 fora de 127.255.255.0/24 — listagem real"
+            elif _dnsbl_has_error "$raw"; then
+                status="desconhecido"; listed="null"
+                reason="o resolver nao respondeu a consulta (falha de transporte/SERVFAIL) — nao verificavel, nao limpo"
+                continue
+            elif printf '%s' "$raw" | grep -qiE 'NXDOMAIN|not found|has no A record'; then
+                status="limpo"; listed="false"; reason="NXDOMAIN — o IP nao consta nesta zona"
+            elif [ -z "$(printf '%s' "$raw" | tr -d '[:space:]')" ]; then
+                # dig +short devolve vazio para NXDOMAIN — o caso normal de "limpo"
+                status="limpo"; listed="false"; reason="resposta vazia (NXDOMAIN) — o IP nao consta nesta zona"
+            else
+                status="desconhecido"; listed="null"
+                reason="resposta nao reconhecida do resolver — tratada como nao verificavel, nao como limpa"
+                continue
+            fi
+            break
+        done < <(printf '%s\n' "$usable")
+
+        raw_esc=$(printf '%s' "$raw" | tr '\n' ' ' | sed 's/"/\\"/g' | cut -c1-300)
+        reason_esc=$(printf '%s' "$reason" | sed 's/"/\\"/g')
         [ "$first" -eq 1 ] || entries="${entries},"
-        entries="${entries}{\"list\":\"${bl}\",\"listed\":${listed}}"
+        entries="${entries}{\"list\":\"${bl}\",\"zone\":\"${rev_ip}.${bl}\",\"status\":\"${status}\",\"listed\":${listed},\"raw\":\"${raw_esc}\",\"resolver\":\"${used_resolver}\",\"resolver_source\":\"${used_src}\",\"reason\":\"${reason_esc}\"}"
         first=0
     done
-    printf '"ip": "%s", "blocklists": [%s]' "$ip" "$entries"
+
+    local overall="ok" overall_reason=""
+    if [ -z "$first_resolver" ]; then
+        overall="desconhecido"
+        overall_reason="nenhum resolver disponivel consegue consultar DNSBLs"
+    fi
+    printf '"ip": "%s", "blocklists": [%s], "blocklist_resolver": "%s", "blocklist_resolver_source": "%s", "blocklist_status": "%s", "blocklist_reason": "%s"' \
+        "$ip" "$entries" "$first_resolver" "$(_dnsbl_resolver_source "$first_resolver")" "$overall" "$overall_reason"
 }
 
 check_deliverability_json() {
@@ -3269,41 +3444,135 @@ check_deliverability_json() {
         "$domain" "$spf_found" "$spf_rec" "$dkim_found" "$dkim_sel" "$dmarc_found" "$dmarc_rec"
 }
 
-# Expiração do certificado TLS usado pelo STARTTLS na porta 25 (SMTP).
-# "valid" só indica que um certificado foi obtido e parseado com sucesso —
-# um cert já expirado ainda retorna valid:true com days_remaining negativo;
-# quem decide o que fazer com isso (alertar, compor score) é quem consome
-# o JSON, não este script (mesma separação de responsabilidade do resto
-# de check_*_json — aqui só coleta dado estruturado).
+# ============================================================
+# Hostname de correio — contra QUEM o certificado deve ser validado
+#
+# Sessão 4, T2: um certificado de servidor de e-mail se valida contra o
+# hostname que o servidor anuncia no banner SMTP / que o MX aponta —
+# nunca contra o IP de saída. A versão anterior passava o resultado de
+# _detect_domain() como SNI, que num servidor sem tráfego cai no domínio
+# do host (ou, pior, no IP extraído de um remetente) — validação contra
+# alvo errado, e a origem do "certificado expirado há 56 anos".
+#
+# Imprime "<hostname>|<origem>"; hostname vazio + origem "none" quando
+# nenhuma fonte confiável existe — nesse caso quem chama devolve
+# "desconhecido", não um palpite.
+# ============================================================
+_detect_mail_hostname() {
+    local h=""
+    # 1. Banner SMTP do próprio Exim ("220 mail.exemplo.com ESMTP ...") —
+    #    é literalmente o nome que o servidor usa pra se apresentar.
+    h=$(timeout 6 bash -c 'exec 3<>/dev/tcp/127.0.0.1/25 && head -1 <&3' 2>/dev/null \
+         | sed -nE 's/^220[ -]+([A-Za-z0-9._-]+).*/\1/p' | head -1)
+    if printf '%s' "$h" | grep -qE '^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$' && ! printf '%s' "$h" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
+        printf '%s|smtp_banner' "$h"; return 0
+    fi
+
+    # 2. Reverso do IP público — o que o destinatário vê e confere.
+    local ip
+    if ip=$(_detect_public_ip); then
+        h=$(timeout 8 dig +short -x "$ip" 2>/dev/null | head -1 | sed 's/\.$//')
+        [ -z "$h" ] && h=$(timeout 8 host "$ip" 2>/dev/null | sed -nE 's/.*domain name pointer (.*)\.$/\1/p' | head -1)
+        if printf '%s' "$h" | grep -qE '^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$'; then
+            printf '%s|reverse_dns' "$h"; return 0
+        fi
+    fi
+
+    # 3. MX do domínio detectado — último recurso confiável.
+    local domain; domain=$(_detect_domain)
+    if [ -n "$domain" ] && ! printf '%s' "$domain" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
+        h=$(timeout 8 dig +short MX "$domain" 2>/dev/null | sort -n | head -1 | awk '{print $2}' | sed 's/\.$//')
+        [ -z "$h" ] && h=$(timeout 8 host -t MX "$domain" 2>/dev/null | sed -nE 's/.*mail is handled by [0-9]+ (.*)\.$/\1/p' | head -1)
+        if printf '%s' "$h" | grep -qE '^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$'; then
+            printf '%s|mx' "$h"; return 0
+        fi
+    fi
+
+    printf '|none'
+}
+
+# Certificado TLS do STARTTLS na porta 25, validado contra o hostname
+# certo (ver _detect_mail_hostname).
+#
+# Sessão 4, T1/T2 — o JSON NUNCA afirma duas coisas contraditórias: não
+# existe mais um "valid" que significa "consegui parsear" convivendo com
+# um vencimento negativo. Os campos são independentes e explícitos:
+#   status        ok | desconhecido   (o script só sabe se conseguiu ou
+#                                      não verificar; alerta/critico é
+#                                      decisão de threshold, do backend)
+#   parsed        conseguiu extrair um certificado
+#   expired       já venceu (só presente quando parsed)
+#   days_remaining  negativo = vencido — sempre dentro de [-3650, 3650];
+#                   fora disso o resultado inteiro vira "desconhecido",
+#                   porque uma data absurda é sinal de parse ruim ou de
+#                   cert autogerado com data inválida, não de um
+#                   certificado que venceu há 56 anos.
+CERT_DAYS_SANITY=3650
 check_cert_json() {
-    local domain="${1:-$(_detect_domain)}"
-    local enddate
-    # -servername vazio faz o openssl abortar o handshake antes de expor o
-    # cert ("Unable to set TLS servername extension") — sem domínio
-    # detectado (ex.: servidor novo, sem histórico de log ainda), omite a
-    # extensão SNI e usa o cert padrão do Exim.
-    if [ -n "$domain" ]; then
-        enddate=$(timeout 10 openssl s_client -starttls smtp -connect localhost:25 -servername "$domain" \
-            </dev/null 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | sed -E 's/^notAfter=//')
+    local forced_host="${1:-}"
+    local hostname source picked
+    if [ -n "$forced_host" ] && ! printf '%s' "$forced_host" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
+        hostname="$forced_host"; source="parametro"
     else
-        enddate=$(timeout 10 openssl s_client -starttls smtp -connect localhost:25 \
-            </dev/null 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | sed -E 's/^notAfter=//')
+        picked=$(_detect_mail_hostname)
+        hostname="${picked%%|*}"; source="${picked##*|}"
     fi
-    if [ -z "$enddate" ]; then
-        printf '"cert": {"valid": false, "days_remaining": null, "expires_at": null}'
+
+    if [ -z "$hostname" ]; then
+        printf '"cert": {"status": "desconhecido", "parsed": false, "reason": "sem hostname para SNI — banner SMTP, DNS reverso e MX nao forneceram um nome valido; validar certificado contra o IP nao diz nada sobre a entrega", "hostname": null, "hostname_source": "none", "sni_sent": false, "days_remaining": null, "expires_at": null}'
         return
     fi
-    local end_epoch now_epoch days_remaining expires_at
+
+    local pem
+    pem=$(timeout 15 openssl s_client -starttls smtp -connect localhost:25 -servername "$hostname" \
+        </dev/null 2>/dev/null | openssl x509 2>/dev/null)
+    if [ -z "$pem" ]; then
+        printf '"cert": {"status": "desconhecido", "parsed": false, "reason": "handshake STARTTLS na porta 25 nao devolveu certificado (servico parado, STARTTLS desabilitado ou conexao recusada)", "hostname": "%s", "hostname_source": "%s", "sni_sent": true, "days_remaining": null, "expires_at": null}' \
+            "$hostname" "$source"
+        return
+    fi
+
+    local enddate startdate issuer subject sans
+    enddate=$(printf '%s' "$pem"  | openssl x509 -noout -enddate   2>/dev/null | sed -E 's/^notAfter=//')
+    startdate=$(printf '%s' "$pem"| openssl x509 -noout -startdate 2>/dev/null | sed -E 's/^notBefore=//')
+    issuer=$(printf '%s' "$pem"   | openssl x509 -noout -issuer    2>/dev/null | sed -E 's/^issuer=[ ]*//')
+    subject=$(printf '%s' "$pem"  | openssl x509 -noout -subject   2>/dev/null | sed -E 's/^subject=[ ]*//')
+    sans=$(printf '%s' "$pem" | openssl x509 -noout -ext subjectAltName 2>/dev/null \
+        | grep -oE 'DNS:[^,]+' | sed 's/^DNS://' | tr '\n' ' ' | sed 's/ *$//')
+
+    local issuer_esc subject_esc sans_esc
+    issuer_esc=$(printf '%s'  "$issuer"  | sed 's/"/\\"/g')
+    subject_esc=$(printf '%s' "$subject" | sed 's/"/\\"/g')
+    sans_esc=$(printf '%s'    "$sans"    | sed 's/"/\\"/g')
+
+    local end_epoch
     end_epoch=$(date -d "$enddate" +%s 2>/dev/null)
-    if [ -z "$end_epoch" ]; then
-        printf '"cert": {"valid": false, "days_remaining": null, "expires_at": null}'
+    if [ -z "$enddate" ] || [ -z "$end_epoch" ]; then
+        printf '"cert": {"status": "desconhecido", "parsed": true, "reason": "certificado obtido mas a data de validade nao pode ser interpretada (notAfter bruto: %s)", "hostname": "%s", "hostname_source": "%s", "sni_sent": true, "issuer": "%s", "subject": "%s", "sans": "%s", "days_remaining": null, "expires_at": null, "not_after_raw": "%s"}' \
+            "${enddate:-vazio}" "$hostname" "$source" "$issuer_esc" "$subject_esc" "$sans_esc" "${enddate}"
         return
     fi
+
+    local now_epoch days_remaining expires_at starts_at expired
     now_epoch=$(date +%s)
     days_remaining=$(( (end_epoch - now_epoch) / 86400 ))
-    expires_at=$(date -u -d "$enddate" "+%Y-%m-%dT%H:%M:%SZ" 2>/dev/null)
-    printf '"cert": {"valid": true, "days_remaining": %d, "expires_at": "%s"}' \
-        "$days_remaining" "$expires_at"
+
+    if [ "$days_remaining" -gt "$CERT_DAYS_SANITY" ] || [ "$days_remaining" -lt "-$CERT_DAYS_SANITY" ]; then
+        printf '"cert": {"status": "desconhecido", "parsed": true, "reason": "validade fora de qualquer faixa plausivel (%s dias; notAfter bruto: %s) — tratado como nao verificavel, tipico de certificado autogerado com data invalida", "hostname": "%s", "hostname_source": "%s", "sni_sent": true, "issuer": "%s", "subject": "%s", "sans": "%s", "days_remaining": null, "expires_at": null, "not_after_raw": "%s"}' \
+            "$days_remaining" "$enddate" "$hostname" "$source" "$issuer_esc" "$subject_esc" "$sans_esc" "$enddate"
+        return
+    fi
+
+    expires_at=$(date -u -d "$enddate"   "+%Y-%m-%dT%H:%M:%SZ" 2>/dev/null)
+    starts_at=$(date -u -d "$startdate"  "+%Y-%m-%dT%H:%M:%SZ" 2>/dev/null)
+    expired="false"; [ "$days_remaining" -lt 0 ] && expired="true"
+
+    local host_match="false"
+    printf '%s %s' "$subject" "$sans" | grep -qiF "$hostname" && host_match="true"
+
+    printf '"cert": {"status": "ok", "parsed": true, "reason": "", "hostname": "%s", "hostname_source": "%s", "sni_sent": true, "issuer": "%s", "subject": "%s", "sans": "%s", "hostname_matches": %s, "expired": %s, "days_remaining": %d, "expires_at": "%s", "starts_at": "%s"}' \
+        "$hostname" "$source" "$issuer_esc" "$subject_esc" "$sans_esc" "$host_match" "$expired" \
+        "$days_remaining" "$expires_at" "$starts_at"
 }
 
 # ============================================================
