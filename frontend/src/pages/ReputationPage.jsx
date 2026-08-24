@@ -9,10 +9,11 @@
  * ver backend/app/routers/reputation.py).
  */
 import { AlertTriangle, ArrowLeft, CheckCircle2, RefreshCw } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { fetchReputation } from '../api/client'
 import { Button } from '@/components/ui/button'
+import { useServer } from '../contexts/ServerContext'
 
 const CHECK_LABELS = {
   blocklist: 'DNSBL (blocklist)', spf_dkim_dmarc: 'SPF / DKIM / DMARC', cert: 'Certificado TLS',
@@ -95,15 +96,21 @@ function ServerCard({ row }) {
 
 export default function ReputationPage() {
   const navigate = useNavigate()
+  const { activeServer, isFleet } = useServer()
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
 
-  const load = () => {
-    setLoading(true)
-    fetchReputation().then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
-  }
+  // Sessão 5: esta tela chamava fetchReputation() sem argumento e
+  // renderizava a frota inteira mesmo com um servidor selecionado no
+  // seletor — era a única aba que ignorava o escopo global da URL.
+  const scopeId = isFleet ? null : activeServer?.id ?? null
 
-  useEffect(load, [])
+  const load = useCallback(() => {
+    setLoading(true)
+    fetchReputation(scopeId).then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
+  }, [scopeId])
+
+  useEffect(() => { load() }, [load])
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--surface)' }}>
@@ -132,7 +139,14 @@ export default function ReputationPage() {
         ) : rows.length === 0 ? (
           <p style={{ fontSize: 12, color: 'var(--dim)' }}>Nenhum servidor encontrado.</p>
         ) : (
-          rows.map(row => <ServerCard key={row.server_id} row={row} />)
+          <>
+            <p style={{ fontSize: 11, color: 'var(--dim)', margin: '0 0 10px' }}>
+              {isFleet
+                ? `Toda a frota — ${rows.length} servidor${rows.length === 1 ? '' : 'es'}.`
+                : `Escopo: ${activeServer?.name ?? 'servidor selecionado'}.`}
+            </p>
+            {rows.map(row => <ServerCard key={row.server_id} row={row} />)}
+          </>
         )}
       </div>
     </div>

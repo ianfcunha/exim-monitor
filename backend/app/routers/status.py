@@ -25,7 +25,21 @@ def _resolve_server_id(server_id: Optional[int], db: Session, current_user: User
     """
     Resolve o server_id efetivo:
     - Se fornecido: valida que o usuário tem acesso e retorna.
-    - Se None: retorna o ID do primeiro servidor ativo do usuário.
+    - Se omitido e o usuário tem UM servidor: aquele servidor.
+    - Se omitido e o usuário tem vários: 400 nomeando a ambiguidade.
+
+    Sessão 5 — o fallback "primeiro servidor da lista" era a raiz de um
+    defeito sério na aba Fila. Em `?server=all` o frontend não manda
+    server_id; esta função escolhia `servers[0]` calada, a tela exibia o
+    diagnóstico do Cloudez sem dizer de quem era, e o painel de ações
+    (que resolve o servidor por conta própria, pelo contexto do
+    frontend) desenhava os botões com as permissões de OUTRO servidor —
+    ações destrutivas habilitadas sem alvo identificado.
+
+    Escolher por conta própria entre dois servidores é sempre um palpite
+    sobre a intenção de quem chamou. Com um servidor só não há palpite
+    nenhum, e o fallback continua valendo: é o caso de quem nunca
+    interagiu com o seletor.
     """
     if server_id is not None:
         server = get_server_owned_by(db, server_id, current_user)
@@ -33,10 +47,16 @@ def _resolve_server_id(server_id: Optional[int], db: Session, current_user: User
             raise HTTPException(404, f"Servidor {server_id} não encontrado.")
         return server_id
 
-    # Fallback: primeiro servidor ativo do usuário
     servers = get_servers_for_user(db, current_user)
-    if servers:
+    if len(servers) == 1:
         return servers[0].id
+    if len(servers) > 1:
+        raise HTTPException(
+            400,
+            "Estes dados são de um servidor específico e você tem "
+            f"{len(servers)} cadastrados — escolha um no seletor. "
+            f"Disponíveis: {', '.join(s.name for s in servers)}.",
+        )
 
     return None  # sem servidores cadastrados ainda
 

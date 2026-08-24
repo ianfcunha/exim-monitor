@@ -5,7 +5,7 @@
  * pra trocar pelo dropdown do header).
  */
 import { AlertTriangle, Bell, ChevronRight, History, Moon, Server, Sparkles, Sun, Users } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { Switch } from '@/components/ui/switch'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -19,6 +19,12 @@ const LINKS = [
 
 export default function GeneralSettings({ isDark, onToggleTheme, advanced, onToggleAdvanced }) {
   const { isAdmin } = useAuth()
+  // Sessão 5: os cards tinham href sem `?server=`. O clique preservava o
+  // escopo porque o SPA reescreve a URL depois, mas "copiar endereço do
+  // link" produzia um link sem servidor — que abre no escopo de quem
+  // clica, não no de quem mandou. Um link colado no chat precisa levar o
+  // contexto junto; é o motivo de o servidor viver na URL (T8).
+  const { search } = useLocation()
   const links = LINKS.filter(l => !l.adminOnly || isAdmin)
 
   return (
@@ -72,7 +78,7 @@ export default function GeneralSettings({ isDark, onToggleTheme, advanced, onTog
         </p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
           {links.map(({ to, Icon, title, desc }) => (
-            <Link key={to} to={to} style={{
+            <Link key={to} to={`${to}${search}`} style={{
               display: 'flex', alignItems: 'flex-start', gap: 12,
               background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12,
               padding: '16px 16px', textDecoration: 'none',

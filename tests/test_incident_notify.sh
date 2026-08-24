@@ -73,6 +73,7 @@ inc = Incident(
     metrics={}, suggested_fix={"description": "teste"}, triggered_by={},
 )
 db.add(inc); db.commit(); db.refresh(inc)
+inc_display_id = inc.display_id   # guardado: depois do db.delete(inc) não dá mais para derivar
 
 for event, mutate in (
     ("opened", lambda: None),
@@ -165,8 +166,26 @@ db.commit()
 for k, v in saved.items():
     setattr(cfg, k, v)
 db.commit()
-db.query(AlertHistory).filter(AlertHistory.server_id == sid, AlertHistory.problem.like("%__test_notify__%")).delete(synchronize_session=False)
+
+# Sessão 5 — este filtro nunca casou com nada. _record() grava
+# `problem = "{tipo}:{evento}:{display_id}"` (incident_notify.py), que
+# não contém a ENTIDADE do incidente; procurar por "__test_notify__" ali
+# não achava as linhas que o próprio teste acabara de criar. Resultado:
+# cada execução deixava 6+ notificações no Histórico de Alertas
+# apontando para um INC-### que este bloco apagava logo em seguida — o
+# "opened repetido de duas a quatro vezes por incidente" da verificação
+# em navegador. Filtra pelo incident_id agora (migration 024), que é o
+# que a linha realmente guarda; o CASCADE do db.delete(inc) abaixo
+# também dá conta, e as duas coisas juntas cobrem bancos ainda sem a
+# migration aplicada.
+db.query(AlertHistory).filter(AlertHistory.incident_id == inc.id).delete(synchronize_session=False)
+db.commit()
 db.delete(inc)
+db.commit()
+
+# Nada deste teste pode sobreviver a ele.
+leftover = db.query(AlertHistory).filter(AlertHistory.problem.like(f"%:{inc_display_id}")).count()
+check(leftover == 0, f"nenhuma notificação de teste sobra no histórico (sobraram {leftover})")
 db.commit()
 db.close()
 httpd.shutdown()

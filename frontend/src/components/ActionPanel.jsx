@@ -65,6 +65,19 @@ function observationReason(server) {
   return `${server.name} está em modo observação — o painel diagnostica, mas não executa ações que alterem o servidor. Desligue o modo em Configurações → Servidores para liberar.`
 }
 
+// Sessão 5: sem servidor resolvido (escopo "Toda a frota"), este painel
+// lia `activeServer?.capabilities` de um null — nenhuma capability
+// faltando, nenhum modo observação, tudo habilitado. Botões destrutivos
+// clicáveis sem alvo identificado. A aba Fila agora pede a escolha antes
+// de chegar aqui; este é o cinto além do suspensório, porque o painel
+// pode ser montado de outro lugar amanhã.
+function noTargetReason(server, isFleet) {
+  if (server) return null
+  return isFleet
+    ? 'Nenhum servidor selecionado — ações agem sobre um servidor específico. Escolha um no seletor do topo.'
+    : 'Servidor não resolvido — recarregue a página.'
+}
+
 function missingCapReason(action, capabilities) {
   if (!capabilities || action.requiredCaps.length === 0) return null
   const missing = action.requiredCaps.filter(c => capabilities[c] === false)
@@ -86,7 +99,7 @@ const COLOR_MAP = {
 
 export default function ActionPanel({ onActionComplete, recommendedActions = [] }) {
   const toast                       = useToast()
-  const { activeServer }            = useServer()
+  const { activeServer, isFleet }   = useServer()
   const [pending, setPending]       = useState(null)
   const [confirmId, setConfirmId]   = useState(null)
   const [paramValue, setParamValue] = useState('')
@@ -213,8 +226,9 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
           const c = COLOR_MAP[action.color]
           const isRunning     = pending === action.id
           const isRecommended = recommendedActions.includes(action.id)
+          const noTarget       = noTargetReason(activeServer, isFleet)
           const obsReason      = observationReason(activeServer)
-          const capReason      = obsReason || missingCapReason(action, activeServer?.capabilities)
+          const capReason      = noTarget || obsReason || missingCapReason(action, activeServer?.capabilities)
           const isCapBlocked   = !!capReason
           const isDisabled     = !!pending || isCapBlocked
           return (
@@ -249,7 +263,7 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
                   padding: '1px 5px', borderRadius: 999,
                   background: 'var(--dim)', color: '#fff', pointerEvents: 'none',
                 }}>
-                  {obsReason ? 'Observação' : 'Só leitura'}
+                  {noTarget ? 'Sem alvo' : obsReason ? 'Observação' : 'Só leitura'}
                 </span>
               )}
               {isRecommended && !isRunning && !isCapBlocked && (
@@ -281,8 +295,9 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
           const c = COLOR_MAP[action.color]
           const isRunning     = pending === action.id
           const isRecommended = recommendedActions.includes(action.id)
+          const noTarget       = noTargetReason(activeServer, isFleet)
           const obsReason      = observationReason(activeServer)
-          const capReason      = obsReason || missingCapReason(action, activeServer?.capabilities)
+          const capReason      = noTarget || obsReason || missingCapReason(action, activeServer?.capabilities)
           const isCapBlocked   = !!capReason
           const isDisabled     = !!pending || isCapBlocked
           return (
@@ -317,7 +332,7 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
                   padding: '1px 5px', borderRadius: 999,
                   background: 'var(--dim)', color: '#fff', pointerEvents: 'none',
                 }}>
-                  {obsReason ? 'Observação' : 'Só leitura'}
+                  {noTarget ? 'Sem alvo' : obsReason ? 'Observação' : 'Só leitura'}
                 </span>
               )}
               {isRecommended && !isRunning && !isCapBlocked && (

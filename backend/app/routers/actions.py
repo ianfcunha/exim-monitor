@@ -228,6 +228,22 @@ def _reject_if_observation_mode(db: Session, server_id: Optional[int], current_u
 
 def _resolve_server_cfg(db: Session, server_id: Optional[int], current_user: User) -> Optional[dict]:
     if server_id is None:
+        # Sessão 5: sem server_id a ação caía no servidor do .env
+        # (retrocompatibilidade), o que também pulava
+        # _reject_if_observation_mode() — que retorna cedo quando não há
+        # server_id. Para quem tem uma frota cadastrada isso é uma ação
+        # destrutiva sem alvo identificado; a verificação em navegador
+        # viu os botões habilitados na aba Fila em `?server=all`. Com
+        # vários servidores, exigir a escolha; com um (ou nenhum), o
+        # caminho legado continua valendo — não há ambiguidade a
+        # resolver.
+        servers = get_servers_for_user(db, current_user)
+        if len(servers) > 1:
+            raise HTTPException(
+                400,
+                "Esta ação age sobre um servidor específico e você tem "
+                f"{len(servers)} cadastrados — escolha um no seletor antes de executar.",
+            )
         return None
     server = get_server_owned_by(db, server_id, current_user)
     if not server:

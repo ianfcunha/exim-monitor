@@ -17,10 +17,10 @@
  */
 import {
   CheckCircle, Clock, FileText, History, Inbox,
-  MailOpen, RefreshCw, XCircle,
+  LayoutGrid, MailOpen, RefreshCw, XCircle,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { refreshStatus } from '../api/client'
+import { fetchServerHealth, refreshStatus } from '../api/client'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import ActionPanel from '../components/ActionPanel'
@@ -87,10 +87,46 @@ const METRIC_TOOLTIPS = {
   sent:      'Mensagens recebidas/aceitas pelo EXIM para envio no período amostrado',
 }
 
+// ── Escolha de servidor (Sessão 5) ───────────────────────────────────────────
+// Esta aba é intrinsecamente de UM servidor: a fila é dele, o
+// diagnóstico é dele, e as ações agem nele. Em "Toda a frota" ela
+// mostrava um servidor só, sem dizer qual — o backend caía no primeiro
+// da lista calado — enquanto o painel de ações desenhava os botões com
+// as permissões do contexto vazio: destrutivos, habilitados, sem alvo
+// identificado. Escolher por conta própria era o defeito; pedir a
+// escolha é a correção.
+function ChooseServer({ servers, onPick }) {
+  return (
+    <div style={{ maxWidth: 1280, margin: '0 auto', padding: '48px 24px', width: '100%' }}>
+      <div style={{
+        background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12,
+        padding: '28px 24px', textAlign: 'center', maxWidth: 520, margin: '0 auto',
+      }}>
+        <LayoutGrid size={22} color="var(--dim)" style={{ marginBottom: 10 }} />
+        <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', margin: '0 0 6px' }}>
+          A Fila é por servidor
+        </p>
+        <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 18px', lineHeight: 1.55 }}>
+          Fila, diagnóstico e ações agem sobre um servidor específico — não há
+          como somá-los na frota sem esconder de qual servidor é cada número.
+          Para uma visão de toda a frota, use a <strong>Triagem</strong>.
+        </p>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+          {servers.map(s => (
+            <Button key={s.id} size="sm" variant="outline" onClick={() => onPick(s)}>
+              {s.name}
+            </Button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Componente principal ─────────────────────────────────────────────────────
 export default function Dashboard({ advanced = false }) {
   const { isAdmin } = useAuth()
-  const { activeServer }      = useServer()
+  const { activeServer, isFleet, servers, setActiveServer } = useServer()
   const quick                 = useQuickStatus()
   const full                  = useFullStatus()
   const [refreshing, setRefreshing] = useState(false)
@@ -134,20 +170,41 @@ export default function Dashboard({ advanced = false }) {
     }
   }, [quick.data]) // eslint-disable-line
 
+  // ── Selo de saúde — a única fonte do veredito ─────────────────────────────
+  // Sessão 5: buscado AQUI e passado ao HealthSeal, em vez de o selo
+  // buscar por conta própria, porque o título da aba precisa do mesmo
+  // valor. Sem isso havia três representações do estado do servidor na
+  // mesma tela — selo (incidentes), painel DIAGNÓSTICO (severity da
+  // coleta) e título da aba (severity da coleta) — e as duas últimas
+  // divergiam da primeira. health.py é a fonte única desde a T5.
+  const [health, setHealth] = useState(null)
+  useEffect(() => {
+    if (!activeServer) { setHealth(null); return }
+    let alive = true
+    const load = () => fetchServerHealth(activeServer.id)
+      .then(h => { if (alive) setHealth(h) })
+      .catch(() => { if (alive) setHealth(null) })
+    load()
+    const id = setInterval(load, 30_000)
+    return () => { alive = false; clearInterval(id) }
+  }, [activeServer])
+
   // ── Título dinâmico da aba ────────────────────────────────────────────────
   useEffect(() => {
-    // T6 (Sessão 1, pós-auditoria): default era 'OK' — antes do primeiro
-    // dado chegar (ou se vier sem severity), a aba mostrava "tudo bem"
-    // sem ter confirmado nada ainda. UNKNOWN não ganha ícone de alerta
-    // (é "ainda não sei", não "algo está errado"), só não finge OK.
-    const sev   = diag.severity ?? 'UNKNOWN'
-    const icons = { MEDIUM: '⚠️', HIGH: '🚨', CRITICAL: '🔴', DEGRADED: '🔴' }
-    const icon  = icons[sev] ?? ''
-    document.title = (sev === 'OK' || sev === 'LOW' || sev === 'UNKNOWN')
+    // O ícone e a palavra vêm do estado de saúde (health.py), não do
+    // `severity` do último snapshot: o snapshot é a leitura crua de uma
+    // coleta, o selo é o veredito depois da histerese. A aba dizia
+    // "🔴 CRÍTICO — Mail IQ" enquanto o selo, a dois centímetros dali,
+    // dizia entrega normal.
+    // "indeterminado" não ganha ícone de alerta — é "ainda não sei",
+    // não "algo está errado" — mas também não finge OK.
+    const icons = { critico: '🔴', atencao: '⚠️' }
+    const state = health?.state
+    document.title = (!state || state === 'ok' || state === 'indeterminado')
       ? 'Mail IQ — AVILI'
-      : `${icon} ${severityLabel(sev)} — Mail IQ`
+      : `${icons[state] ?? ''} ${severityLabel(state)} — Mail IQ`
     return () => { document.title = 'Mail IQ — AVILI' }
-  }, [diag.severity])
+  }, [health?.state])
 
   // ── Atalhos de teclado ────────────────────────────────────────────────────
   // Sessão 3, T6 — "poda": atalhos fora da Triagem só existem em modo
@@ -209,6 +266,17 @@ export default function Dashboard({ advanced = false }) {
     q.top_auth_user && { label: q.top_auth_user, count: q.top_auth_count ?? 0, tag: 'auth' },
   ].filter(Boolean).filter(r => r.label).sort((a, b) => b.count - a.count)
 
+  // Frota com mais de um servidor: pede a escolha em vez de exibir um
+  // servidor sem nome. Depois de todos os hooks — a ordem deles não pode
+  // depender deste ramo.
+  if (!activeServer && isFleet && servers.length > 1) {
+    return (
+      <div style={{ background: 'var(--surface)' }}>
+        <ChooseServer servers={servers} onPick={setActiveServer} />
+      </div>
+    )
+  }
+
   return (
     <div style={{ background: 'var(--surface)' }}>
 
@@ -219,7 +287,7 @@ export default function Dashboard({ advanced = false }) {
           (mesma fonte da Triagem, T5) e os controles da coleta. */}
       <div style={{ maxWidth: 1280, margin: '0 auto', padding: '16px 24px 0', width: '100%' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <HealthSeal />
+          <HealthSeal health={health} />
           {staleness && (
             <div className="hidden sm:flex items-center gap-1.5" style={{ fontSize: 11, color: staleness.color }}>
               <span style={{ width: 5, height: 5, borderRadius: '50%', background: staleness.dot }} />
@@ -319,7 +387,7 @@ export default function Dashboard({ advanced = false }) {
         </div>
 
         {/* Diagnóstico */}
-        <DiagnosisPanel diagnosis={diag} />
+        <DiagnosisPanel diagnosis={diag} sealState={health?.state ?? null} />
 
         {/* Tabelas + Ações */}
         <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${isAdmin ? 'lg:grid-cols-3' : ''}`}>

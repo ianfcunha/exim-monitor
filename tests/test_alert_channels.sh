@@ -155,10 +155,16 @@ CODE="$(curl -s -o /tmp/tg_test.json -w '%{http_code}' -X POST "${AUTH[@]}" \
 # Token sintaticamente válido mas inexistente: o Telegram responde 401
 # com "Unauthorized" no CORPO — é esse texto que precisa chegar à tela.
 put "?server_id=$SID" '{"telegram_override":true,"telegram_enabled":true,"telegram_bot_token":"123456:TOKEN_INVALIDO_DE_TESTE","telegram_chat_id":"-1009999999999"}' > /dev/null
+# Sessão 5: era 502. O motivo real do Telegram chega no corpo, e 502 é
+# código de GATEWAY — um proxy no caminho (Caddy, Cloudflare) tem
+# licença para trocar o corpo pela própria página de erro, e aí a
+# mensagem some justo no caso em que ela importa. Nada aqui é falha de
+# gateway: é a configuração que o usuário acabou de salvar sendo
+# recusada pelo destino.
 CODE="$(curl -s -o /tmp/tg_test.json -w '%{http_code}' -X POST "${AUTH[@]}" \
     "$API/api/settings/test/telegram?server_id=$SID")"
-[ "$CODE" = "502" ] \
-    && ok "falha real de envio devolve 502, não um 'ok' otimista" \
+[ "$CODE" = "422" ] \
+    && ok "falha real de envio devolve 422, não um 'ok' otimista nem um 502 de gateway" \
     || fail "envio com token inválido devolveu HTTP $CODE"
 
 grep -qi "unauthorized" /tmp/tg_test.json \

@@ -47,28 +47,38 @@ function ModeBadge() {
   // Sessão 4, Tarefa 12 — selo de modo observação no cabeçalho. Sem
   // isto o modo não aparecia em lugar nenhum da interface, e o painel
   // continuava exibindo ações destrutivas como botões comuns.
+  //
+  // Sessão 5: o selo dizia o que o modo faz mas não onde desligá-lo — um
+  // aviso que interrompe o trabalho e não aponta a saída. Agora é um
+  // link para Configurações → Servidores, que é onde a chave está.
   const { activeServer, servers, isFleet } = useServer()
   const inObservation = isFleet
     ? servers.length > 0 && servers.every(s => s.observation_mode)
     : activeServer?.observation_mode
 
   if (!inObservation) return null
+  const scope = isFleet
+    ? `${servers.length === 1 ? 'O servidor' : `Todos os ${servers.length} servidores`}`
+    : activeServer.name
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span
+        <NavLink
+          to={withScope('/settings/servers')}
           style={{
             fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 999,
             background: 'var(--warn-bg)', border: '1px solid var(--warn-border)',
             color: 'var(--warn)', textTransform: 'uppercase', letterSpacing: '0.05em',
-            flexShrink: 0, whiteSpace: 'nowrap',
+            flexShrink: 0, whiteSpace: 'nowrap', textDecoration: 'none',
           }}
         >
           Modo observação
-        </span>
+        </NavLink>
       </TooltipTrigger>
       <TooltipContent>
-        Nenhuma ação que altera o servidor será executada — o painel só lê e diagnostica.
+        {scope} {isFleet && servers.length > 1 ? 'estão' : 'está'} em modo observação:
+        nenhuma ação que altere o servidor será executada — o painel só lê e
+        diagnostica. Clique para desligar em Configurações → Servidores.
       </TooltipContent>
     </Tooltip>
   )

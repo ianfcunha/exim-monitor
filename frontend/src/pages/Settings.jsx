@@ -3,12 +3,13 @@
  * (aba "Alertas"), sem header/wrapper de página próprio.
  */
 import { RefreshCw } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { fetchAlertHistory, fetchAlertSettings, saveAlertSettings, testEmail, testMonthlyReport, testTelegram, testWeeklyReport, testWebhook } from '../api/client'
 import { Select as SelectPrimitive, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { useServer } from '../contexts/ServerContext'
-import { severityLabel } from '../lib/severity'
+import { describeAlertProblem, severityLabel } from '../lib/severity'
 
 // O VALOR continua sendo o da escala do script (é como o diagnóstico
 // classifica); o RÓTULO é o vocabulário único da interface (Sessão 4,
@@ -217,19 +218,27 @@ const SEV_COLOR = {
 const CH_LABEL  = { email: '✉ E-mail', telegram: '✈ Telegram', webhook: '🔗 Webhook' }
 
 function AlertHistorySection() {
+  const navigate = useNavigate()
+  const { activeServer, isFleet } = useServer()
   const [rows, setRows]   = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  const load = () => {
+  // Sessão 5: esta lista era a única tela do painel sem escopo nenhum —
+  // devolvia o histórico de todos os servidores do banco, sem dizer de
+  // qual era cada linha, mesmo com um servidor selecionado no seletor.
+  const scopeId = isFleet ? null : activeServer?.id ?? null
+
+  const load = useCallback(() => {
     setLoading(true)
-    fetchAlertHistory(50)
+    setError(null)
+    fetchAlertHistory(50, scopeId)
       .then(setRows)
       .catch(e => setError(e?.response?.data?.detail ?? e.message))
       .finally(() => setLoading(false))
-  }
+  }, [scopeId])
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [load])
 
   const fmtDate = (iso) => {
     const d = new Date(iso)
@@ -300,9 +309,39 @@ function AlertHistorySection() {
                       {severityLabel(r.severity)}
                     </span>
                   </td>
-                  <td style={{ padding: '7px 8px', color: 'var(--text)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  {/* Sessão 5: a coluna imprimia a chave técnica crua
+                      ("auth_abuse:opened:INC-113") ao lado de uma
+                      severidade já traduzida. Agora vem desmontada, e o
+                      INC-### é o link pro incidente — o histórico deixa
+                      de ser um beco sem saída. */}
+                  <td style={{ padding: '7px 8px', color: 'var(--text)', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                     title={r.problem}>
-                    {r.problem}
+                    {(() => {
+                      const { text, displayId } = describeAlertProblem(r.problem)
+                      return (
+                        <>
+                          {text}
+                          {displayId && (
+                            <>
+                              {' '}
+                              <button
+                                onClick={() => navigate(`/incidents/${displayId}${window.location.search}`)}
+                                style={{
+                                  background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                                  fontFamily: 'monospace', fontSize: 11, fontWeight: 700,
+                                  color: 'var(--accent-fg)', textDecoration: 'underline',
+                                }}
+                              >
+                                {displayId}
+                              </button>
+                            </>
+                          )}
+                          {isFleet && r.server_name && (
+                            <span style={{ color: 'var(--dim)' }}> · {r.server_name}</span>
+                          )}
+                        </>
+                      )
+                    })()}
                   </td>
                   <td style={{ padding: '7px 8px', color: 'var(--muted)', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
                     {r.queue_total}

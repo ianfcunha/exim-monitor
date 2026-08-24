@@ -163,7 +163,8 @@ def _record(channel: str, incident: Incident, event_type: str, success: bool, er
         db = SessionLocal()
         try:
             db.add(AlertHistory(
-                server_id=incident.server_id, channel=channel, severity=incident.severity,
+                server_id=incident.server_id, incident_id=incident.id,
+                channel=channel, severity=incident.severity,
                 problem=f"{incident.type}:{event_type}:{incident.display_id}",
                 queue_total=0, success=success, error_msg=error_msg,
             ))

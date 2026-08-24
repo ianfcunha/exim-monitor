@@ -43,6 +43,15 @@ export default function TriagePage() {
 
   const scopeId = isFleet ? null : activeServer?.id ?? null
 
+  // Sessão 5: um incidente aberto por link direto (`/triage/88`, ou o
+  // `/incidents/INC-88` que as notificações mandam) não pode ser
+  // descartado só porque está fora do filtro atual. O filtro padrão é
+  // "Ativos"; um incidente já resolvido — que é exatamente o caso de
+  // quem clica no alerta horas depois — caía numa lista vazia, sem
+  // explicação. `pinnedId` é a seleção que veio da rota: sobrevive ao
+  // recarregamento da lista e, se não estiver no filtro, o filtro cede.
+  const pinnedRef = useRef(routeId ? Number(routeId) : null)
+
   const load = useCallback(() => {
     setLoading(true)
     const params = {}
@@ -52,17 +61,34 @@ export default function TriagePage() {
     Promise.all([fetchIncidents(params), fetchIncidentsSummary(scopeId)])
       .then(([rows, sum]) => {
         const filtered = status === 'open' ? rows.filter(r => OPEN_STATUSES.has(r.status)) : rows
+        const pinned = pinnedRef.current
+        if (pinned != null && !filtered.some(r => r.id === pinned)) {
+          // O incidente do link existe, só não está neste filtro — abre o
+          // filtro em vez de mostrar lista vazia. Se nem sem filtro ele
+          // aparece (outro servidor, ou apagado), solta o pin e segue o
+          // comportamento normal.
+          if (status !== 'all') {
+            fetchIncidents(scopeId ? { server_id: scopeId } : {})
+              .then(all => { if (all.some(r => r.id === pinned)) setStatus('all'); else pinnedRef.current = null })
+              .catch(() => { pinnedRef.current = null })
+          } else {
+            pinnedRef.current = null
+          }
+        }
         setIncidents(filtered)
         setSummary(sum)
         // Mantém a seleção se ainda existir na lista; senão seleciona o
         // primeiro item — a Triagem nunca fica em branco com incidentes na lista.
-        setSelectedId(prev => (filtered.some(r => r.id === prev) ? prev : (filtered[0]?.id ?? null)))
+        setSelectedId(prev => {
+          if (pinnedRef.current != null && filtered.some(r => r.id === pinnedRef.current)) return pinnedRef.current
+          return filtered.some(r => r.id === prev) ? prev : (filtered[0]?.id ?? null)
+        })
       })
       .catch(() => { setIncidents([]); setSummary(null) })
       .finally(() => setLoading(false))
   }, [status, severity, scopeId])
 
-  useEffect(load, [load])
+  useEffect(() => { load() }, [load])
 
   // Link de notificação (Telegram/e-mail/webhook) aponta pro display_id
   // ("INC-7"), não pro id numérico interno — resolve contra a lista
@@ -72,10 +98,35 @@ export default function TriagePage() {
     if (!displayId) return
     fetchIncidents({}).then(rows => {
       const match = rows.find(r => r.display_id === displayId)
-      if (match) { setSelectedId(match.id); navigate(`/triage/${match.id}${window.location.search}`, { replace: true }) }
+      if (match) {
+        pinnedRef.current = match.id
+        setSelectedId(match.id)
+        navigate(`/triage/${match.id}${window.location.search}`, { replace: true })
+      }
     }).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [displayId])
+
+  // Escolher outro incidente na lista solta o pin do link — a partir daí
+  // a seleção é do usuário, e o filtro não é mais forçado a acomodá-la.
+  const handleSelect = useCallback((id) => {
+    pinnedRef.current = null
+    setSelectedId(id)
+  }, [])
+
+  // Trocar o filtro manualmente é a mesma declaração de independência:
+  // sem soltar o pin aqui, escolher "Ativos" depois de abrir um deep
+  // link resolvido (que empurrou o filtro pra "Todos") fazia o load()
+  // reverter pra "Todos" de novo, sozinho — o pin brigava com o clique
+  // do usuário em vez de ceder a ele.
+  const handleStatusChange = useCallback((s) => {
+    pinnedRef.current = null
+    setStatus(s)
+  }, [])
+  const handleSeverityChange = useCallback((s) => {
+    pinnedRef.current = null
+    setSeverity(s)
+  }, [])
 
   // Poll leve — a Triagem é a tela que fica aberta esperando o próximo
   // incidente aparecer, não só uma tela visitada uma vez.
@@ -104,10 +155,10 @@ export default function TriagePage() {
 
       if (e.key === 'j' || e.key === 'J') {
         e.preventDefault()
-        setSelectedId(rows[Math.min(idx + 1, rows.length - 1)]?.id ?? rows[0].id)
+        handleSelect(rows[Math.min(idx + 1, rows.length - 1)]?.id ?? rows[0].id)
       } else if (e.key === 'k' || e.key === 'K') {
         e.preventDefault()
-        setSelectedId(rows[Math.max(idx - 1, 0)]?.id ?? rows[0].id)
+        handleSelect(rows[Math.max(idx - 1, 0)]?.id ?? rows[0].id)
       } else if ((e.key === 'e' || e.key === 'E') && selectedId != null) {
         e.preventDefault()
         resolveIncident(selectedId, 'manual').then(load).catch(() => {})
@@ -118,7 +169,7 @@ export default function TriagePage() {
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [selectedId, load])
+  }, [selectedId, load, handleSelect])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
@@ -139,9 +190,9 @@ export default function TriagePage() {
       }}>
         <div style={{ minHeight: 0 }}>
           <IncidentList
-            incidents={incidents} selectedId={selectedId} onSelect={setSelectedId}
-            status={status} onStatusChange={setStatus}
-            severity={severity} onSeverityChange={setSeverity}
+            incidents={incidents} selectedId={selectedId} onSelect={handleSelect}
+            status={status} onStatusChange={handleStatusChange}
+            severity={severity} onSeverityChange={handleSeverityChange}
             loading={loading} showServerName={isFleet}
           />
         </div>

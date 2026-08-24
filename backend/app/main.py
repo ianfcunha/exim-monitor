@@ -33,7 +33,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Versão atual do schema — atualizar junto com cada nova migration
-_SCHEMA_VERSION = "023"
+_SCHEMA_VERSION = "024"
 
 _DDL_ALEMBIC_VERSION = """
     CREATE TABLE IF NOT EXISTS alembic_version (
@@ -775,6 +775,59 @@ def run_migrations() -> None:
             )
             logger.info("Migration 023 aplicada com sucesso (%d config(s) por servidor avaliada(s))", len(promoted))
             current = {"023"}
+
+        if "023" in current and "024" not in current:
+            logger.info("Aplicando migration 023 → 024 (alert_history.incident_id — notificação órfã, Sessão 5)...")
+            # O histórico de alertas guardava a referência ao incidente só
+            # dentro da string `problem` ("auth_abuse:opened:INC-113").
+            # Apagar o incidente deixava a linha para trás, e o painel
+            # continuava exibindo um INC-### que não existe mais — foi o
+            # que a verificação em navegador viu como "opened repetido de
+            # duas a quatro vezes". Com a FK, apagar o incidente apaga as
+            # notificações dele.
+            conn.execute(text("""
+                ALTER TABLE alert_history
+                    ADD COLUMN IF NOT EXISTS incident_id INTEGER
+                    REFERENCES incidents(id) ON DELETE CASCADE
+            """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS ix_alert_history_incident ON alert_history (incident_id)
+            """))
+
+            # Retroativo: liga as linhas já gravadas ao incidente cujo
+            # display_id aparece no fim de `problem`. As que não casarem
+            # (incidente já apagado) são justamente as órfãs — apagadas
+            # abaixo, porque referenciam um INC-### que ninguém consegue
+            # abrir.
+            # `:INC-` não pode aparecer literal no SQL: text() lê `:INC`
+            # como bind parameter e o startup morre com "A value is
+            # required for bind parameter 'INC'". Vai como parâmetro.
+            conn.execute(
+                text("""
+                    UPDATE alert_history a SET incident_id = i.id
+                      FROM incidents i
+                     WHERE a.incident_id IS NULL
+                       AND a.problem LIKE :pat
+                       AND split_part(a.problem, :sep, 2) = i.id::text
+                """),
+                {"pat": "%:INC-%", "sep": ":INC-"},
+            )
+            orphans = conn.execute(
+                text("""
+                    DELETE FROM alert_history
+                     WHERE incident_id IS NULL AND problem LIKE :pat
+                    RETURNING id
+                """),
+                {"pat": "%:INC-%"},
+            ).fetchall()
+
+            conn.execute(text("DELETE FROM alembic_version"))
+            conn.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
+                {"v": "024"},
+            )
+            logger.info("Migration 024 aplicada com sucesso (%d notificação(ões) órfã(s) removida(s))", len(orphans))
+            current = {"024"}
 
         logger.info("Banco de dados pronto (schema %s)", _SCHEMA_VERSION)
 

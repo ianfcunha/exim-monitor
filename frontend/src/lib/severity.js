@@ -43,3 +43,70 @@ const LABELS = {
 export function severityLabel(severity) {
   return LABELS[severity] ?? String(severity ?? '').toUpperCase()
 }
+
+/**
+ * Sessão 5 — o `problem` do diagnóstico é uma chave do script
+ * (FILA_TRAVADA, LOG_NAO_RECONHECIDO, AUTH_ABUSE…) e chegava crua na
+ * tela, ao lado de uma severidade já traduzida. Mesma regra da
+ * severidade: o valor armazenado não muda, só a palavra exibida.
+ */
+const PROBLEM_LABELS = {
+  NORMAL: 'Nada fora do padrão',
+  UNKNOWN: 'Não verificado',
+  LOG_NAO_RECONHECIDO: 'Log em formato não reconhecido',
+  AUTH_ABUSE: 'Conta comprometida',
+  SPAM_RELAY: 'Relay aberto',
+  SPAM_MASSIVO: 'Envio massivo',
+  ENVIO_THROTTLED: 'Envio limitado pelo destino',
+  BOUNCE_CONCENTRADO: 'Devoluções concentradas',
+  BOUNCE_STORM: 'Tempestade de devoluções',
+  IP_FLOOD: 'Excesso de conexões de um IP',
+  FILA_TRAVADA: 'Fila travada',
+  FILA_ALTA: 'Fila acima do normal',
+  FILA_MENSAGENS_GRANDES: 'Fila com mensagens grandes',
+  ALTO_DEFERIMENTO: 'Muitas entregas adiadas',
+  ALTA_REJEICAO: 'Muitas entregas rejeitadas',
+  ALTO_CONSUMO_RECURSOS: 'Consumo alto de recursos',
+  TLD_SUSPEITA: 'Destinos em TLD suspeita',
+}
+
+export function problemLabel(problem) {
+  if (!problem) return ''
+  return PROBLEM_LABELS[problem] ?? String(problem).replace(/_/g, ' ').toLowerCase()
+}
+
+/**
+ * Tipo de incidente — mesma tradução usada na Triagem, repetida aqui
+ * porque o histórico de alertas grava a chave técnica em `problem`
+ * ("auth_abuse:opened:INC-113") e precisa desmontá-la.
+ */
+const INCIDENT_TYPE_LABELS = {
+  auth_abuse: 'Conta comprometida',
+  queue_stuck: 'Fila travada',
+  reputation: 'Reputação',
+  dest_deferral: 'Destino adiando entregas',
+}
+
+const INCIDENT_EVENT_LABELS = {
+  opened: 'aberto',
+  escalated: 'agravado',
+  resolved: 'resolvido',
+}
+
+/**
+ * Desmonta "auth_abuse:opened:INC-113" em algo legível, devolvendo
+ * também o display_id para a linha poder linkar ao incidente. Alertas
+ * de diagnóstico do script (que não seguem esse formato) passam pelo
+ * problemLabel() normal.
+ */
+export function describeAlertProblem(problem) {
+  const parts = String(problem ?? '').split(':')
+  if (parts.length === 3 && parts[2].startsWith('INC-')) {
+    const [type, event, displayId] = parts
+    return {
+      text: `${INCIDENT_TYPE_LABELS[type] ?? type} · ${INCIDENT_EVENT_LABELS[event] ?? event}`,
+      displayId,
+    }
+  }
+  return { text: problemLabel(problem), displayId: null }
+}

@@ -5,7 +5,7 @@
  * técnica do script (HIGH/CRITICAL/…) escolhe a cor, o vocabulário
  * único da interface (CRÍTICO/ATENÇÃO) escolhe o texto.
  */
-import { severityLabel } from '../lib/severity'
+import { problemLabel, severityLabel } from '../lib/severity'
 
 const S = {
   OK:       { border: 'var(--accent-border)', bg: 'var(--accent-bg)', text: 'var(--accent-fg)', dot: 'var(--sky)' },
@@ -47,7 +47,7 @@ export default function StatusBadge({ severity = 'UNKNOWN', problem, description
         <span style={{ ...dotStyle, marginTop: 4 }} />
         <div>
           <p style={{ fontWeight: 700, fontSize: 13, color: s.text }}>
-            {severityLabel(severity)}{problem && problem !== 'NORMAL' ? ` — ${problem}` : ''}
+            {severityLabel(severity)}{problem && problem !== 'NORMAL' ? ` — ${problemLabel(problem)}` : ''}
           </p>
           {description && (
             <p style={{ marginTop: 2, fontSize: 11, color: s.text, opacity: 0.75 }}>{description}</p>

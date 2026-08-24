@@ -51,15 +51,22 @@ export function ServerProvider({ children }) {
 
   useEffect(() => { refresh() }, [refresh])
 
+  // Trocar de servidor EMPILHA no histórico (sem `replace`) — é uma
+  // navegação deliberada, e o "voltar" do navegador tem que desfazê-la.
+  // Com `replace: true` a entrada anterior era sobrescrita: voltar
+  // pulava a troca inteira e o usuário aterrissava numa tela sem
+  // relação com o que acabou de fazer.
   const setActiveServer = useCallback((server) => {
     const value = server ? String(server.id) : FLEET
     localStorage.setItem(STORAGE_KEY, value)
+    // Re-selecionar o que já está ativo não é navegação — não empilha.
+    if (value === param) return
     setSearchParams(prev => {
       const next = new URLSearchParams(prev)
       next.set('server', value)
       return next
-    }, { replace: true })
-  }, [setSearchParams])
+    })
+  }, [setSearchParams, param])
 
   // Sem `?server` na URL (primeira visita, ou link sem o parâmetro):
   // usa a última escolha guardada e a grava na URL — daí em diante a URL

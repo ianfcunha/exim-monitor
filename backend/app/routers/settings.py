@@ -19,7 +19,7 @@ from ..alerts import (
 from ..auth import get_current_user, require_admin
 from ..database import (
     AlertHistory, AlertSettings, Server, User, get_alert_settings,
-    get_effective_alert_settings, get_db, to_utc_iso,
+    get_effective_alert_settings, get_db, get_servers_for_user, to_utc_iso,
 )
 from ..monthly_report import send_fleet_monthly_report, send_monthly_report
 from ..reports import send_weekly_report
@@ -27,6 +27,16 @@ from ..reports import send_weekly_report
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 MASK = "••••••••"
+
+# Sessão 5: os testes de canal respondiam 502 quando o destino recusava
+# a mensagem. O corpo trazia o motivo real ("Unauthorized", "chat not
+# found") mas 502 é código de GATEWAY — um proxy no caminho (Caddy,
+# Cloudflare) tem licença para trocar o corpo pela própria página de
+# erro, e aí o motivo some justamente no caso em que ele importa. Nada
+# aqui é falha de gateway: é a configuração que o usuário acabou de
+# salvar sendo recusada pelo destino. 422 é a resposta certa e nenhum
+# proxy mexe nela.
+_UPSTREAM_REJECTED = 422
 
 
 # ── Schemas ────────────────────────────────────────────────────────────────
@@ -220,18 +230,33 @@ async def test_email(
     try:
         await send_test_email(cfg)
     except Exception as exc:
-        raise HTTPException(502, f"Falha ao enviar e-mail: {exc}")
+        raise HTTPException(_UPSTREAM_REJECTED, f"Falha ao enviar e-mail: {exc}")
     return {"ok": True, "message": f"E-mail de teste enviado para {cfg.email_to}"}
 
 
 @router.get("/alerts/history", summary="Histórico de alertas disparados")
 def get_alert_history(
     limit: int = Query(50, ge=1, le=200, description="Máximo de registros"),
+    server_id: Optional[int] = Query(None, description="Servidor específico; omitido = toda a frota do usuário"),
     db: Session = Depends(get_db),
-    _: str = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
+    """
+    Sessão 5: esta rota ignorava escopo por completo — devolvia o
+    histórico de TODOS os servidores do banco, inclusive de quem o
+    usuário não tem acesso, e sem dizer de qual servidor era cada linha.
+    Agora respeita o escopo da interface (`?server=` na URL) e nomeia o
+    servidor de cada alerta.
+    """
+    allowed = {s.id: s.name for s in get_servers_for_user(db, current_user)}
+    if server_id is not None:
+        if server_id not in allowed:
+            raise HTTPException(404, f"Servidor {server_id} não encontrado.")
+        allowed = {server_id: allowed[server_id]}
+
     rows = (
         db.query(AlertHistory)
+        .filter(AlertHistory.server_id.in_(allowed.keys()))
         .order_by(AlertHistory.sent_at.desc())
         .limit(limit)
         .all()
@@ -243,6 +268,9 @@ def get_alert_history(
             "channel":     r.channel,
             "severity":    r.severity,
             "problem":     r.problem,
+            "incident_id": r.incident_id,
+            "server_id":   r.server_id,
+            "server_name": allowed.get(r.server_id),
             "queue_total": r.queue_total,
             "success":     r.success,
             "error_msg":   r.error_msg,
@@ -278,7 +306,7 @@ async def test_weekly_report(
 
     sent = await send_weekly_report(server_id, server_name, mark_sent=False)
     if not sent:
-        raise HTTPException(502, "Falha ao enviar o relatório de teste — veja os logs do backend.")
+        raise HTTPException(_UPSTREAM_REJECTED, "Falha ao enviar o relatório de teste — veja os logs do backend.")
     return {"ok": True, "message": f"Relatório semanal de teste enviado para {channels.email_to}"}
 
 
@@ -307,7 +335,7 @@ async def test_monthly_report(
         sent = await send_fleet_monthly_report(mark_sent=False)
 
     if not sent:
-        raise HTTPException(502, "Falha ao enviar o relatório de teste — veja os logs do backend.")
+        raise HTTPException(_UPSTREAM_REJECTED, "Falha ao enviar o relatório de teste — veja os logs do backend.")
     return {"ok": True, "message": f"Relatório mensal de teste enviado para {channels.email_to}"}
 
 
@@ -327,9 +355,9 @@ async def test_telegram(
         # O motivo vem da própria API do Telegram ("chat not found",
         # "Unauthorized") — é o que diz se o erro foi no chat ID ou no
         # token. Antes só chegava "HTTP Error 400: Bad Request".
-        raise HTTPException(502, f"O Telegram recusou a mensagem: {exc}")
+        raise HTTPException(_UPSTREAM_REJECTED, f"O Telegram recusou a mensagem: {exc}")
     except Exception as exc:
-        raise HTTPException(502, f"Falha ao falar com o Telegram: {exc}")
+        raise HTTPException(_UPSTREAM_REJECTED, f"Falha ao falar com o Telegram: {exc}")
     return {"ok": True, "message": f"Mensagem enviada ao chat {cfg.telegram_chat_id}"}
 
 
@@ -354,5 +382,5 @@ async def test_webhook(
     try:
         await send_test_webhook(cfg, server_id=server_id, server_name=server_name)
     except Exception as exc:
-        raise HTTPException(502, f"Falha ao enviar webhook: {exc}")
+        raise HTTPException(_UPSTREAM_REJECTED, f"Falha ao enviar webhook: {exc}")
     return {"ok": True, "message": f"Webhook de teste enviado para {cfg.webhook_url}"}

@@ -12,8 +12,16 @@ import { fetchFullStatus, fetchQuickStatus } from '../api/client'
 import { useServer } from '../contexts/ServerContext'
 
 function usePolling(fetcherFn, intervalMs) {
-  const { activeServer } = useServer()
+  const { activeServer, servers } = useServer()
   const serverId = activeServer?.id ?? null
+
+  // Sessão 5: estes dados são sempre de UM servidor. Sem servidor ativo
+  // e com mais de um cadastrado, o pedido era ambíguo — o backend caía
+  // no primeiro da lista e a tela exibia números de um servidor que não
+  // nomeava. O backend agora recusa a ambiguidade (400); aqui nem
+  // chegamos a pedir, para a tela poder mostrar a escolha em vez de um
+  // erro.
+  const ambiguous = serverId === null && servers.length > 1
 
   const [data, setData]       = useState(null)
   const [error, setError]     = useState(null)
@@ -21,6 +29,7 @@ function usePolling(fetcherFn, intervalMs) {
   const timerRef              = useRef(null)
 
   const fetcher = useCallback(async () => {
+    if (ambiguous) { setData(null); setError(null); setLoading(false); return }
     try {
       const result = await fetcherFn(serverId)
       setData(result)
@@ -30,7 +39,7 @@ function usePolling(fetcherFn, intervalMs) {
     } finally {
       setLoading(false)
     }
-  }, [fetcherFn, serverId])
+  }, [fetcherFn, serverId, ambiguous])
 
   // Reinicia polling quando servidor ativo ou fetcher muda
   useEffect(() => {
@@ -39,9 +48,9 @@ function usePolling(fetcherFn, intervalMs) {
     setError(null)
     fetcher()
     clearInterval(timerRef.current)
-    timerRef.current = setInterval(fetcher, intervalMs)
+    if (!ambiguous) timerRef.current = setInterval(fetcher, intervalMs)
     return () => clearInterval(timerRef.current)
-  }, [fetcher, intervalMs])
+  }, [fetcher, intervalMs, ambiguous])
 
   return { data, error, loading, refresh: fetcher }
 }

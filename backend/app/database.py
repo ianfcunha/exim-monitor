@@ -294,14 +294,23 @@ class AlertHistory(Base):
     sem ele, o relatório semanal por servidor não tinha como saber quais
     alertas eram daquele servidor especificamente (mesma classe de bug do
     AlertSettings antes de ficar por servidor).
+
+    incident_id (nullable, CASCADE — migration 024, Sessão 5): notificação
+    de incidente guardava a referência ao incidente só dentro da string
+    `problem` ("auth_abuse:opened:INC-113"). Apagar o incidente deixava a
+    linha órfã, e o painel seguia exibindo um INC-### que ninguém
+    conseguia abrir. Fica nulo nos alertas de diagnóstico do script, que
+    não têm incidente associado.
     """
     __tablename__ = "alert_history"
     __table_args__ = (
         Index("ix_alert_history_ts", "sent_at"),
+        Index("ix_alert_history_incident", "incident_id"),
     )
 
     id         = Column(Integer, primary_key=True)
     server_id  = Column(Integer, ForeignKey("servers.id", ondelete="SET NULL"), nullable=True)
+    incident_id= Column(Integer, ForeignKey("incidents.id", ondelete="CASCADE"), nullable=True)
     sent_at    = Column(DateTime, default=datetime.utcnow, nullable=False)
     channel    = Column(String(20),  nullable=False)   # 'email' | 'telegram'
     severity   = Column(String(20),  nullable=False)

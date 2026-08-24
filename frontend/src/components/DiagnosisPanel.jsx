@@ -54,7 +54,14 @@ const SEVERITY_BG = {
   UNKNOWN:  { bg: 'var(--surface)', border: 'var(--border)', dot: 'var(--dim)' },
 }
 
-export default function DiagnosisPanel({ diagnosis }) {
+// Sessão 5: o estado que o selo de saúde exibe, para este painel saber
+// quando está dizendo outra coisa. `severity` do script → estado do selo.
+const SEAL_EQUIVALENT = {
+  OK: 'ok', LOW: 'ok', MEDIUM: 'atencao', HIGH: 'atencao',
+  CRITICAL: 'critico', DEGRADED: 'critico', UNKNOWN: 'indeterminado',
+}
+
+export default function DiagnosisPanel({ diagnosis, sealState = null }) {
   const prevSeverity = useRef(null)
   const [collapsed, setCollapsed] = useState(true)
 
@@ -62,6 +69,15 @@ export default function DiagnosisPanel({ diagnosis }) {
   const isOk            = severity === 'OK' || severity === 'LOW'
   const isCritical      = severity === 'CRITICAL' || severity === 'HIGH' || severity === 'DEGRADED'
   const colors          = SEVERITY_BG[severity] ?? SEVERITY_BG.UNKNOWN
+
+  // Este painel é a leitura crua da última coleta; o selo é o veredito
+  // depois da histerese (health.py, T5). Eles PODEM divergir de forma
+  // legítima — uma coleta ruim isolada não muda o selo, é exatamente o
+  // que a histerese existe para evitar. O que não pode é a divergência
+  // aparecer sem explicação: até a Sessão 5 esta tela mostrava
+  // "CRÍTICO" a dois centímetros de um selo verde e deixava o usuário
+  // escolher em qual acreditar.
+  const diverges = sealState != null && SEAL_EQUIVALENT[severity] !== sealState
 
   // Auto-expande quando status piora; auto-colapsa quando volta a OK
   useEffect(() => {
@@ -102,7 +118,7 @@ export default function DiagnosisPanel({ diagnosis }) {
           animation: isCritical ? 'pulseDot 2s ease-in-out infinite' : undefined,
         }} />
 
-        <span className="section-label" style={{ flex: 1 }}>Diagnóstico</span>
+        <span className="section-label" style={{ flex: 1 }}>Última coleta</span>
 
         <StatusBadge severity={severity} problem={problem} description={description} />
 
@@ -120,6 +136,19 @@ export default function DiagnosisPanel({ diagnosis }) {
       {/* ── Corpo colapsável ── */}
       {!collapsed && (
         <div style={{ padding: '0 16px 16px' }}>
+          {diverges && (
+            <p style={{
+              fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.5,
+              margin: '0 0 12px', padding: '8px 10px', borderRadius: 8,
+              background: 'var(--surface)', border: '1px solid var(--border)',
+            }}>
+              Esta é a classificação da <strong>última coleta</strong>, isolada.
+              O selo de saúde no topo é o veredito do servidor e só muda depois
+              de leituras consecutivas confirmarem — por isso os dois podem
+              divergir por um ciclo.
+            </p>
+          )}
+
           {/* Descrição */}
           {description && (
             <p style={{ fontSize: 13, color: 'var(--text)', marginBottom: 12, lineHeight: 1.5 }}>

@@ -152,8 +152,8 @@ export const resendInvite   = (id) => api.post(`/users/${id}/resend-invite`).the
 export const getInviteLink  = (id) => api.get(`/users/${id}/invite-link`).then(r => r.data)
 
 // ── Configuracoes de alertas ──────────────────────────────────────────────
-export const fetchAlertHistory  = (limit = 50) =>
-  api.get('/settings/alerts/history', { params: { limit } }).then(r => r.data)
+export const fetchAlertHistory  = (limit = 50, serverId = null) =>
+  api.get('/settings/alerts/history', { params: { limit, ...(serverId ? { server_id: serverId } : {}) } }).then(r => r.data)
 export const fetchAlertSettings = (serverId = null) =>
   api.get('/settings/alerts', { params: serverId ? { server_id: serverId } : {} }).then(r => r.data)
 export const saveAlertSettings  = (payload, serverId = null) =>

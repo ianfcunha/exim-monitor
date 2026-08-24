@@ -29,6 +29,28 @@ AUTH=(-H "Authorization: Bearer $TOKEN")
 
 SERVER_ID=$(curl -s "$API/servers" "${AUTH[@]}" | python3 -c "import sys,json;print(json.load(sys.stdin)[0]['id'])")
 
+# Sessão 5 — higiene. Este teste cria incidentes NUM SERVIDOR REAL e a
+# limpeza no fim do arquivo só apagava `%__test_legacy_impact__`; os
+# `__test_report__` ficavam para trás a cada execução. Cinco deles
+# estavam no Cloudez LAB quando a verificação em navegador rodou, e o
+# motor de incidentes os resolvia sozinho três ciclos depois — o que
+# parecia "algo resolvendo incidentes sem intervenção". Pior: as
+# notificações que eles geraram sobreviviam ao incidente e apareciam no
+# Histórico de Alertas apontando para um INC-### inexistente.
+#
+# `trap EXIT` porque limpeza no fim do script só roda quando o script
+# chega ao fim — qualquer `set -e` ou Ctrl-C no meio deixava sujeira.
+cleanup() {
+    $COMPOSE exec -T backend sh -c "PYTHONPATH=/app python3" >/dev/null 2>&1 <<'PYEOF' || true
+from app.database import SessionLocal, Incident
+db = SessionLocal()
+for i in db.query(Incident).filter(Incident.fingerprint.like("%__test_%")).all():
+    db.delete(i)   # alert_history.incident_id é ON DELETE CASCADE (migration 024)
+db.commit(); db.close()
+PYEOF
+}
+trap cleanup EXIT
+
 SETUP=$($COMPOSE exec -T backend sh -c "PYTHONPATH=/app python3" <<PYEOF
 from app.database import SessionLocal, Incident, ActionHistory, record_incident_event
 from datetime import datetime, timedelta
@@ -142,13 +164,8 @@ echo "$LEGACY_REPORT" | grep -qi "melhora de 0.4" \
     && fail "ainda exibe a variação positiva como impacto de um incidente crítico" \
     || ok "variação positiva da entrega não vira 'impacto'"
 
-$COMPOSE exec -T backend sh -c "PYTHONPATH=/app python3" >/dev/null <<PYEOF
-from app.database import SessionLocal, Incident
-db = SessionLocal()
-for i in db.query(Incident).filter(Incident.fingerprint.like("%__test_legacy_impact__")).all():
-    db.delete(i)
-db.commit(); db.close()
-PYEOF
+# A limpeza roda no `trap EXIT` definido lá em cima e cobre TODOS os
+# fingerprints `__test_*` criados aqui, não só o legacy_impact.
 
 echo
 echo "Resultado: $PASS ok, $FAIL falha(s)"
