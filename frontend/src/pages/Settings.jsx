@@ -63,7 +63,7 @@ function Input({ value, onChange, type = 'text', placeholder = '' }) {
     <input
       type={type} value={value ?? ''} onChange={e => onChange(e.target.value)}
       placeholder={placeholder} style={inputStyle}
-      onFocus={e => { e.target.style.borderColor = 'var(--sky)'; e.target.style.boxShadow = '0 0 0 3px rgba(14,165,233,0.15)' }}
+      onFocus={e => { e.target.style.borderColor = 'var(--sky)'; e.target.style.boxShadow = '0 0 0 3px rgba(228,87,46,0.15)' }}
       onBlur={e  => { e.target.style.borderColor = 'var(--border)'; e.target.style.boxShadow = 'none' }}
     />
   )
@@ -673,7 +673,7 @@ export default function Settings() {
             background: saving ? 'var(--sky-dark)' : 'var(--sky)',
             color: '#fff', fontSize: 13, fontWeight: 700,
             padding: '10px 24px', cursor: saving ? 'not-allowed' : 'pointer',
-            boxShadow: saving ? 'none' : '0 1px 4px rgba(14,165,233,0.35)',
+            boxShadow: saving ? 'none' : '0 1px 4px rgba(228,87,46,0.35)',
             transition: 'background 0.15s', opacity: saving ? 0.7 : 1,
           }}
           onMouseEnter={e => { if (!saving) e.currentTarget.style.background = 'var(--sky-dark)' }}

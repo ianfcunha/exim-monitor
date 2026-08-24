@@ -4,7 +4,7 @@
  * única preferência realmente "geral" que existe hoje — antes só dava
  * pra trocar pelo dropdown do header).
  */
-import { AlertTriangle, Bell, ChevronRight, History, Moon, Server, Sparkles, Sun, Users } from 'lucide-react'
+import { AlertTriangle, Bell, ChevronRight, History, Layers, Moon, Server, Sparkles, Sun, Users } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 import { Switch } from '@/components/ui/switch'
 import { useAuth } from '../contexts/AuthContext'
@@ -17,7 +17,7 @@ const LINKS = [
   { to: '/settings/maintenance', Icon: AlertTriangle, title: 'Manutenção',   desc: 'Limpar toda a fila e restaurar mensagens da quarentena.',     adminOnly: true },
 ]
 
-export default function GeneralSettings({ isDark, onToggleTheme, advanced, onToggleAdvanced }) {
+export default function GeneralSettings({ isDark, onToggleTheme, advanced, onToggleAdvanced, classic, onToggleClassic }) {
   const { isAdmin } = useAuth()
   // Sessão 5: os cards tinham href sem `?server=`. O clique preservava o
   // escopo porque o SPA reescreve a URL depois, mas "copiar endereço do
@@ -43,6 +43,24 @@ export default function GeneralSettings({ isDark, onToggleTheme, advanced, onTog
           </span>
           <Switch checked={!!isDark} onCheckedChange={onToggleTheme} />
         </label>
+
+        {/* Sessão 6: o design "Tinta e Coral" é o padrão novo; a casca e
+            paleta anteriores (AVILI) não foram removidas — ficam aqui,
+            desligadas por padrão, pra quem preferir o visual anterior ou
+            se o design novo precisar ser revertido depois. */}
+        <div className="avili-divider" style={{ margin: '14px 0' }} />
+        <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', userSelect: 'none' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Layers size={15} color="var(--muted)" />
+            <span style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>Design clássico (AVILI)</span>
+          </span>
+          <Switch checked={!!classic} onCheckedChange={onToggleClassic} />
+        </label>
+        <p style={{ fontSize: 11, color: 'var(--dim)', marginTop: 8, lineHeight: 1.5 }}>
+          Volta à paleta e à navegação anteriores ao redesign "Mail IQ 2.0 ·
+          Tinta e Coral". Frota, Métricas e Plano de correção continuam
+          acessíveis pelo endereço direto mesmo com isto ligado.
+        </p>
       </div>
 
       {/* Sessão 3, T6 — "poda": estes recursos ficam fora do Painel

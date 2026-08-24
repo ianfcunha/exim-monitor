@@ -28,7 +28,7 @@ function StatusDot({ ok }) {
 // claros demais pra servir de fundo com texto branco).
 const GRADE_COLOR = {
   A: { bg: 'var(--ok-bg)', border: 'var(--ok-border)', fg: '#15803D' },
-  B: { bg: 'var(--accent-bg)', border: 'var(--accent-border)', fg: '#0369A1' },
+  B: { bg: 'var(--accent-bg)', border: 'var(--accent-border)', fg: '#9A3412' },
   C: { bg: 'var(--warn-bg)', border: 'var(--warn-border)', fg: '#B45309' },
   D: { bg: 'var(--warn-bg)', border: 'var(--warn-border)', fg: '#C2410C' },
   F: { bg: 'var(--danger-bg)', border: 'var(--danger-border)', fg: '#DC2626' },
@@ -158,7 +158,7 @@ export default function DeliverabilityCard() {
             color: 'var(--text)', outline: 'none', background: 'var(--surface)',
             transition: 'border-color 0.15s, box-shadow 0.15s',
           }}
-          onFocus={e => { e.target.style.borderColor = 'var(--sky)'; e.target.style.boxShadow = '0 0 0 3px rgba(14,165,233,0.15)' }}
+          onFocus={e => { e.target.style.borderColor = 'var(--sky)'; e.target.style.boxShadow = '0 0 0 3px rgba(228,87,46,0.15)' }}
           onBlur={e => { e.target.style.borderColor = 'var(--border)'; e.target.style.boxShadow = 'none' }}
         />
         <Button variant="outline" size="sm" onClick={check} disabled={loading}>

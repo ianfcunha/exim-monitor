@@ -159,8 +159,8 @@ export default function MetricCard({
         {Icon && (
           <div style={{
             width: 40, height: 40, borderRadius: 10, flexShrink: 0,
-            background: 'rgba(14,165,233,0.10)',
-            border: '1px solid rgba(14,165,233,0.18)',
+            background: 'rgba(228,87,46,0.10)',
+            border: '1px solid rgba(228,87,46,0.18)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
             <Icon size={18} color="var(--sky)" strokeWidth={1.8} />

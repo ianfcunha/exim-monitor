@@ -9,19 +9,19 @@ export default {
       colors: {
         // Paleta AVILI
         avili: {
-          sky:   '#0EA5E9',
-          cyan:  '#22D3EE',
-          night: '#080F1E',
-          navy:  '#0F1A2E',
-          deep:  '#061020',
+          sky:   '#E4572E',
+          cyan:  '#F2946B',
+          night: '#16233D',
+          navy:  '#1B2A48',
+          deep:  '#0F1830',
         },
         // Paleta de severidade
         severity: {
-          ok:       '#16a34a',
-          low:      '#0EA5E9',
-          medium:   '#d97706',
-          high:     '#ea580c',
-          critical: '#dc2626',
+          ok:       '#1E7355',
+          low:      '#E4572E',
+          medium:   '#B0731A',
+          high:     '#C2410C',
+          critical: '#A81E14',
         },
         // Tokens semânticos — consomem as CSS variables de index.css
         // (:root = tema claro, .dark = tema escuro). Usados pelos
@@ -70,8 +70,8 @@ export default {
         '2xl': '40px',
       },
       boxShadow: {
-        'glow-sky':  '0 0 20px rgba(14,165,233,0.20)',
-        'glow-cyan': '0 0 16px rgba(34,211,238,0.18)',
+        'glow-sky':  '0 0 20px rgba(228,87,46,0.20)',
+        'glow-cyan': '0 0 16px rgba(242,148,107,0.18)',
       },
       keyframes: {
         'accordion-down': { from: { height: '0' }, to: { height: 'var(--radix-accordion-content-height)' } },

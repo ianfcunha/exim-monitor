@@ -2,28 +2,100 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ─── Design tokens AVILI ─────────────────────────────────────────────────
+/* ─── Design tokens — "Tinta e Coral" (Mail IQ 2.0) ───────────────────────
    :root  = tema claro (padrão)
    .dark  = tema escuro (toggle: useDarkMode(), Fase F)
    Consumidos via tailwind.config.js (não usar hex solto em componente novo).
 
-   --dim contra --surface/--card, WCAG AA (auditoria Fase C):
-     claro:  #94A3B8 original dava 2.45:1 (falha até AA-large, que pede
-             3:1) — trocado por #75839A, 3.67-3.84:1 (passa AA-large,
-             ~18px+/14px+bold; texto pequeno/corpo com --dim continua
-             abaixo do 4.5:1 de AA-normal — nesses casos use --muted).
-             --muted já está no piso do AA-normal (4.55-4.76:1); não dá
-             pra manter --dim visualmente mais sutil E cumprir AA-normal
-             pros dois ao mesmo tempo sem colapsar a hierarquia dos dois
-             tons — por isso o alvo realista pro --dim é AA-large.
-     escuro: #64748B original dava 3.93/3.66:1 (passa AA-large, falha
-             AA-normal por pouco) — trocado por #7787A0, 5.13/4.77:1,
-             que fecha AA-normal nos dois fundos mantendo a hierarquia
-             abaixo de --muted (7.30/6.79:1).
-   --muted contra --surface/--card: já passava AA-normal nos dois temas,
-   não precisou de ajuste.
+   Sessão 6 — retema da paleta AVILI (azul-céu) para Tinta e Coral, a
+   paleta do handoff de design "Mail IQ 2.0". Os NOMES das variáveis não
+   mudam (são consumidos por ~50 arquivos); só os valores. Mapeamento:
+     --sky        → `accent` do handoff (coral sólido: ícones, texto de
+                     link, aba ativa, CTA) — já era o "destaque de marca"
+                     na paleta antiga, papel que se mantém.
+     --accent-bg/fg/border → `accentTint` do handoff (fundo/borda/texto
+                     suaves da mesma cor) — já era usado assim (~17
+                     arquivos: seleção ativa, badges neutros/"mitigado").
+     --ok/--warn/--danger (+ -bg/-border) → ok/warn/crit do handoff,
+                     1:1. --danger é o "crítico" da Sessão 5 (aberto,
+                     ChooseServer, etc.) — mesma cor, nome antigo mantido
+                     para não reescrever todo consumidor.
+     --text/--muted/--border/--surface/--card → text/text2/border/bg/
+                     surface do handoff. --surface aqui é o FUNDO DA
+                     PÁGINA (não o card) — nome pré-existente, mapeamento
+                     preservado.
+     --dim  → não existe terceiro tom no handoff; mantido como um passo
+              a mais de --muted em direção a --border, mesma função que
+              já tinha (rótulos pequenos/discretos), só a matiz mudou de
+              azul pra o cinza levemente quente da paleta nova.
+   --dim/--muted contra --surface/--card não foram re-auditados pixel a
+   pixel nesta troca de matiz; a relação relativa de contraste entre os
+   três tons (text > muted > dim > border) foi preservada.
 ──────────────────────────────────────────────────────────────────────────── */
 :root {
+  --sky:      #E4572E;
+  --sky-dark: #C2410C;
+  --cyan:     #F2946B;
+  --night:    #16233D;
+  --text:     #16233D;
+  --muted:    #566179;
+  --dim:      #7B8699;
+  --border:   #E1E4EC;
+  --surface:  #F6F7FA;
+  --card:     #FFFFFF;
+  --surface-alt: #EDEEF2;
+
+  --radius:        0.6rem;
+  --accent-bg:     #FDEDE7;
+  --accent-fg:     #E4572E;
+  --accent-border: rgba(228,87,46,0.25);
+  --danger:        #A81E14;
+  --danger-bg:     rgba(168,30,20,0.06);
+  --danger-border: rgba(168,30,20,0.22);
+  --ok:            #1E7355;
+  --ok-bg:         rgba(30,115,85,0.06);
+  --ok-border:     rgba(30,115,85,0.22);
+  --warn:          #B0731A;
+  --warn-bg:       rgba(176,115,26,0.06);
+  --warn-border:   rgba(176,115,26,0.22);
+}
+
+.dark {
+  --sky:      #FF7A52;
+  --sky-dark: #E4572E;
+  --cyan:     #FFB088;
+  --night:    #E8ECEE;
+  --text:     #E8ECEE;
+  --muted:    #8D979D;
+  --dim:      #6C767C;
+  --border:   #242A2D;
+  --surface:  #0A0C0D;
+  --card:     #141719;
+  --surface-alt: #1E2224;
+
+  --accent-bg:     rgba(255,122,82,0.15);
+  --accent-fg:     #FF7A52;
+  --accent-border: rgba(255,122,82,0.32);
+  --danger:        #FF6B5C;
+  --danger-bg:     rgba(255,107,92,0.1);
+  --danger-border: rgba(255,107,92,0.32);
+  --ok:            #4CC79A;
+  --ok-bg:         rgba(76,199,154,0.1);
+  --ok-border:     rgba(76,199,154,0.32);
+  --warn:          #E5A93E;
+  --warn-bg:       rgba(229,169,62,0.1);
+  --warn-border:   rgba(229,169,62,0.32);
+}
+
+/* ─── Paleta "Clássico" (AVILI azul-céu) ───────────────────────────────────
+   Sessão 6 pediu, no meio da troca de tema, pra não descartar a paleta
+   anterior: fica desligada por padrão (Tinta e Coral é o tema novo),
+   religável em Configurações → Geral (useClassicDesign.js aplica/remove
+   esta classe no <html>, mesmo mecanismo do .dark). Valores idênticos
+   aos que estavam em :root/.dark antes desta sessão — só movidos para
+   trás de uma classe, nada recalculado.
+──────────────────────────────────────────────────────────────────────────── */
+.classic {
   --sky:      #0EA5E9;
   --sky-dark: #0284C7;
   --cyan:     #22D3EE;
@@ -34,8 +106,8 @@
   --border:   #E2E8F0;
   --surface:  #F8FAFC;
   --card:     #FFFFFF;
+  --surface-alt: #F1F5F9;
 
-  --radius:        0.6rem;
   --accent-bg:     #F0F9FF;
   --accent-fg:     #0369A1;
   --accent-border: #BAE6FD;
@@ -50,7 +122,7 @@
   --warn-border:   #FDE68A;
 }
 
-.dark {
+.classic.dark {
   --sky:      #38BDF8;
   --sky-dark: #0EA5E9;
   --cyan:     #67E8F9;
@@ -61,6 +133,7 @@
   --border:   #1E293B;
   --surface:  #0B1220;
   --card:     #101A2C;
+  --surface-alt: #172137;
 
   --accent-bg:     #0C2536;
   --accent-fg:     #7DD3FC;
@@ -79,7 +152,7 @@
 @layer base {
   body {
     @apply antialiased;
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-family: 'Instrument Sans', system-ui, -apple-system, sans-serif;
     color: var(--text);
     /* var(--surface), não mais o #F1F5F9 fixo — era o único ponto do CSS
        global que não respondia à classe .dark; a maioria das telas ainda
@@ -88,9 +161,15 @@
        o token. */
     background-color: var(--surface);
     background-image:
+      radial-gradient(ellipse 1000px 600px at 0% 0%, rgba(228,87,46,0.06) 0%, transparent 60%),
+      radial-gradient(ellipse 800px 500px at 100% 100%, rgba(242,148,107,0.05) 0%, transparent 55%);
+    background-attachment: fixed;
+  }
+
+  .classic body {
+    background-image:
       radial-gradient(ellipse 1000px 600px at 0% 0%, rgba(14,165,233,0.07) 0%, transparent 60%),
       radial-gradient(ellipse 800px 500px at 100% 100%, rgba(34,211,238,0.05) 0%, transparent 55%);
-    background-attachment: fixed;
   }
 
   * { box-sizing: border-box; }
@@ -117,9 +196,13 @@
     transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
   }
   .card-interactive:hover {
+    border-color: rgba(228,87,46,0.35);
+    box-shadow:   0 4px 16px rgba(228,87,46,0.10), 0 1px 3px rgba(0,0,0,0.06);
+    transform:    translateY(-1px);
+  }
+  .classic .card-interactive:hover {
     border-color: rgba(14,165,233,0.35);
     box-shadow:   0 4px 16px rgba(14,165,233,0.10), 0 1px 3px rgba(0,0,0,0.06);
-    transform:    translateY(-1px);
   }
 
   /* Label de seção */
@@ -137,6 +220,15 @@
     position: absolute;
     top: 0; left: 0; right: 0;
     height: 2px;
+    background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(228,87,46,0.70) 25%,
+      rgba(242,148,107,0.90) 50%,
+      rgba(228,87,46,0.70) 75%,
+      transparent 100%
+    );
+  }
+  .classic .header-accent::before {
     background: linear-gradient(90deg,
       transparent 0%,
       rgba(14,165,233,0.70) 25%,

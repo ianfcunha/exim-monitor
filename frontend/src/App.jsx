@@ -6,14 +6,18 @@ import { AuthProvider } from './contexts/AuthContext'
 import { ServerProvider } from './contexts/ServerContext'
 import { ToastProvider } from './contexts/ToastContext'
 import { useAdvancedMode } from './hooks/useAdvancedMode'
+import { useClassicDesign } from './hooks/useClassicDesign'
 import { useDarkMode } from './hooks/useDarkMode'
 import ActionHistoryPage from './pages/ActionHistoryPage'
 import Dashboard from './pages/Dashboard'
+import FrotaPage from './pages/FrotaPage'
 import GeneralSettings from './pages/GeneralSettings'
 import IncidentReportPage from './pages/IncidentReportPage'
 import InviteAccept from './pages/InviteAccept'
 import Login from './pages/Login'
 import MaintenancePage from './pages/MaintenancePage'
+import MetricasPage from './pages/MetricasPage'
+import PlanoPage from './pages/PlanoPage'
 import ReputationPage from './pages/ReputationPage'
 import ServersPage from './pages/ServersPage'
 import Settings from './pages/Settings'
@@ -42,6 +46,11 @@ export default function App() {
   // Sessão 3, T6 — "poda": gráficos históricos, log viewer e atalhos
   // fora da Triagem só aparecem com isto ligado (padrão: desligado).
   const { advanced, toggleAdvanced } = useAdvancedMode()
+  // Sessão 6: o design "Tinta e Coral" é o padrão; a casca/paleta
+  // anteriores (AVILI) ficam desligadas, religáveis em Configurações →
+  // Geral — mesmo motivo de existir do useAdvancedMode (preferência de
+  // quem usa, e disponível se precisarmos reverter depois).
+  const { classic, toggleClassic } = useClassicDesign()
 
   useEffect(() => {
     if (token) localStorage.setItem('exim_token', token)
@@ -57,8 +66,12 @@ export default function App() {
   if (!token) return <Login onLogin={setToken} />
 
   const logout = () => setToken(null)
+  // Sessão 6: o toggle de tema mora na navbar (casca única), não só
+  // dentro de Configurações → Geral — por isso vai pra AppShell em toda
+  // rota, não só na de Settings (que ainda o repassa pra GeneralSettings
+  // via `props`, de onde o controle antigo continua funcionando também).
   const shell = (page, props = {}) => (
-    <AppShell onLogout={logout} {...props}>{page}</AppShell>
+    <AppShell onLogout={logout} isDark={isDark} onToggleTheme={toggleTheme} classic={classic} {...props}>{page}</AppShell>
   )
 
   return (
@@ -85,6 +98,12 @@ export default function App() {
                 que o dono do host encaminha ao cliente dele. */}
             <Route path="/incidents/:id/report" element={<IncidentReportPage />} />
 
+            {/* Sessão 6 — telas do handoff Mail IQ 2.0 */}
+            <Route path="/frota"    element={shell(<FrotaPage />)} />
+            <Route path="/metricas" element={shell(<MetricasPage />)} />
+            <Route path="/plano"     element={shell(<PlanoPage />)} />
+            <Route path="/plano/:id" element={shell(<PlanoPage />)} />
+
             <Route path="/reputation" element={shell(<ReputationPage />)} />
             {/* O painel clássico deixou de ser um destino e virou a aba
                 "Fila". /dashboard continua funcionando para links antigos. */}
@@ -92,7 +111,7 @@ export default function App() {
             <Route path="/dashboard" element={<ScopedRedirect to="/queue" />} />
 
             <Route path="/settings" element={shell(<SettingsLayout />)}>
-              <Route index          element={<GeneralSettings isDark={isDark} onToggleTheme={toggleTheme} advanced={advanced} onToggleAdvanced={toggleAdvanced} />} />
+              <Route index          element={<GeneralSettings isDark={isDark} onToggleTheme={toggleTheme} advanced={advanced} onToggleAdvanced={toggleAdvanced} classic={classic} onToggleClassic={toggleClassic} />} />
               <Route path="alerts"  element={<Settings />} />
               <Route path="servers" element={<ServersPage />} />
               <Route path="users"   element={<UsersPage />} />

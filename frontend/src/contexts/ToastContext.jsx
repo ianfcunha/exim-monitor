@@ -53,18 +53,18 @@ function ToastStack({ toasts, onRemove }) {
             minWidth: 260, maxWidth: 380,
             borderRadius: 12, padding: '11px 16px',
             fontSize: 13, fontWeight: 400, cursor: 'pointer',
-            background: '#fff',
-            border: t.type === 'ok' ? '1px solid #BAE6FD' : '1px solid #FECACA',
+            background: 'var(--card)',
+            border: t.type === 'ok' ? '1px solid var(--accent-border)' : '1px solid var(--danger-border)',
             boxShadow: '0 4px 16px rgba(0,0,0,0.10)',
-            color: t.type === 'ok' ? '#0369A1' : '#991B1B',
+            color: t.type === 'ok' ? 'var(--accent-fg)' : 'var(--danger)',
           }}
         >
           {t.type === 'ok'
-            ? <CheckCircle2 size={15} style={{ flexShrink: 0, color: '#0EA5E9' }} />
-            : <XCircle      size={15} style={{ flexShrink: 0, color: '#EF4444' }} />
+            ? <CheckCircle2 size={15} style={{ flexShrink: 0, color: 'var(--sky)' }} />
+            : <XCircle      size={15} style={{ flexShrink: 0, color: 'var(--danger)' }} />
           }
-          <span style={{ flex: 1, lineHeight: 1.4, color: '#0F172A' }}>{t.msg}</span>
-          <X size={13} style={{ flexShrink: 0, opacity: 0.35, color: '#0F172A' }} />
+          <span style={{ flex: 1, lineHeight: 1.4, color: 'var(--text)' }}>{t.msg}</span>
+          <X size={13} style={{ flexShrink: 0, opacity: 0.35, color: 'var(--text)' }} />
         </div>
       ))}
     </div>

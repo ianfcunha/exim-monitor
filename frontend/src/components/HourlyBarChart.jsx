@@ -21,7 +21,7 @@ const tooltipStyle = {
   },
   labelStyle: { color: 'var(--muted)', fontSize: 11, marginBottom: 4 },
   itemStyle: { fontSize: 11, color: 'var(--text)' },
-  cursor: { fill: 'rgba(14,165,233,0.04)' },
+  cursor: { fill: 'rgba(228,87,46,0.04)' },
 }
 
 export default function HourlyBarChart({ data = [], loading = false }) {

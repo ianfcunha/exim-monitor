@@ -10,9 +10,9 @@ import { Field } from '@/components/primitives/field'
 function LogoMark({ size = 28 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 60 60" fill="none" aria-hidden>
-      <path d="M10 46 L30 16 L50 46" fill="none" stroke="#0F172A" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
-      <path d="M18 36 L30 26 L42 36" fill="none" stroke="#0EA5E9" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
-      <circle cx="30" cy="16" r="2.5" fill="#22D3EE"/>
+      <path d="M10 46 L30 16 L50 46" fill="none" stroke="var(--text)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M18 36 L30 26 L42 36" fill="none" stroke="var(--sky)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+      <circle cx="30" cy="16" r="2.5" fill="var(--sky)"/>
     </svg>
   )
 }
@@ -42,8 +42,8 @@ export default function Login({ onLogin }) {
       className="flex min-h-screen items-center justify-center bg-surface px-4"
       style={{
         backgroundImage: `
-          radial-gradient(ellipse 700px 500px at 15% 15%, rgba(14,165,233,0.10) 0%, transparent 60%),
-          radial-gradient(ellipse 600px 400px at 85% 85%, rgba(34,211,238,0.07) 0%, transparent 55%)
+          radial-gradient(ellipse 700px 500px at 15% 15%, rgba(228,87,46,0.10) 0%, transparent 60%),
+          radial-gradient(ellipse 600px 400px at 85% 85%, rgba(242,148,107,0.07) 0%, transparent 55%)
         `,
         backgroundAttachment: 'fixed',
       }}

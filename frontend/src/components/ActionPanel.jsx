@@ -248,7 +248,7 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
                   cursor: isDisabled ? 'not-allowed' : 'pointer',
                   transition: 'background 0.15s, opacity 0.15s',
                   opacity: isDisabled && !isRunning ? 0.45 : 1,
-                  boxShadow: isRecommended ? '0 0 0 3px rgba(14,165,233,0.12)' : 'none',
+                  boxShadow: isRecommended ? '0 0 0 3px rgba(228,87,46,0.12)' : 'none',
                 }}
                 onMouseEnter={e => { if (!isDisabled) e.currentTarget.style.background = isRecommended ? 'color-mix(in srgb, var(--sky) 22%, var(--card))' : c.hoverBg }}
                 onMouseLeave={e => { e.currentTarget.style.background = isRecommended ? 'var(--accent-bg)' : c.bg }}
@@ -317,7 +317,7 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
                   cursor: isDisabled ? 'not-allowed' : 'pointer',
                   transition: 'background 0.15s, opacity 0.15s',
                   opacity: isDisabled && !isRunning ? 0.45 : 1,
-                  boxShadow: isRecommended ? '0 0 0 3px rgba(14,165,233,0.12)' : 'none',
+                  boxShadow: isRecommended ? '0 0 0 3px rgba(228,87,46,0.12)' : 'none',
                 }}
                 onMouseEnter={e => { if (!isDisabled) e.currentTarget.style.background = isRecommended ? 'color-mix(in srgb, var(--sky) 22%, var(--card))' : c.hoverBg }}
                 onMouseLeave={e => { e.currentTarget.style.background = isRecommended ? 'var(--accent-bg)' : c.bg }}
@@ -385,7 +385,7 @@ export default function ActionPanel({ onActionComplete, recommendedActions = [] 
                   e.target.style.borderColor = paramError ? 'var(--danger)' : 'var(--sky)'
                   e.target.style.boxShadow = paramError
                     ? '0 0 0 3px rgba(248,113,113,0.30)'
-                    : '0 0 0 3px rgba(14,165,233,0.20)'
+                    : '0 0 0 3px rgba(228,87,46,0.20)'
                 }}
                 onBlur={e => {
                   e.target.style.borderColor = paramError ? 'var(--danger)' : 'var(--danger-border)'

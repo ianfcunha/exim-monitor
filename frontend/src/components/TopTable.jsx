@@ -4,7 +4,7 @@
  */
 
 const ACCENT = {
-  sky:   { bar0: 'var(--sky)', bar1: '#38BDF8', bar2: 'var(--accent-border)', rank0bg: 'var(--sky)', rank0text: '#fff' },
+  sky:   { bar0: 'var(--sky)', bar1: 'var(--cyan)', bar2: 'var(--accent-border)', rank0bg: 'var(--sky)', rank0text: '#fff' },
   red:   { bar0: 'var(--danger)', bar1: 'var(--danger)', bar2: 'var(--danger-border)', rank0bg: 'var(--danger)', rank0text: '#fff' },
   amber: { bar0: 'var(--warn)', bar1: '#FCD34D', bar2: 'var(--warn-border)', rank0bg: 'var(--warn)', rank0text: '#fff' },
 }

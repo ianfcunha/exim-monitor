@@ -35,7 +35,7 @@ const TYPE_CONFIG = {
   delivered: { label: 'Entregues', color: 'var(--ok)', bg: 'rgba(22,163,74,0.08)',  dot: 'var(--ok)' },
   rejected:  { label: 'Rejeitados', color: 'var(--danger)', bg: 'rgba(220,38,38,0.08)', dot: 'var(--danger)' },
   deferred:  { label: 'Deferidos', color: 'var(--warn)', bg: 'rgba(217,119,6,0.08)',  dot: 'var(--warn)' },
-  sent:      { label: 'Enviados', color: 'var(--sky)', bg: 'rgba(14,165,233,0.08)',  dot: 'var(--sky)' },
+  sent:      { label: 'Enviados', color: 'var(--sky)', bg: 'rgba(228,87,46,0.08)',  dot: 'var(--sky)' },
   other:     { label: 'Outros', color: 'var(--muted)', bg: 'transparent',              dot: 'var(--dim)' },
 }
 
@@ -303,7 +303,7 @@ export default function LogViewerDrawer({ onClose }) {
               display: 'flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 999,
               fontSize: 11, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap',
               border: filter === 'all' ? '1px solid var(--sky)' : '1px solid var(--border)',
-              background: filter === 'all' ? 'rgba(14,165,233,0.08)' : '#fff',
+              background: filter === 'all' ? 'rgba(228,87,46,0.08)' : '#fff',
               color: filter === 'all' ? 'var(--accent-fg)' : 'var(--muted)', transition: 'all 0.15s',
             }}>
               Todos
@@ -322,7 +322,7 @@ export default function LogViewerDrawer({ onClose }) {
             type="text" placeholder="Filtrar por texto…" value={search}
             onChange={e => setSearch(e.target.value)}
             style={{ width: '100%', padding: '6px 10px', borderRadius: 7, fontSize: 12, border: '1px solid var(--border)', outline: 'none', color: 'var(--text)', background: 'var(--surface)', boxSizing: 'border-box', transition: 'border-color 0.15s, box-shadow 0.15s' }}
-            onFocus={e => { e.target.style.borderColor = 'var(--sky)'; e.target.style.boxShadow = '0 0 0 3px rgba(14,165,233,0.15)' }}
+            onFocus={e => { e.target.style.borderColor = 'var(--sky)'; e.target.style.boxShadow = '0 0 0 3px rgba(228,87,46,0.15)' }}
             onBlur={e => { e.target.style.borderColor = 'var(--border)'; e.target.style.boxShadow = 'none' }}
           />
 

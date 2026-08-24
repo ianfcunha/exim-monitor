@@ -187,7 +187,7 @@ export default function MessagesDrawer({ cardType, onClose }) {
 
         {/* Header */}
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-          <div style={{ width: 34, height: 34, borderRadius: 9, flexShrink: 0, background: 'rgba(14,165,233,0.10)', border: '1px solid rgba(14,165,233,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: 34, height: 34, borderRadius: 9, flexShrink: 0, background: 'rgba(228,87,46,0.10)', border: '1px solid rgba(228,87,46,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <IconComp size={16} color="var(--sky)" />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>

@@ -10,7 +10,7 @@ function LogoMark({ size = 22 }) {
     <svg width={size} height={size} viewBox="0 0 60 60" fill="none" aria-hidden>
       <path d="M10 46 L30 16 L50 46" fill="none" stroke="var(--text)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
       <path d="M18 36 L30 26 L42 36" fill="none" stroke="var(--sky)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
-      <circle cx="30" cy="16" r="2.5" fill="#22D3EE"/>
+      <circle cx="30" cy="16" r="2.5" fill="var(--sky)"/>
     </svg>
   )
 }
@@ -146,7 +146,7 @@ export default function InviteAccept({ token, onDone }) {
             type="text" value={username} onChange={e => setUsername(e.target.value)}
             placeholder="seunome" required minLength={3} maxLength={50}
             style={inputStyle}
-            onFocus={e => { e.target.style.borderColor = 'var(--sky)'; e.target.style.boxShadow = '0 0 0 3px rgba(14,165,233,0.10)' }}
+            onFocus={e => { e.target.style.borderColor = 'var(--sky)'; e.target.style.boxShadow = '0 0 0 3px rgba(228,87,46,0.10)' }}
             onBlur={e  => { e.target.style.borderColor = 'var(--border)'; e.target.style.boxShadow = 'none' }}
           />
         </div>
@@ -159,7 +159,7 @@ export default function InviteAccept({ token, onDone }) {
             type="password" value={password} onChange={e => setPassword(e.target.value)}
             placeholder="Mínimo 8 caracteres" required minLength={8}
             style={inputStyle}
-            onFocus={e => { e.target.style.borderColor = 'var(--sky)'; e.target.style.boxShadow = '0 0 0 3px rgba(14,165,233,0.10)' }}
+            onFocus={e => { e.target.style.borderColor = 'var(--sky)'; e.target.style.boxShadow = '0 0 0 3px rgba(228,87,46,0.10)' }}
             onBlur={e  => { e.target.style.borderColor = 'var(--border)'; e.target.style.boxShadow = 'none' }}
           />
         </div>
@@ -172,7 +172,7 @@ export default function InviteAccept({ token, onDone }) {
             type="password" value={password2} onChange={e => setPassword2(e.target.value)}
             placeholder="Repita a senha" required
             style={inputStyle}
-            onFocus={e => { e.target.style.borderColor = 'var(--sky)'; e.target.style.boxShadow = '0 0 0 3px rgba(14,165,233,0.10)' }}
+            onFocus={e => { e.target.style.borderColor = 'var(--sky)'; e.target.style.boxShadow = '0 0 0 3px rgba(228,87,46,0.10)' }}
             onBlur={e  => { e.target.style.borderColor = 'var(--border)'; e.target.style.boxShadow = 'none' }}
           />
         </div>
