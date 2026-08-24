@@ -108,8 +108,15 @@ export const exportActionHistory = (params, serverId = null) =>
   })
 
 // ── Historico (com server_id) ──────────────────────────────────────────────
+// A barra no fim é proposital: a rota no backend é "/api/history/" (o
+// router monta GET "/" sob o prefixo "/api/history"). Sem a barra, o
+// FastAPI responde 307 pra a forma com barra — atrás do proxy real esse
+// redirect sai como "http://" (sem TLS), e o navegador bloqueia como
+// conteúdo misto numa página https, silenciosamente (a chamada falha,
+// cai no .catch(), a tela só mostra "sem dados"). Chamando a URL final
+// direto, o redirect nunca acontece.
 export const fetchHistory = (hours = 24, mode = 'quick', serverId = null) =>
-  api.get('/history', { params: { hours, mode, ...(serverId ? { server_id: serverId } : {}) } }).then(r => r.data)
+  api.get('/history/', { params: { hours, mode, ...(serverId ? { server_id: serverId } : {}) } }).then(r => r.data)
 
 export const fetchSummary = (serverId = null) =>
   api.get('/history/summary', { params: serverId ? { server_id: serverId } : {} }).then(r => r.data)
