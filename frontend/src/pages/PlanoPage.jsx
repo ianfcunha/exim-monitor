@@ -22,7 +22,7 @@
  * fixo que o mockup inventa.
  */
 import {
-  AlertTriangle, Check, CheckCircle2, ClipboardList, Loader2, ShieldOff,
+  Check, CheckCircle2, ClipboardList, Loader2, ShieldOff,
 } from 'lucide-react'
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
@@ -32,6 +32,9 @@ import {
 } from '../api/client'
 import { ACTIONS, CAP_LABELS } from '../components/ActionPanel'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
 import {
   SEVERITY_STYLE, STATUS_LABELS, fmtAge, incidentTitle,
 } from '../components/incidents/incidentLabels'
@@ -188,16 +191,29 @@ function missingCapReason(action, capabilities) {
   return `Este servidor está em modo somente leitura para esta ação — falta permissão para ${missing.map(c => CAP_LABELS[c] ?? c).join(' e ')}.`
 }
 
-// ── Ações disponíveis — seleciona UMA opção (a sugerida vem marcada e
-// pré-selecionada), gera o preview e só aplica com confirmação explícita.
-// Sessão 6: antes só oferecia a correção sugerida sozinha; agora reúne o
-// mesmo catálogo do ActionPanel (Fila) — quem está vendo o plano pode
-// escolher uma alternativa se a sugestão não servir, sem precisar trocar
-// de tela. Aplicar a sugerida usa a rota específica do incidente (marca
-// `mitigado` de verdade); as demais são ações gerais do servidor — não
-// mudam o status do incidente sozinhas, por isso o link "Confirmar
-// ciência"/"Resolver" no banner continua sendo a forma de fechar o ciclo
-// depois de uma ação que não é a sugerida.
+// Quais ações do catálogo do ActionPanel fazem sentido para cada tipo de
+// incidente — sem isto, "Bloquear IP"/"Bloquear remetente" apareciam
+// como opção pra uma fila travada, o que não tem relação nenhuma com a
+// causa. Chave é `${type}:${subtype}`; tipos sem entrada aqui (reputação,
+// adiamento por destino) só mostram a sugerida, se houver uma.
+const RELEVANT_ACTION_IDS = {
+  'queue_stuck:fila':   ['retry-queue', 'clean-sender', 'clean-bounces'],
+  'queue_stuck:frozen': ['clean-frozen', 'retry-queue'],
+  'auth_abuse:conta':   ['block-sender'],
+}
+
+// ── Ações disponíveis — marca uma ou mais opções (a sugerida vem
+// pré-marcada), gera o preview de todas de uma vez e só aplica depois de
+// confirmar num popup — nada roda antes disso. Sessão 6/retorno: antes
+// era seleção única (rádio) com o catálogo inteiro do ActionPanel
+// (Fila); agora é seleção múltipla (checkbox) restrita ao que faz
+// sentido pro tipo do incidente (RELEVANT_ACTION_IDS), e um botão único
+// "Aplicar plano de correção" cobre 1 ou várias ações marcadas. Aplicar
+// a sugerida usa a rota específica do incidente (marca `mitigado` de
+// verdade); as demais são ações gerais do servidor — não mudam o status
+// do incidente sozinhas, por isso "Confirmar ciência"/"Resolver" no
+// banner continuam sendo a forma de fechar o ciclo quando a sugerida não
+// foi uma das marcadas.
 function ActionOptions({ incident, server, isResolved, onApplied, onPhaseChange }) {
   const toast = useToast()
   const suggested = incident.suggested_fix?.action
@@ -208,11 +224,12 @@ function ActionOptions({ incident, server, isResolved, onApplied, onPhaseChange 
       const meta = ACTIONS.find(a => a.id === suggested.action)
       list.push({
         id: suggested.action, label: meta?.label ?? suggested.action, Icon: meta?.Icon ?? Check,
-        requiredCaps: meta?.requiredCaps ?? [], isSuggested: true, fixedParam: suggested.param ?? null,
+        requiredCaps: meta?.requiredCaps ?? [], isSuggested: true,
       })
     }
+    const relevantIds = RELEVANT_ACTION_IDS[`${incident.type}:${incident.subtype ?? ''}`] ?? []
     for (const a of ACTIONS) {
-      if (a.id === suggested?.action) continue
+      if (a.id === suggested?.action || !relevantIds.includes(a.id)) continue
       list.push({
         id: a.id, label: a.label, Icon: a.Icon, requiredCaps: a.requiredCaps,
         isSuggested: false, hasParam: !!a.param, placeholder: a.placeholder, paramKind: a.param,
@@ -220,15 +237,16 @@ function ActionOptions({ incident, server, isResolved, onApplied, onPhaseChange 
       })
     }
     return list
-  }, [suggested])
+  }, [suggested, incident.type, incident.subtype])
 
-  const [selectedId, setSelectedId] = useState(suggested?.action ?? null)
-  const [paramValue, setParamValue] = useState('')
-  const [paramError, setParamError] = useState('')
-  const [snapshot, setSnapshot]     = useState(true)
-  const [plan, setPlan]             = useState(null)
-  const [planning, setPlanning]     = useState(false)
-  const [applying, setApplying]     = useState(false)
+  const [selectedIds, setSelectedIds] = useState(() => new Set(suggested?.action ? [suggested.action] : []))
+  const [paramValues, setParamValues] = useState({})
+  const [paramErrors, setParamErrors] = useState({})
+  const [snapshot, setSnapshot]         = useState(true)
+  const [planningAll, setPlanningAll]   = useState(false)
+  const [applyingAll, setApplyingAll]   = useState(false)
+  // null = popup fechado; array = previews prontos, popup de confirmação aberto
+  const [previews, setPreviews] = useState(null)
 
   const setPhase = (p) => {
     onPhaseChange?.(p)
@@ -237,11 +255,13 @@ function ActionOptions({ incident, server, isResolved, onApplied, onPhaseChange 
     }
   }
 
-  const selected = options.find(o => o.id === selectedId)
-
-  const select = (opt) => {
-    setSelectedId(opt.id); setPlan(null); setParamError('')
-    setParamValue('')
+  const toggle = (opt) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      next.has(opt.id) ? next.delete(opt.id) : next.add(opt.id)
+      return next
+    })
+    setParamErrors(prev => ({ ...prev, [opt.id]: '' }))
   }
 
   const capReason = (opt) => {
@@ -252,56 +272,80 @@ function ActionOptions({ incident, server, isResolved, onApplied, onPhaseChange 
     return missingCapReason(opt, server.capabilities)
   }
 
-  const validateParam = () => {
-    if (!selected?.hasParam) return true
-    const v = paramValue.trim()
-    if (!v) { setParamError('Campo obrigatório'); return false }
-    if (selected.paramKind === 'ip') {
-      const ipv4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(v)
-      const ipv6 = /^[0-9a-fA-F:]+$/.test(v) && v.includes(':')
-      if (!ipv4 && !ipv6) { setParamError('IP inválido (ex: 192.168.0.1)'); return false }
+  const selected = options.filter(o => selectedIds.has(o.id))
+
+  const validateParams = () => {
+    const errors = {}
+    let ok = true
+    for (const opt of selected) {
+      if (!opt.hasParam) continue
+      const v = (paramValues[opt.id] || '').trim()
+      if (!v) { errors[opt.id] = 'Campo obrigatório'; ok = false; continue }
+      if (opt.paramKind === 'ip') {
+        const ipv4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(v)
+        const ipv6 = /^[0-9a-fA-F:]+$/.test(v) && v.includes(':')
+        if (!ipv4 && !ipv6) { errors[opt.id] = 'IP inválido (ex: 192.168.0.1)'; ok = false }
+      }
+      if (opt.paramKind === 'email') {
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) { errors[opt.id] = 'Endereço inválido'; ok = false }
+      }
     }
-    if (selected.paramKind === 'email') {
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) { setParamError('Endereço inválido'); return false }
-    }
-    return true
+    setParamErrors(errors)
+    return ok
   }
 
-  const requestPlan = async () => {
-    if (!selected || capReason(selected)) return
-    if (!validateParam()) return
-    setPlanning(true); setPhase('aguardando')
-    try {
-      const res = selected.isSuggested
-        ? await planIncidentFix(incident.id)
-        : await planAction(selected.id, paramValue.trim(), server.id)
-      setPlan(res)
-      onPhaseChange?.('ocioso')
-    } catch (err) {
-      toast({ type: 'err', msg: err?.response?.data?.detail || err.message || 'Erro ao planejar.' })
+  // Gera o preview real de cada ação marcada (plan_id de verdade, não
+  // texto inventado) e só então abre o popup de confirmação — se alguma
+  // falhar ao planejar, nenhuma aplica e o popup nem chega a abrir.
+  const requestPlans = async () => {
+    if (selected.length === 0 || selected.some(capReason)) return
+    if (!validateParams()) return
+    setPlanningAll(true); setPhase('aguardando')
+    const results = []
+    for (const opt of selected) {
+      try {
+        const res = opt.isSuggested
+          ? await planIncidentFix(incident.id)
+          : await planAction(opt.id, (paramValues[opt.id] || '').trim(), server.id)
+        results.push({ opt, plan: res })
+      } catch (err) {
+        results.push({ opt, plan: null, error: err?.response?.data?.detail || err.message || 'Erro ao planejar.' })
+      }
+    }
+    setPlanningAll(false)
+    const failed = results.filter(r => r.error)
+    if (failed.length > 0) {
+      toast({ type: 'err', msg: `Não deu pra planejar: ${failed.map(r => `${r.opt.label} (${r.error})`).join(' · ')}` })
       setPhase('erro')
-    } finally {
-      setPlanning(false)
+      return
     }
+    onPhaseChange?.('ocioso')
+    setPreviews(results)
   }
 
-  const applySelected = async () => {
-    if (!plan || !selected) return
-    setApplying(true); setPhase('agindo')
-    try {
-      const res = selected.isSuggested
-        ? await applyIncidentFix(incident.id, plan.plan_id)
-        : await runAction(selected.id, paramValue.trim(), server.id, snapshot, plan.plan_id)
-      toast({ type: 'ok', msg: res.message || `${selected.label} concluído.` })
-      setPlan(null)
+  const applyAll = async () => {
+    if (!previews) return
+    setApplyingAll(true); setPhase('agindo')
+    const failures = []
+    for (const { opt, plan } of previews) {
+      try {
+        if (opt.isSuggested) await applyIncidentFix(incident.id, plan.plan_id)
+        else await runAction(opt.id, (paramValues[opt.id] || '').trim(), server.id, snapshot, plan.plan_id)
+      } catch (err) {
+        failures.push(`${opt.label}: ${err?.response?.data?.detail || err.message || 'erro'}`)
+      }
+    }
+    const applied = previews.length - failures.length
+    setApplyingAll(false)
+    setPreviews(null)
+    if (failures.length === 0) {
+      toast({ type: 'ok', msg: previews.length === 1 ? `${previews[0].opt.label} concluído.` : `${applied} ações aplicadas com sucesso.` })
       setPhase('concluido')
-      onApplied?.()
-    } catch (err) {
-      toast({ type: 'err', msg: err?.response?.data?.detail || err.message || 'Erro ao aplicar.' })
+    } else {
+      toast({ type: 'err', msg: `${applied} aplicada(s), falhou: ${failures.join(' · ')}` })
       setPhase('erro')
-    } finally {
-      setApplying(false)
     }
+    onApplied?.()
   }
 
   if (isResolved) return null
@@ -316,96 +360,102 @@ function ActionOptions({ incident, server, isResolved, onApplied, onPhaseChange 
       {options.length === 0 ? (
         <p style={{ fontSize: 11, color: 'var(--dim)' }}>Nenhuma ação executável de um clique para este tipo de incidente.</p>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
-          {options.map(opt => {
-            const reason = capReason(opt)
-            const isSelected = selectedId === opt.id
-            return (
-              <label
-                key={opt.id}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 9,
-                  border: `1.5px solid ${isSelected ? 'var(--sky)' : 'var(--border)'}`,
-                  background: isSelected ? 'var(--accent-bg)' : 'var(--surface)',
-                  cursor: reason ? 'not-allowed' : 'pointer', opacity: reason ? 0.5 : 1,
-                }}
-              >
-                <input
-                  type="radio" name="plano-action" checked={isSelected} disabled={!!reason}
-                  onChange={() => select(opt)} style={{ accentColor: 'var(--sky)', flexShrink: 0 }}
-                />
-                <opt.Icon size={13} color={isSelected ? 'var(--accent-fg)' : 'var(--muted)'} style={{ flexShrink: 0 }} />
-                <span style={{ fontSize: 12.5, fontWeight: isSelected ? 600 : 500, color: isSelected ? 'var(--accent-fg)' : 'var(--text)', flex: 1 }}>
-                  {opt.label}
-                </span>
-                {opt.isSuggested && (
-                  <span style={{
-                    fontSize: 9.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase',
-                    padding: '2px 7px', borderRadius: 999, background: 'var(--sky)', color: '#fff', flexShrink: 0,
-                  }}>
-                    Recomendada
-                  </span>
-                )}
-                {reason && (
-                  <span style={{ fontSize: 10.5, color: 'var(--dim)', flexShrink: 0, maxWidth: 220, textAlign: 'right' }}>{reason}</span>
-                )}
-              </label>
-            )
-          })}
-        </div>
-      )}
-
-      {selected && !plan && selected.hasParam && (
-        <div style={{ marginBottom: 12 }}>
-          <input
-            type="text" value={paramValue} placeholder={selected.placeholder || ''}
-            onChange={e => { setParamValue(e.target.value); setParamError('') }}
-            onKeyDown={e => e.key === 'Enter' && requestPlan()}
-            style={{
-              width: '100%', boxSizing: 'border-box', borderRadius: 7,
-              border: `1px solid ${paramError ? 'var(--danger)' : 'var(--border)'}`,
-              padding: '7px 10px', fontSize: 12.5, color: 'var(--text)', background: 'var(--card)', outline: 'none',
-            }}
-          />
-          {paramError && <span style={{ fontSize: 10, color: 'var(--danger)', marginTop: 3, display: 'block' }}>{paramError}</span>}
-        </div>
-      )}
-
-      {selected && !plan && selected.destructive && (
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, fontSize: 11.5, color: 'var(--muted)', cursor: 'pointer', userSelect: 'none' }}>
-          <input type="checkbox" checked={snapshot} onChange={e => setSnapshot(e.target.checked)} style={{ width: 13, height: 13, accentColor: 'var(--sky)' }} />
-          Registrar o estado atual antes de executar (recomendado)
-        </label>
-      )}
-
-      {selected && !plan && !capReason(selected) && (
-        <Button size="sm" onClick={requestPlan} disabled={planning}>
-          {planning ? 'Gerando preview…' : `Ver plano — ${selected.label}`}
-        </Button>
-      )}
-
-      {plan && (
-        <div style={{ borderRadius: 10, padding: '12px 14px', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <AlertTriangle size={13} color="var(--danger)" />
-            <span style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 600 }}>Preview — nada foi alterado ainda</span>
+        <>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
+            {options.map(opt => {
+              const reason = capReason(opt)
+              const isChecked = selectedIds.has(opt.id)
+              return (
+                <div key={opt.id}>
+                  <label
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 9,
+                      border: `1.5px solid ${isChecked ? 'var(--sky)' : 'var(--border)'}`,
+                      background: isChecked ? 'var(--accent-bg)' : 'var(--surface)',
+                      cursor: reason ? 'not-allowed' : 'pointer', opacity: reason ? 0.5 : 1,
+                    }}
+                  >
+                    <input
+                      type="checkbox" checked={isChecked} disabled={!!reason}
+                      onChange={() => toggle(opt)} style={{ accentColor: 'var(--sky)', flexShrink: 0 }}
+                    />
+                    <opt.Icon size={13} color={isChecked ? 'var(--accent-fg)' : 'var(--muted)'} style={{ flexShrink: 0 }} />
+                    <span style={{ fontSize: 12.5, fontWeight: isChecked ? 600 : 500, color: isChecked ? 'var(--accent-fg)' : 'var(--text)', flex: 1 }}>
+                      {opt.label}
+                    </span>
+                    {opt.isSuggested && (
+                      <span style={{
+                        fontSize: 9.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase',
+                        padding: '2px 7px', borderRadius: 999, background: 'var(--sky)', color: '#fff', flexShrink: 0,
+                      }}>
+                        Recomendada
+                      </span>
+                    )}
+                    {reason && (
+                      <span style={{ fontSize: 10.5, color: 'var(--dim)', flexShrink: 0, maxWidth: 220, textAlign: 'right' }}>{reason}</span>
+                    )}
+                  </label>
+                  {isChecked && opt.hasParam && (
+                    <div style={{ marginTop: 6, marginLeft: 30 }}>
+                      <input
+                        type="text" value={paramValues[opt.id] || ''} placeholder={opt.placeholder || ''}
+                        onChange={e => setParamValues(prev => ({ ...prev, [opt.id]: e.target.value }))}
+                        style={{
+                          width: '100%', boxSizing: 'border-box', borderRadius: 7,
+                          border: `1px solid ${paramErrors[opt.id] ? 'var(--danger)' : 'var(--border)'}`,
+                          padding: '7px 10px', fontSize: 12.5, color: 'var(--text)', background: 'var(--card)', outline: 'none',
+                        }}
+                      />
+                      {paramErrors[opt.id] && <span style={{ fontSize: 10, color: 'var(--danger)', marginTop: 3, display: 'block' }}>{paramErrors[opt.id]}</span>}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
-          <div style={{ marginBottom: 8, fontSize: 11.5, color: 'var(--text)', background: 'var(--card)', border: '1px solid var(--danger-border)', borderRadius: 7, padding: '8px 10px', whiteSpace: 'pre-wrap' }}>
-            {plan.preview?.message || 'Plano gerado.'}
-          </div>
-          {plan.revert_description && (
-            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
-              <strong>Como reverter:</strong> {plan.revert_description}
-            </div>
+
+          {selected.some(o => o.destructive) && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, fontSize: 11.5, color: 'var(--muted)', cursor: 'pointer', userSelect: 'none' }}>
+              <input type="checkbox" checked={snapshot} onChange={e => setSnapshot(e.target.checked)} style={{ width: 13, height: 13, accentColor: 'var(--sky)' }} />
+              Registrar o estado atual antes de executar (recomendado)
+            </label>
           )}
-          <div className="flex gap-2">
-            <Button variant="destructive" size="sm" onClick={applySelected} disabled={applying}>
-              {applying ? 'Aplicando…' : `Aplicar — ${selected.label}`}
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setPlan(null)} disabled={applying}>Cancelar</Button>
-          </div>
-        </div>
+
+          <Button size="sm" onClick={requestPlans} disabled={selected.length === 0 || planningAll}>
+            {planningAll ? 'Gerando plano…' : 'Aplicar plano de correção'}
+          </Button>
+        </>
       )}
+
+      <Dialog open={!!previews} onOpenChange={(v) => { if (!v && !applyingAll) setPreviews(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirmar plano de correção</DialogTitle>
+            <DialogDescription>
+              Nada foi alterado ainda — revise {previews?.length === 1 ? 'a ação' : `as ${previews?.length ?? 0} ações`} abaixo antes de aplicar.
+            </DialogDescription>
+          </DialogHeader>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 320, overflowY: 'auto' }}>
+            {previews?.map(({ opt, plan }) => (
+              <div key={opt.id} style={{ borderRadius: 9, padding: '10px 12px', background: 'var(--surface)', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>{opt.label}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--muted)', whiteSpace: 'pre-wrap' }}>{plan.preview?.message || 'Plano gerado.'}</div>
+                {plan.revert_description && (
+                  <div style={{ fontSize: 10.5, color: 'var(--dim)', marginTop: 4 }}>
+                    <strong>Como reverter:</strong> {plan.revert_description}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setPreviews(null)} disabled={applyingAll}>Cancelar</Button>
+            <Button variant="destructive" size="sm" onClick={applyAll} disabled={applyingAll}>
+              {applyingAll ? 'Aplicando…' : 'Confirmar aplicação'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

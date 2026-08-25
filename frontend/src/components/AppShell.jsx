@@ -26,13 +26,15 @@
  * porque são funcionalidade real do produto, não decoração.
  */
 import {
-  Bell, ClipboardList, Inbox, Layers, LayoutGrid, LineChart,
+  Bell, CheckCircle2, ClipboardList, Inbox, Layers, LayoutGrid, LineChart,
   LogOut, Moon, Server, Settings, ShieldCheck, Sun,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { fetchIncidentsSummary } from '../api/client'
+import { fetchIncidents, fetchIncidentsSummary } from '../api/client'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { SEVERITY_STYLE, fmtAge, incidentTitle } from './incidents/incidentLabels'
 import ServerSelector from './ServerSelector'
 import { useAuth } from '../contexts/AuthContext'
 import { useServer } from '../contexts/ServerContext'
@@ -174,6 +176,106 @@ function CollectionState() {
           : broken.map(s => `${s.name}: ${s.ssh_error_msg || s.ssh_status}`).join(' · ')}
       </TooltipContent>
     </Tooltip>
+  )
+}
+
+// Sino de notificações — antes só decorativo (ícone + bolinha vermelha
+// sem clique). Abre a lista dos incidentes abertos da frota inteira,
+// mesma pergunta do useFleetIncidentCount acima; busca só quando o
+// popover abre, não fica pollando em segundo plano à toa.
+function NotificationBell({ incidentCount }) {
+  const navigate = useNavigate()
+  const [open, setOpen] = useState(false)
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    setLoading(true)
+    fetchIncidents({ status: 'aberto' })
+      .then(list => {
+        const sorted = [...list].sort((a, b) => {
+          if (a.severity !== b.severity) return a.severity === 'critico' ? -1 : 1
+          return new Date(b.last_seen) - new Date(a.last_seen)
+        })
+        setRows(sorted.slice(0, 6))
+      })
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false))
+  }, [open])
+
+  const go = (to) => { setOpen(false); navigate(to) }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          className="hidden md:flex"
+          style={{
+            position: 'relative', width: 30, height: 30, alignItems: 'center', justifyContent: 'center',
+            background: 'none', border: 'none', cursor: 'pointer', borderRadius: 8,
+          }}
+        >
+          <Bell size={15} color="var(--muted)" />
+          {incidentCount > 0 && (
+            <span style={{
+              position: 'absolute', top: 5, right: 5, width: 6, height: 6, borderRadius: '50%',
+              background: 'var(--danger)', border: '1.5px solid var(--card)',
+            }} />
+          )}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" style={{ width: 320, padding: 0, overflow: 'hidden' }}>
+        <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 12.5, color: 'var(--text)' }}>
+          Incidentes abertos {incidentCount > 0 && `(${incidentCount})`}
+        </div>
+        <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+          {loading ? (
+            <div style={{ padding: '18px 14px', fontSize: 12, color: 'var(--dim)', textAlign: 'center' }}>Carregando…</div>
+          ) : rows.length === 0 ? (
+            <div style={{ padding: '18px 14px', fontSize: 12, color: 'var(--dim)', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+              <CheckCircle2 size={16} color="var(--ok)" />
+              Nenhum incidente ativo no momento.
+            </div>
+          ) : (
+            rows.map(inc => {
+              const sev = SEVERITY_STYLE[inc.severity] ?? SEVERITY_STYLE.atencao
+              return (
+                <button
+                  key={inc.id}
+                  onClick={() => go(`/plano/${inc.id}`)}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px',
+                    background: 'none', border: 'none', borderBottom: '1px solid var(--border)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: sev.text, flexShrink: 0 }} />
+                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {incidentTitle(inc)}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 10.5, color: 'var(--dim)', paddingLeft: 12 }}>
+                    {inc.server_name ?? `servidor #${inc.server_id}`} · {fmtAge(inc.last_seen)}
+                  </div>
+                </button>
+              )
+            })
+          )}
+        </div>
+        <button
+          onClick={() => go('/plano')}
+          style={{
+            display: 'block', width: '100%', padding: '9px 14px', textAlign: 'center',
+            background: 'var(--surface)', border: 'none', borderTop: '1px solid var(--border)',
+            fontSize: 11.5, fontWeight: 600, color: 'var(--sky)', cursor: 'pointer',
+          }}
+        >
+          Ver no Plano de correção →
+        </button>
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -358,15 +460,7 @@ function NewShell({ children, onLogout, right, dense, isDark, onToggleTheme }) {
           {right}
           <ThemeToggle isDark={isDark} onToggleTheme={onToggleTheme} />
 
-          <div className="hidden md:flex" style={{ position: 'relative', width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}>
-            <Bell size={15} color="var(--muted)" />
-            {incidentCount > 0 && (
-              <span style={{
-                position: 'absolute', top: 5, right: 5, width: 6, height: 6, borderRadius: '50%',
-                background: 'var(--danger)', border: '1.5px solid var(--card)',
-              }} />
-            )}
-          </div>
+          <NotificationBell incidentCount={incidentCount} />
 
           {username && (
             <span className="hidden lg:inline" style={{ fontSize: 11, color: 'var(--dim)', whiteSpace: 'nowrap' }}>
