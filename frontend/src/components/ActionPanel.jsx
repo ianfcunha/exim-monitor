@@ -32,7 +32,10 @@ const SNAPSHOT_ACTIONS = new Set([
 //                distinto e sempre passando por preview
 // T11 — os rótulos deixaram de usar o vocabulário do código: "frozen"
 // virou "congeladas", "bounces" virou "devoluções".
-const ACTIONS = [
+// Exportado — Plano de correção (PlanoPage.jsx) reaproveita o mesmo
+// catálogo em vez de duplicá-lo, pra "aplicar correção" ter exatamente
+// as mesmas opções nos dois lugares.
+export const ACTIONS = [
   { id: 'retry-queue',   tier: 'segura',     label: 'Reprocessar fila',           Icon: RotateCcw,      color: 'sky',    confirm: true, param: null, requiredCaps: [] },
   { id: 'clean-frozen',  tier: 'destrutiva', label: 'Remover mensagens congeladas', Icon: Snowflake,    color: 'amber',  confirm: true, param: null, requiredCaps: ['cap_remove_messages', 'cap_quarantine'] },
   { id: 'clean-bounces', tier: 'destrutiva', label: 'Remover devoluções',         Icon: CornerDownLeft, color: 'orange', confirm: true, param: null, requiredCaps: ['cap_remove_messages', 'cap_quarantine'] },
@@ -48,7 +51,7 @@ const ACTIONS = [
 // o motivo explicado. `capabilities` vem de Server.capabilities
 // (persistido no último POST /servers/{id}/test) — null/undefined
 // (servidor nunca testado) não desabilita nada, deixa a ação tentar.
-const CAP_LABELS = {
+export const CAP_LABELS = {
   cap_remove_messages: 'remover mensagens da fila',
   cap_manage_firewall: 'bloquear IP',
   cap_write_blacklist: 'bloquear remetente',

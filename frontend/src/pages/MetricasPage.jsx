@@ -13,8 +13,8 @@
  * de um servidor cadastrado e nenhum selecionado, pede a escolha em vez
  * de inventar uma agregação.
  */
-import { LayoutGrid } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { LayoutGrid, RefreshCw } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
@@ -91,9 +91,10 @@ function ChartCard({ title, sub, badge, children }) {
 
 export default function MetricasPage() {
   const { activeServer, isFleet, servers, setActiveServer } = useServer()
-  const [periodKey, setPeriodKey] = useState('24h')
-  const [rows, setRows]     = useState([])
-  const [loading, setLoading] = useState(true)
+  const [periodKey, setPeriodKey]   = useState('24h')
+  const [rows, setRows]             = useState([])
+  const [loading, setLoading]       = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
 
   const ambiguous = !activeServer && isFleet && servers.length > 1
   const hours = PERIODS.find(p => p.key === periodKey).hours
@@ -102,12 +103,15 @@ export default function MetricasPage() {
   // de 1), o backend resolve sozinho (_resolve_server_id) — só recusa
   // quando é genuinamente ambíguo, e nesse caso `ambiguous` já barrou
   // acima antes deste efeito rodar.
-  useEffect(() => {
+  const load = useCallback((opts = {}) => {
     if (ambiguous) { setLoading(false); return }
-    setLoading(true)
+    opts.manual ? setRefreshing(true) : setLoading(true)
     fetchHistory(hours, 'quick', activeServer?.id ?? null)
-      .then(setRows).catch(() => setRows([])).finally(() => setLoading(false))
+      .then(setRows).catch(() => setRows([]))
+      .finally(() => { setLoading(false); setRefreshing(false) })
   }, [activeServer, hours, ambiguous])
+
+  useEffect(() => { load() }, [load])
 
   const { queuePts, delivPts, kpis } = useMemo(() => {
     if (rows.length === 0) return { queuePts: [], delivPts: [], kpis: null }
@@ -145,21 +149,34 @@ export default function MetricasPage() {
             {rows.length} ponto{rows.length === 1 ? '' : 's'} de dados · coleta a cada 30s
           </p>
         </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, background: 'var(--surface-alt)', borderRadius: 9, padding: 3, border: '1px solid var(--border)' }}>
-          {PERIODS.map(p => (
-            <button
-              key={p.key} onClick={() => setPeriodKey(p.key)}
-              style={{
-                padding: '5px 13px', borderRadius: 6, fontSize: 12.5, fontWeight: periodKey === p.key ? 600 : 500,
-                background: periodKey === p.key ? 'var(--card)' : 'transparent',
-                color: periodKey === p.key ? 'var(--sky)' : 'var(--muted)',
-                border: 'none', cursor: 'pointer',
-                boxShadow: periodKey === p.key ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
-              }}
-            >
-              {p.key}
-            </button>
-          ))}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 4, background: 'var(--surface-alt)', borderRadius: 9, padding: 3, border: '1px solid var(--border)' }}>
+            {PERIODS.map(p => (
+              <button
+                key={p.key} onClick={() => setPeriodKey(p.key)}
+                style={{
+                  padding: '5px 13px', borderRadius: 6, fontSize: 12.5, fontWeight: periodKey === p.key ? 600 : 500,
+                  background: periodKey === p.key ? 'var(--card)' : 'transparent',
+                  color: periodKey === p.key ? 'var(--sky)' : 'var(--muted)',
+                  border: 'none', cursor: 'pointer',
+                  boxShadow: periodKey === p.key ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                }}
+              >
+                {p.key}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => load({ manual: true })} disabled={refreshing}
+            title="Forçar atualização agora"
+            style={{
+              width: 30, height: 30, borderRadius: 8, background: 'var(--surface-alt)', border: 'none',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)',
+              cursor: refreshing ? 'not-allowed' : 'pointer', flexShrink: 0,
+            }}
+          >
+            <RefreshCw size={13} style={{ animation: refreshing ? 'spin 1s linear infinite' : undefined }} />
+          </button>
         </div>
       </div>
 

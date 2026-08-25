@@ -9,16 +9,15 @@
  * já validado em ActionPanel/MaintenancePage (Sessão 1, T3): nada
  * executa até o usuário ver exatamente o que vai mudar.
  */
-import { AlertTriangle, Check, CheckCircle2, FileText, Settings2, ShieldOff } from 'lucide-react'
+import { Check, CheckCircle2, FileText, Settings2, ShieldOff } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ackIncident, applyIncidentFix, planIncidentFix, resolveIncident, silenceIncident } from '../../api/client'
+import { ackIncident, resolveIncident, silenceIncident } from '../../api/client'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { SEVERITY_STYLE, STATUS_LABELS, STATUS_STYLE, applyLabel, incidentTitle } from './incidentLabels'
+import { SEVERITY_STYLE, STATUS_LABELS, STATUS_STYLE, incidentTitle } from './incidentLabels'
 import ThresholdEditor from './ThresholdEditor'
 import { useToast } from '../../contexts/ToastContext'
-import { useServer } from '../../contexts/ServerContext'
 
 function fmtDateTime(iso) {
   if (!iso) return '—'
@@ -175,11 +174,7 @@ function ImpactSection({ impact }) {
 
 export default function IncidentDetail({ incident, onChanged }) {
   const toast = useToast()
-  const { servers } = useServer()
   const [busy, setBusy]           = useState(null) // 'ack' | 'silence' | 'resolve' | null
-  const [plan, setPlan]           = useState(null)
-  const [planning, setPlanning]   = useState(false)
-  const [applying, setApplying]   = useState(false)
   const [thresholdsOpen, setThresholdsOpen] = useState(false)
 
   if (!incident) {
@@ -198,44 +193,6 @@ export default function IncidentDetail({ incident, onChanged }) {
   const st  = STATUS_STYLE[incident.status] ?? STATUS_STYLE.aberto
   const fixAction = incident.suggested_fix?.action
   const isResolved = incident.status === 'resolvido'
-
-  // Sessão 4, T12: no painel avançado a ação já nascia desabilitada com o
-  // motivo (ActionPanel.jsx); aqui na Triagem — a tela que se abre
-  // primeiro — o botão ainda oferecia a correção e só falhava com 409
-  // depois do clique. A recusa continua sendo do backend; isto é o aviso
-  // honesto antes de gastar o clique. A Triagem é cross-fleet, então o
-  // servidor vem do incidente, não do seletor.
-  const incidentServer = servers.find(s => s.id === incident.server_id)
-  const observationReason = incidentServer?.observation_mode
-    ? `${incidentServer.name} está em modo observação — o painel diagnostica, mas não executa ações que alterem o servidor. Desligue o modo em Configurações → Servidores para aplicar esta correção.`
-    : null
-
-  const requestPlan = async () => {
-    setPlanning(true)
-    try {
-      const res = await planIncidentFix(incident.id)
-      setPlan(res)
-    } catch (err) {
-      toast({ type: 'err', msg: err?.response?.data?.detail || err.message || 'Erro ao planejar correção.' })
-    } finally {
-      setPlanning(false)
-    }
-  }
-
-  const applyFix = async () => {
-    if (!plan) return
-    setApplying(true)
-    try {
-      const res = await applyIncidentFix(incident.id, plan.plan_id)
-      toast({ type: 'ok', msg: res.message || 'Correção aplicada.' })
-      setPlan(null)
-      onChanged?.()
-    } catch (err) {
-      toast({ type: 'err', msg: err?.response?.data?.detail || err.message || 'Erro ao aplicar correção.' })
-    } finally {
-      setApplying(false)
-    }
-  }
 
   const doAck = async () => {
     setBusy('ack')
@@ -379,46 +336,17 @@ export default function IncidentDetail({ incident, onChanged }) {
           <p style={{ fontSize: 11, color: 'var(--dim)' }}>
             Esta correção é manual — não há uma ação executável de um clique para este caso.
           </p>
-        ) : isResolved ? null : observationReason ? (
-          <div style={{
-            borderRadius: 10, padding: '10px 12px', fontSize: 11.5, lineHeight: 1.5,
-            background: 'var(--warn-bg)', border: '1px solid var(--warn-border)', color: 'var(--warn)',
-          }}>
-            {observationReason}
-          </div>
-        ) : !plan ? (
-          <Button size="sm" onClick={requestPlan} disabled={planning}>
-            {planning ? 'Gerando preview…' : 'Aplicar correção sugerida'}
-          </Button>
-        ) : (
-          <div style={{
-            borderRadius: 10, padding: '12px 14px',
-            background: 'var(--danger-bg)', border: '1px solid var(--danger-border)',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <AlertTriangle size={13} color="var(--danger)" />
-              <span style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 600 }}>Preview — nada foi alterado ainda</span>
-            </div>
-            <div style={{
-              marginBottom: 8, fontSize: 11.5, color: 'var(--text)',
-              background: 'var(--card)', border: '1px solid var(--danger-border)',
-              borderRadius: 7, padding: '8px 10px', whiteSpace: 'pre-wrap',
-            }}>
-              {plan.preview?.message || 'Plano gerado.'}
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
-              <strong>Como reverter:</strong> {plan.revert_description}
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant="destructive" size="sm" onClick={applyFix} disabled={applying}
-                className="border-transparent bg-red-600 text-white shadow-sm hover:bg-red-700 hover:text-white active:bg-red-800"
-              >
-                {applying ? 'Aplicando…' : applyLabel(fixAction.action)}
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => setPlan(null)} disabled={applying}>Cancelar</Button>
-            </div>
-          </div>
+        ) : isResolved ? null : (
+          // A Triagem só orienta — aplicar a correção acontece no Plano
+          // de correção, que reúne todas as ações disponíveis para o
+          // incidente (não só a sugerida) com seleção explícita antes de
+          // executar. Nenhuma ação que altera o servidor roda a partir
+          // daqui.
+          <Link to={`/plano/${incident.id}`} style={{ textDecoration: 'none' }}>
+            <Button size="sm">
+              Ver no Plano de correção →
+            </Button>
+          </Link>
         )}
       </div>
     </div>

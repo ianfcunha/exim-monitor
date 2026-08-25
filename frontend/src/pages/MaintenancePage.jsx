@@ -142,7 +142,7 @@ export default function MaintenancePage() {
             className="border-transparent bg-red-600 text-white shadow-sm hover:bg-red-700 hover:text-white active:bg-red-800"
           >
             {planning ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-            {planning ? 'Planejando…' : `Ver plano para ${activeServer.name}`}
+            {planning ? 'Planejando…' : `Limpar toda a fila de ${activeServer.name}`}
           </Button>
         ) : (
           <div style={{

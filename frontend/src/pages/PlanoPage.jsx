@@ -22,17 +22,18 @@
  * fixo que o mockup inventa.
  */
 import {
-  AlertTriangle, Check, CheckCircle2, ClipboardList, ShieldOff,
+  AlertTriangle, Check, CheckCircle2, ClipboardList, Loader2, ShieldOff,
 } from 'lucide-react'
-import { Fragment, useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   ackIncident, applyIncidentFix, fetchIncident, fetchIncidents,
-  planIncidentFix, resolveIncident, silenceIncident,
+  planAction, planIncidentFix, resolveIncident, runAction, silenceIncident,
 } from '../api/client'
+import { ACTIONS, CAP_LABELS } from '../components/ActionPanel'
 import { Button } from '@/components/ui/button'
 import {
-  SEVERITY_STYLE, STATUS_LABELS, applyLabel, fmtAge, incidentTitle,
+  SEVERITY_STYLE, STATUS_LABELS, fmtAge, incidentTitle,
 } from '../components/incidents/incidentLabels'
 import { useServer } from '../contexts/ServerContext'
 import { useToast } from '../contexts/ToastContext'
@@ -95,14 +96,40 @@ function NoActiveIncident() {
   )
 }
 
+// Fase ao vivo de uma ação em andamento — não é o `status` persistido do
+// incidente (esse só muda quando o backend confirma), é o feedback
+// imediato de "o que este clique está fazendo agora".
+const PHASE_LABELS = {
+  aguardando: 'Aguardando prévia…',
+  agindo:     'Aplicando correção…',
+  concluido:  'Ação concluída — atualizando estado…',
+  erro:       'A ação falhou — veja o aviso abaixo',
+}
+const PHASE_COLOR = {
+  aguardando: 'var(--warn)', agindo: 'var(--warn)',
+  concluido:  'var(--ok)',   erro:   'var(--danger)',
+}
+
 // ── Stepper — 4 estados reais do incidente, não uma narrativa fixa ──────
-function Stepper({ status }) {
+function Stepper({ status, livePhase = 'ocioso' }) {
   const idx = STATUS_ORDER.indexOf(status)
   const resolved = status === 'resolvido'
   return (
     <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '22px 32px' }}>
-      <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', marginBottom: 20 }}>
-        Estado do incidente
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>Estado do incidente</span>
+        {livePhase !== 'ocioso' && (
+          <span style={{
+            display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 600,
+            color: PHASE_COLOR[livePhase], background: 'var(--surface)', border: `1px solid ${PHASE_COLOR[livePhase]}`,
+            borderRadius: 999, padding: '2px 10px',
+          }}>
+            {(livePhase === 'aguardando' || livePhase === 'agindo') && (
+              <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} />
+            )}
+            {PHASE_LABELS[livePhase]}
+          </span>
+        )}
       </div>
       <div style={{ display: 'flex', alignItems: 'center' }}>
         {STATUS_ORDER.map((s, i) => {
@@ -148,6 +175,241 @@ function Stepper({ status }) {
   )
 }
 
+// Quanto tempo o badge "concluído"/"falhou" fica visível no Stepper antes
+// de voltar a 'ocioso' — só feedback, o dado real já está atualizado
+// antes disso (onApplied roda no mesmo instante que o phase vira
+// 'concluido').
+const PHASE_RESET_MS = 2500
+
+function missingCapReason(action, capabilities) {
+  if (!capabilities || !action.requiredCaps?.length) return null
+  const missing = action.requiredCaps.filter(c => capabilities[c] === false)
+  if (missing.length === 0) return null
+  return `Este servidor está em modo somente leitura para esta ação — falta permissão para ${missing.map(c => CAP_LABELS[c] ?? c).join(' e ')}.`
+}
+
+// ── Ações disponíveis — seleciona UMA opção (a sugerida vem marcada e
+// pré-selecionada), gera o preview e só aplica com confirmação explícita.
+// Sessão 6: antes só oferecia a correção sugerida sozinha; agora reúne o
+// mesmo catálogo do ActionPanel (Fila) — quem está vendo o plano pode
+// escolher uma alternativa se a sugestão não servir, sem precisar trocar
+// de tela. Aplicar a sugerida usa a rota específica do incidente (marca
+// `mitigado` de verdade); as demais são ações gerais do servidor — não
+// mudam o status do incidente sozinhas, por isso o link "Confirmar
+// ciência"/"Resolver" no banner continua sendo a forma de fechar o ciclo
+// depois de uma ação que não é a sugerida.
+function ActionOptions({ incident, server, isResolved, onApplied, onPhaseChange }) {
+  const toast = useToast()
+  const suggested = incident.suggested_fix?.action
+
+  const options = useMemo(() => {
+    const list = []
+    if (suggested?.action) {
+      const meta = ACTIONS.find(a => a.id === suggested.action)
+      list.push({
+        id: suggested.action, label: meta?.label ?? suggested.action, Icon: meta?.Icon ?? Check,
+        requiredCaps: meta?.requiredCaps ?? [], isSuggested: true, fixedParam: suggested.param ?? null,
+      })
+    }
+    for (const a of ACTIONS) {
+      if (a.id === suggested?.action) continue
+      list.push({
+        id: a.id, label: a.label, Icon: a.Icon, requiredCaps: a.requiredCaps,
+        isSuggested: false, hasParam: !!a.param, placeholder: a.placeholder, paramKind: a.param,
+        destructive: a.tier === 'destrutiva',
+      })
+    }
+    return list
+  }, [suggested])
+
+  const [selectedId, setSelectedId] = useState(suggested?.action ?? null)
+  const [paramValue, setParamValue] = useState('')
+  const [paramError, setParamError] = useState('')
+  const [snapshot, setSnapshot]     = useState(true)
+  const [plan, setPlan]             = useState(null)
+  const [planning, setPlanning]     = useState(false)
+  const [applying, setApplying]     = useState(false)
+
+  const setPhase = (p) => {
+    onPhaseChange?.(p)
+    if (p === 'concluido' || p === 'erro') {
+      setTimeout(() => onPhaseChange?.('ocioso'), PHASE_RESET_MS)
+    }
+  }
+
+  const selected = options.find(o => o.id === selectedId)
+
+  const select = (opt) => {
+    setSelectedId(opt.id); setPlan(null); setParamError('')
+    setParamValue('')
+  }
+
+  const capReason = (opt) => {
+    if (!server) return 'Servidor não encontrado — recarregue a página.'
+    if (server.observation_mode) {
+      return `${server.name} está em modo observação — desligue em Configurações → Servidores para aplicar ações.`
+    }
+    return missingCapReason(opt, server.capabilities)
+  }
+
+  const validateParam = () => {
+    if (!selected?.hasParam) return true
+    const v = paramValue.trim()
+    if (!v) { setParamError('Campo obrigatório'); return false }
+    if (selected.paramKind === 'ip') {
+      const ipv4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(v)
+      const ipv6 = /^[0-9a-fA-F:]+$/.test(v) && v.includes(':')
+      if (!ipv4 && !ipv6) { setParamError('IP inválido (ex: 192.168.0.1)'); return false }
+    }
+    if (selected.paramKind === 'email') {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) { setParamError('Endereço inválido'); return false }
+    }
+    return true
+  }
+
+  const requestPlan = async () => {
+    if (!selected || capReason(selected)) return
+    if (!validateParam()) return
+    setPlanning(true); setPhase('aguardando')
+    try {
+      const res = selected.isSuggested
+        ? await planIncidentFix(incident.id)
+        : await planAction(selected.id, paramValue.trim(), server.id)
+      setPlan(res)
+      onPhaseChange?.('ocioso')
+    } catch (err) {
+      toast({ type: 'err', msg: err?.response?.data?.detail || err.message || 'Erro ao planejar.' })
+      setPhase('erro')
+    } finally {
+      setPlanning(false)
+    }
+  }
+
+  const applySelected = async () => {
+    if (!plan || !selected) return
+    setApplying(true); setPhase('agindo')
+    try {
+      const res = selected.isSuggested
+        ? await applyIncidentFix(incident.id, plan.plan_id)
+        : await runAction(selected.id, paramValue.trim(), server.id, snapshot, plan.plan_id)
+      toast({ type: 'ok', msg: res.message || `${selected.label} concluído.` })
+      setPlan(null)
+      setPhase('concluido')
+      onApplied?.()
+    } catch (err) {
+      toast({ type: 'err', msg: err?.response?.data?.detail || err.message || 'Erro ao aplicar.' })
+      setPhase('erro')
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  if (isResolved) return null
+
+  return (
+    <div style={{ background: 'var(--card)', border: '1.5px solid var(--warn-border)', borderRadius: 12, padding: '20px 24px' }}>
+      <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>Ações disponíveis</div>
+      <p style={{ fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.5, marginBottom: 14, whiteSpace: 'pre-wrap' }}>
+        {incident.suggested_fix?.description ?? 'Sem orientação registrada — escolha uma ação abaixo ou trate manualmente.'}
+      </p>
+
+      {options.length === 0 ? (
+        <p style={{ fontSize: 11, color: 'var(--dim)' }}>Nenhuma ação executável de um clique para este tipo de incidente.</p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
+          {options.map(opt => {
+            const reason = capReason(opt)
+            const isSelected = selectedId === opt.id
+            return (
+              <label
+                key={opt.id}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 9,
+                  border: `1.5px solid ${isSelected ? 'var(--sky)' : 'var(--border)'}`,
+                  background: isSelected ? 'var(--accent-bg)' : 'var(--surface)',
+                  cursor: reason ? 'not-allowed' : 'pointer', opacity: reason ? 0.5 : 1,
+                }}
+              >
+                <input
+                  type="radio" name="plano-action" checked={isSelected} disabled={!!reason}
+                  onChange={() => select(opt)} style={{ accentColor: 'var(--sky)', flexShrink: 0 }}
+                />
+                <opt.Icon size={13} color={isSelected ? 'var(--accent-fg)' : 'var(--muted)'} style={{ flexShrink: 0 }} />
+                <span style={{ fontSize: 12.5, fontWeight: isSelected ? 600 : 500, color: isSelected ? 'var(--accent-fg)' : 'var(--text)', flex: 1 }}>
+                  {opt.label}
+                </span>
+                {opt.isSuggested && (
+                  <span style={{
+                    fontSize: 9.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase',
+                    padding: '2px 7px', borderRadius: 999, background: 'var(--sky)', color: '#fff', flexShrink: 0,
+                  }}>
+                    Recomendada
+                  </span>
+                )}
+                {reason && (
+                  <span style={{ fontSize: 10.5, color: 'var(--dim)', flexShrink: 0, maxWidth: 220, textAlign: 'right' }}>{reason}</span>
+                )}
+              </label>
+            )
+          })}
+        </div>
+      )}
+
+      {selected && !plan && selected.hasParam && (
+        <div style={{ marginBottom: 12 }}>
+          <input
+            type="text" value={paramValue} placeholder={selected.placeholder || ''}
+            onChange={e => { setParamValue(e.target.value); setParamError('') }}
+            onKeyDown={e => e.key === 'Enter' && requestPlan()}
+            style={{
+              width: '100%', boxSizing: 'border-box', borderRadius: 7,
+              border: `1px solid ${paramError ? 'var(--danger)' : 'var(--border)'}`,
+              padding: '7px 10px', fontSize: 12.5, color: 'var(--text)', background: 'var(--card)', outline: 'none',
+            }}
+          />
+          {paramError && <span style={{ fontSize: 10, color: 'var(--danger)', marginTop: 3, display: 'block' }}>{paramError}</span>}
+        </div>
+      )}
+
+      {selected && !plan && selected.destructive && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, fontSize: 11.5, color: 'var(--muted)', cursor: 'pointer', userSelect: 'none' }}>
+          <input type="checkbox" checked={snapshot} onChange={e => setSnapshot(e.target.checked)} style={{ width: 13, height: 13, accentColor: 'var(--sky)' }} />
+          Registrar o estado atual antes de executar (recomendado)
+        </label>
+      )}
+
+      {selected && !plan && !capReason(selected) && (
+        <Button size="sm" onClick={requestPlan} disabled={planning}>
+          {planning ? 'Gerando preview…' : `Ver plano — ${selected.label}`}
+        </Button>
+      )}
+
+      {plan && (
+        <div style={{ borderRadius: 10, padding: '12px 14px', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <AlertTriangle size={13} color="var(--danger)" />
+            <span style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 600 }}>Preview — nada foi alterado ainda</span>
+          </div>
+          <div style={{ marginBottom: 8, fontSize: 11.5, color: 'var(--text)', background: 'var(--card)', border: '1px solid var(--danger-border)', borderRadius: 7, padding: '8px 10px', whiteSpace: 'pre-wrap' }}>
+            {plan.preview?.message || 'Plano gerado.'}
+          </div>
+          {plan.revert_description && (
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
+              <strong>Como reverter:</strong> {plan.revert_description}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Button variant="destructive" size="sm" onClick={applySelected} disabled={applying}>
+              {applying ? 'Aplicando…' : `Aplicar — ${selected.label}`}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setPlan(null)} disabled={applying}>Cancelar</Button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function PlanoPage() {
   const { id: routeId } = useParams()
   const toast = useToast()
@@ -157,9 +419,10 @@ export default function PlanoPage() {
   const [loading, setLoading]   = useState(true)
   const [notFoundActive, setNotFoundActive] = useState(false)
   const [busy, setBusy]         = useState(null)
-  const [plan, setPlan]         = useState(null)
-  const [planning, setPlanning] = useState(false)
-  const [applying, setApplying] = useState(false)
+  // Feedback imediato de uma ação em andamento — ver PHASE_LABELS acima
+  // do Stepper. Some sozinho quando o refresh() pós-ação traz o
+  // `incident.status` já atualizado (ou volta a 'ocioso' se falhou).
+  const [actionPhase, setActionPhase] = useState('ocioso')
 
   // Sem :id na rota — escolhe o incidente aberto mais severo da frota
   // inteira (crítico antes de atenção, mais recente primeiro), o mesmo
@@ -206,11 +469,7 @@ export default function PlanoPage() {
 
   const sev = SEVERITY_STYLE[incident.severity] ?? SEVERITY_STYLE.atencao
   const isResolved = incident.status === 'resolvido'
-  const fixAction = incident.suggested_fix?.action
   const server = servers.find(s => s.id === incident.server_id)
-  const observationReason = server?.observation_mode
-    ? `${server.name} está em modo observação — desligue em Configurações → Servidores para aplicar esta correção.`
-    : null
 
   const events = [...(incident.events ?? [])].sort((a, b) => new Date(a.at) - new Date(b.at))
   const actors = [...new Set(events.map(e => e.actor).filter(a => a && a !== 'system'))]
@@ -233,23 +492,6 @@ export default function PlanoPage() {
     catch (err) { toast({ type: 'err', msg: err?.response?.data?.detail || 'Erro ao resolver.' }) }
     finally { setBusy(null) }
   }
-  const requestPlan = async () => {
-    setPlanning(true)
-    try { setPlan(await planIncidentFix(incident.id)) }
-    catch (err) { toast({ type: 'err', msg: err?.response?.data?.detail || 'Erro ao planejar correção.' }) }
-    finally { setPlanning(false) }
-  }
-  const applyFix = async () => {
-    if (!plan) return
-    setApplying(true)
-    try {
-      const res = await applyIncidentFix(incident.id, plan.plan_id)
-      toast({ type: 'ok', msg: res.message || 'Correção aplicada.' })
-      setPlan(null); refresh()
-    } catch (err) { toast({ type: 'err', msg: err?.response?.data?.detail || 'Erro ao aplicar correção.' }) }
-    finally { setApplying(false) }
-  }
-
   return (
     <div style={{ maxWidth: 1280, margin: '0 auto', padding: '20px 24px 32px', width: '100%', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
@@ -339,55 +581,13 @@ export default function PlanoPage() {
       </div>
 
       {/* ── Stepper (estado real) ── */}
-      <Stepper status={incident.status} />
+      <Stepper status={incident.status} livePhase={actionPhase} />
 
-      {/* ── Correção sugerida — a "checklist" honesta: uma ação, plan()→apply() ── */}
-      <div style={{ background: 'var(--card)', border: '1.5px solid var(--warn-border)', borderRadius: 12, padding: '20px 24px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>Correção sugerida</span>
-          <span style={{
-            fontSize: 11, fontWeight: 600, borderRadius: 999, padding: '2px 9px',
-            background: isResolved || incident.status === 'mitigado' ? 'var(--ok-bg)' : 'var(--warn-bg)',
-            border: `1px solid ${isResolved || incident.status === 'mitigado' ? 'var(--ok-border)' : 'var(--warn-border)'}`,
-            color: isResolved || incident.status === 'mitigado' ? 'var(--ok)' : 'var(--warn)',
-          }}>
-            {isResolved || incident.status === 'mitigado' ? 'Concluída' : fixAction ? 'Pendente' : 'Manual'}
-          </span>
-        </div>
-        <p style={{ fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.5, marginBottom: 12, whiteSpace: 'pre-wrap' }}>
-          {incident.suggested_fix?.description ?? 'Sem orientação registrada.'}
-        </p>
-        {!fixAction ? (
-          <p style={{ fontSize: 11, color: 'var(--dim)' }}>Correção manual — sem ação executável de um clique para este caso.</p>
-        ) : isResolved || incident.status === 'mitigado' ? null : observationReason ? (
-          <div style={{ borderRadius: 10, padding: '10px 12px', fontSize: 11.5, lineHeight: 1.5, background: 'var(--warn-bg)', border: '1px solid var(--warn-border)', color: 'var(--warn)' }}>
-            {observationReason}
-          </div>
-        ) : !plan ? (
-          <Button size="sm" onClick={requestPlan} disabled={planning}>
-            {planning ? 'Gerando preview…' : 'Aplicar correção sugerida'}
-          </Button>
-        ) : (
-          <div style={{ borderRadius: 10, padding: '12px 14px', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <AlertTriangle size={13} color="var(--danger)" />
-              <span style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 600 }}>Preview — nada foi alterado ainda</span>
-            </div>
-            <div style={{ marginBottom: 8, fontSize: 11.5, color: 'var(--text)', background: 'var(--card)', border: '1px solid var(--danger-border)', borderRadius: 7, padding: '8px 10px', whiteSpace: 'pre-wrap' }}>
-              {plan.preview?.message || 'Plano gerado.'}
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
-              <strong>Como reverter:</strong> {plan.revert_description}
-            </div>
-            <div className="flex gap-2">
-              <Button variant="destructive" size="sm" onClick={applyFix} disabled={applying}>
-                {applying ? 'Aplicando…' : applyLabel(fixAction.action)}
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => setPlan(null)} disabled={applying}>Cancelar</Button>
-            </div>
-          </div>
-        )}
-      </div>
+      {/* ── Ações disponíveis — escolhe uma opção, plan()→apply() nela ── */}
+      <ActionOptions
+        incident={incident} server={server} isResolved={isResolved}
+        onApplied={refresh} onPhaseChange={setActionPhase}
+      />
 
       {/* ── Responsáveis + Timeline ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }} className="plano-2col">

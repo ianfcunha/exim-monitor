@@ -431,7 +431,7 @@ function FooterStatusBar({ incidentCount }) {
         marginLeft: 'auto', fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5,
         color: 'var(--dim)', letterSpacing: '0.03em',
       }}>
-        Mail IQ 2.0 · Tinta e Coral
+        © {new Date().getFullYear()} Mail IQ by AVILI · Todos os direitos reservados
       </span>
     </footer>
   )
