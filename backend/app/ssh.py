@@ -198,11 +198,14 @@ def _run_raw(cmd: str, timeout: int = 20,
 
 # ── Deploy do script ──────────────────────────────────────────────────────
 
-# Montado em /app/diag-exim.sh (ver volumes do serviço backend em
-# docker-compose.yml / docker-compose.prod.yml) — fonte única: o mesmo
-# arquivo do repositório, sem cópia separada dentro do backend. Editar
-# diag-exim.sh não exige rebuild da imagem, só reiniciar o container.
-_LOCAL_SCRIPT_PATH = Path(__file__).resolve().parent.parent / "diag-exim.sh"
+# O diretório diag-exim/ é montado em /app/diag-exim (ver volumes do
+# serviço backend em docker-compose.yml / docker-compose.prod.yml) —
+# fonte única: o mesmo pacote do repositório, sem cópia separada dentro
+# do backend. É um mount de DIRETÓRIO de propósito: um mount de arquivo
+# único fica preso no inode antigo quando `git pull` (ou um editor)
+# substitui o arquivo, e a versão nova só chegava com um restart do
+# container. Com o diretório montado, `git pull` já basta.
+_LOCAL_SCRIPT_PATH = Path(__file__).resolve().parent.parent / "diag-exim" / "diag-exim.sh"
 
 
 def deploy_script(server_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

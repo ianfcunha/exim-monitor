@@ -49,7 +49,7 @@ services:
         condition: service_healthy
     volumes:
       - ~/.ssh:/root/.ssh:ro
-      - ./diag-exim/diag-exim.sh:/app/diag-exim.sh:ro   # fonte única (pacote open-core — ver diag-exim/) — enviado por SFTP ao cadastrar servidor
+      - ./diag-exim:/app/diag-exim:ro   # fonte única (pacote open-core) — enviado por SFTP ao cadastrar servidor. Mount de DIRETÓRIO: git pull troca o inode do arquivo e um mount de arquivo único ficaria preso no inode antigo até restart do container.
     env_file:
       - ./backend/.env
     environment:
