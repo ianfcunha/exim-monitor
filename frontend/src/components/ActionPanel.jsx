@@ -12,7 +12,7 @@
  * digitado. As ações aqui continuam sendo as de escopo específico
  * (frozen/bounces/um remetente/um IP).
  */
-import { AlertTriangle, Ban, CornerDownLeft, RotateCcw, Search, Shield, Snowflake, X } from 'lucide-react'
+import { AlertTriangle, Ban, CornerDownLeft, RotateCcw, Search, Shield, Snowflake, UserX, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { planAction, runAction } from '../api/client'
 import { Button } from '@/components/ui/button'
@@ -40,6 +40,7 @@ export const ACTIONS = [
   { id: 'clean-frozen',  tier: 'destrutiva', label: 'Remover mensagens congeladas', Icon: Snowflake,    color: 'amber',  confirm: true, param: null, requiredCaps: ['cap_remove_messages', 'cap_quarantine'] },
   { id: 'clean-bounces', tier: 'destrutiva', label: 'Remover devoluções',         Icon: CornerDownLeft, color: 'orange', confirm: true, param: null, requiredCaps: ['cap_remove_messages', 'cap_quarantine'] },
   { id: 'clean-sender',  tier: 'destrutiva', label: 'Remover de um remetente',    Icon: Search,         color: 'purple', confirm: true, param: 'email', placeholder: 'remetente@dominio.com', requiredCaps: ['cap_remove_messages', 'cap_quarantine'] },
+  { id: 'clean-auth',    tier: 'destrutiva', label: 'Limpar fila de uma conta',   Icon: UserX,          color: 'purple', confirm: true, param: 'text',  placeholder: 'conta@dominio.com', requiredCaps: ['cap_remove_messages', 'cap_quarantine'] },
   { id: 'block-ip',      tier: 'destrutiva', label: 'Bloquear IP',                Icon: Shield,         color: 'rose',   confirm: true, param: 'ip',    placeholder: '192.168.0.1', requiredCaps: ['cap_manage_firewall'] },
   { id: 'block-sender',  tier: 'destrutiva', label: 'Bloquear remetente',         Icon: Ban,            color: 'red',    confirm: true, param: 'email', placeholder: 'spam@dominio.com', requiredCaps: ['cap_write_blacklist'] },
 ]

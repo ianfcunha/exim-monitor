@@ -35,7 +35,18 @@ info "Para conectar um servidor EXIM, use mailiq-bootstrap.sh depois — ver doc
 
 # ── Verifica dependencias ──────────────────────────────────────────────────
 info "Verificando dependencias..."
-command -v docker  &>/dev/null || err "Docker nao encontrado. Instale em https://docs.docker.com/get-docker/"
+if ! command -v docker &>/dev/null; then
+  warn "Docker nao encontrado."
+  read -rp "  Instalar agora via get.docker.com (script oficial)? [S/n]: " DK_ANSWER
+  DK_ANSWER="${DK_ANSWER:-s}"
+  if [[ "$DK_ANSWER" =~ ^[Ss]$ ]]; then
+    curl -fsSL https://get.docker.com | sh || err "Instalacao do Docker falhou — instale manualmente: https://docs.docker.com/get-docker/"
+    systemctl enable --now docker 2>/dev/null || true
+    ok "Docker instalado"
+  else
+    err "Docker e necessario. Instale em https://docs.docker.com/get-docker/ e rode este script de novo."
+  fi
+fi
 command -v git     &>/dev/null || err "Git nao encontrado. Instale com: apt install git"
 COMPOSE_CMD=""
 if docker compose version &>/dev/null 2>&1; then
@@ -87,15 +98,18 @@ if [[ "$DOMAIN" != "localhost" ]]; then
 
   else
     echo ""
-    ask "1c. Deseja habilitar HTTPS com certificado SSL automatico? (via Caddy)"
-    ask "    Requer que as portas 80 e 443 estejam livres no servidor."
-    read -rp "    Habilitar SSL? [s/N]: " SSL_ANSWER
-    SSL_ANSWER="${SSL_ANSWER:-n}"
+    ask "1c. Habilitar HTTPS com certificado automatico? (via Caddy — recomendado)"
+    ask "    Requer portas 80 e 443 livres e o DNS de $DOMAIN ja apontando aqui."
+    ask "    Sem isto o painel so escuta em 127.0.0.1 (nao acessivel de fora)."
+    read -rp "    Habilitar HTTPS? [S/n]: " SSL_ANSWER
+    SSL_ANSWER="${SSL_ANSWER:-s}"
     if [[ "$SSL_ANSWER" =~ ^[Ss]$ ]]; then
       USE_SSL="y"
       ok "HTTPS habilitado — Caddy gerenciara o certificado automaticamente"
     else
-      warn "SSL desabilitado — o dashboard ficara acessivel via HTTP na porta 5173"
+      warn "HTTPS desabilitado — o painel ficara SO em http://127.0.0.1:5173"
+      warn "deste servidor. Para acesso externo, configure um reverse proxy"
+      warn "para a porta 5173 depois, ou rode o script de novo com HTTPS."
     fi
   fi
 fi
@@ -151,7 +165,7 @@ echo ""
 info "Preparando arquivos..."
 
 REPO_URL="${REPO_URL:-https://github.com/ianfcunha/exim-monitor.git}"
-REPO_BRANCH="${REPO_BRANCH:-cloudez}"
+REPO_BRANCH="${REPO_BRANCH:-main}"
 INSTALL_DIR="$HOME/exim-monitor"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
@@ -301,12 +315,14 @@ elif [[ "$REVERSE_PROXY" == "y" ]]; then
   echo -e "  Dashboard:  ${BLUE}http://$DOMAIN${NC}"
   echo -e "  API Docs:   ${BLUE}http://$DOMAIN/api/docs${NC}"
   echo -e "  ${YELLOW}(Para HTTPS: certbot --nginx -d $DOMAIN)${NC}"
-elif [[ "$DOMAIN" == "localhost" ]]; then
-  echo -e "  Dashboard:  ${BLUE}http://localhost:5173${NC}"
-  echo -e "  API Docs:   ${BLUE}http://localhost:8000/api/docs${NC}"
 else
-  echo -e "  Dashboard:  ${BLUE}http://$DOMAIN:5173${NC}"
-  echo -e "  API Docs:   ${BLUE}http://$DOMAIN:8000/api/docs${NC}"
+  # localhost, ou dominio sem SSL/proxy: as portas so escutam em 127.0.0.1
+  echo -e "  Dashboard:  ${BLUE}http://localhost:5173${NC} ${YELLOW}(so neste servidor)${NC}"
+  echo -e "  API Docs:   ${BLUE}http://localhost:8000/api/docs${NC}"
+  if [[ "$DOMAIN" != "localhost" ]]; then
+    echo -e "  ${YELLOW}Para acesso externo por $DOMAIN: configure um reverse proxy${NC}"
+    echo -e "  ${YELLOW}para 127.0.0.1:5173, ou rode este script de novo com HTTPS.${NC}"
+  fi
 fi
 
 echo ""

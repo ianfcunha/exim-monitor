@@ -212,7 +212,10 @@ function missingCapReason(action, capabilities) {
 const RELEVANT_ACTION_IDS = {
   'queue_stuck:fila':   ['retry-queue', 'clean-sender', 'clean-bounces'],
   'queue_stuck:frozen': ['clean-frozen', 'retry-queue'],
-  'auth_abuse:conta':   ['block-sender'],
+  // auth_abuse: a ação sugerida (clean-auth, com a conta como parâmetro)
+  // já vem fixada; bloquear o endereço do remetente não para uma conta
+  // comprometida — quem para é limpar a fila dela + o admin trocar a senha.
+  'auth_abuse:conta':   ['clean-auth'],
 }
 
 // ── Ações disponíveis — marca uma ou mais opções (a sugerida vem
@@ -602,7 +605,9 @@ function HistoryView({ rows, loading, onOpen }) {
         </h2>
         <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--muted)' }}>
           Incidentes já encerrados — abra qualquer um para ver o plano, o que foi
-          executado e a linha do tempo, em modo leitura.
+          executado e a linha do tempo, em modo leitura. Para a auditoria completa
+          de toda ação executada em cada servidor, veja{' '}
+          <Link to="/settings/history" style={{ color: 'var(--sky)' }}>Configurações → Histórico</Link>.
         </p>
       </div>
 

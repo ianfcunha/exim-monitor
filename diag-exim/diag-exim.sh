@@ -49,6 +49,15 @@
 #        --snapshot=0    desativa o before_snapshot das ações destrutivas
 #                          acima (ligado por padrão — ver Changelog v5.7)
 # ============================================================
+# Changelog v5.19:
+#   - Fix: dns_errors contava toda linha de entrega/adiamento remoto como
+#           erro de DNS — o padrão 'DNS|lookup|NXDOMAIN' casava o token do
+#           roteador "R=dnslookup". Agora só falhas reais de resolução
+#           (host lookup failed, MX inexistente, NXDOMAIN/SERVFAIL, etc).
+#   - Fix: --action=block-sender em cPanel/WHM (ou qualquer host sem
+#           /etc/exim4/) agora falha à vista, apontando o Exim
+#           Configuration Manager, em vez de escrever num arquivo que a
+#           config do Exim não lê.
 # Changelog v5.18:
 #   - Fix (Sessão 4, T3): DNSBL tratava a faixa 127.255.255.0/24 como
 #           listagem. Essa faixa é a forma que a Spamhaus usa para
@@ -376,7 +385,7 @@
 # exiqgrep etc. costumam morar) sejam encontrados mesmo assim.
 export PATH="$PATH:/usr/sbin:/sbin:/usr/local/sbin"
 
-VERSION="5.18"
+VERSION="5.19"
 LOG_PATH="/var/log/exim4/mainlog"
 # Lista única de candidatos a mainlog — consumida por collect() (quick e
 # completo) e run_check(). Debian/exim4, Debian/exim genérico, cPanel/WHM
@@ -980,7 +989,11 @@ analyze_log() {
     BOUNCE_LOG_COUNT=$(echo "$LOG_SAMPLE" | grep -c 'Bounce\|bounce\|bounced')
     DELIVERED_COUNT=$(echo "$LOG_SAMPLE"  | grep -cE '=>.*T=')
     RECENT_SENDS=$(echo "$LOG_SAMPLE"     | grep -c ' <= ')
-    DNS_ERRORS=$(echo "$LOG_SAMPLE"       | grep -cE 'DNS|lookup|NXDOMAIN')
+    # Só falhas reais de resolução — NÃO casar o token do roteador
+    # "R=dnslookup", presente em toda entrega/adiamento remoto normal (o
+    # padrão antigo 'DNS|lookup|NXDOMAIN' contava a fila inteira como erro
+    # de DNS: dns_errors ficava idêntico a deferred).
+    DNS_ERRORS=$(echo "$LOG_SAMPLE"       | grep -cE 'host lookup (did not complete|failed)|all relevant MX records point to non-existent|no host name found for|lookup of host .* (failed|timed out)|Name or service not known|NXDOMAIN|SERVFAIL|temporarily unable to (look ?up|resolve)')
 
     # ── Taxa de reconhecimento (T6, Sessão 1, pós-auditoria) ──────────
     # AUDITORIA.md item 6: se o formato do log não bate com o que este
@@ -2436,6 +2449,16 @@ execute_action() {
                 exit 1
             fi
             local exim_bl_s="/etc/exim4/spammer_sender"
+            # A ação depende da blacklist do pacote exim4 do Debian. cPanel/
+            # WHM não tem /etc/exim4/ — o bloqueio de remetente lá é pelo
+            # Exim Configuration Manager ou pela suspensão da conta. Falha
+            # à vista, com o caminho manual, em vez de escrever num arquivo
+            # que a config do Exim não lê.
+            if [ -d /usr/local/cpanel ] || [ ! -d /etc/exim4 ]; then
+                output_action_json "false" "$cmd" \
+                    "Bloqueio de remetente indisponível neste ambiente — sem /etc/exim4/spammer_sender (pacote exim4 do Debian). Em cPanel/WHM, bloqueie pelo Exim Configuration Manager (WHM » Service Configuration » Exim Configuration Manager » Advanced Editor) ou suspenda a conta de origem."
+                exit 1
+            fi
             if [ -f "$exim_bl_s" ] && grep -qF "$param" "$exim_bl_s" 2>/dev/null; then
                 output_action_json "false" "$cmd" \
                     "Remetente $param já está na blacklist ($exim_bl_s)"

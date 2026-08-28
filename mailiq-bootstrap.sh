@@ -71,6 +71,15 @@ echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━�
 # ── Detecta binários e caminhos reais deste servidor ──────────────────
 info "Detectando ambiente..."
 
+# cPanel/WHM: /home é território das contas de hospedagem — um usuário de
+# sistema ali pode ser varrido pelas ferramentas de conta do WHM. Nesse
+# ambiente o home do mailiq vai pra /opt.
+IS_CPANEL=0
+if [ -d /usr/local/cpanel ]; then
+    IS_CPANEL=1
+    ok "Ambiente cPanel/WHM detectado — home do usuário em /opt/$MAILIQ_USER"
+fi
+
 EXIM_BIN_NAME=""
 for _eb in exim4 exim; do
     command -v "$_eb" &>/dev/null && { EXIM_BIN_NAME="$_eb"; break; }
@@ -109,7 +118,13 @@ LOG_GROUP=""
 if [ -n "$MAINLOG" ]; then
     LOG_GROUP="$(stat -c '%G' "$MAINLOG" 2>/dev/null || true)"
 fi
-[ -z "$LOG_GROUP" ] && getent group adm >/dev/null 2>&1 && LOG_GROUP="adm"
+# Fallback só se o stat não deu nada: adm (Debian/Ubuntu), mail (cPanel/
+# RHEL/AlmaLinux), wheel (último recurso).
+if [ -z "$LOG_GROUP" ]; then
+    for _g in adm mail wheel; do
+        getent group "$_g" >/dev/null 2>&1 && { LOG_GROUP="$_g"; break; }
+    done
+fi
 
 SPOOL_GROUP=""
 [ -d "$SPOOL_DIR" ] && SPOOL_GROUP="$(stat -c '%G' "$SPOOL_DIR" 2>/dev/null || true)"
@@ -132,13 +147,19 @@ echo "$PUB_KEY" | grep -qE '^ssh-(ed25519|rsa) ' || err "--pubkey não parece um
 echo ""
 info "Configurando usuário $MAILIQ_USER..."
 if id "$MAILIQ_USER" &>/dev/null; then
-    ok "Usuário $MAILIQ_USER já existe — reaproveitando"
+    ok "Usuário $MAILIQ_USER já existe — reaproveitando (home: $(getent passwd "$MAILIQ_USER" | cut -d: -f6))"
 else
     # Shell de verdade (bash), não nologin: SSH de execução de comando
     # (client.exec_command() do backend) precisa de um shell que
     # realmente interprete o comando — nologin recusaria.
-    useradd -m -s /bin/bash -c "Mail IQ service account" "$MAILIQ_USER"
-    ok "Usuário $MAILIQ_USER criado (home + /bin/bash — necessário pra SSH de comando funcionar; nologin recusaria)"
+    if [ "$IS_CPANEL" -eq 1 ]; then
+        useradd --home-dir "/opt/$MAILIQ_USER" --create-home -s /bin/bash \
+            -c "Mail IQ service account" "$MAILIQ_USER"
+        ok "Usuário $MAILIQ_USER criado em /opt/$MAILIQ_USER (fora de /home — cPanel)"
+    else
+        useradd -m -s /bin/bash -c "Mail IQ service account" "$MAILIQ_USER"
+        ok "Usuário $MAILIQ_USER criado (home + /bin/bash — necessário pra SSH de comando funcionar; nologin recusaria)"
+    fi
 fi
 
 USER_HOME="$(getent passwd "$MAILIQ_USER" | cut -d: -f6)"
@@ -233,10 +254,19 @@ SUDOERS_TMP="$(mktemp)"
         echo "$MAILIQ_USER ALL=(root) NOPASSWD: /usr/bin/chmod 640 /etc/firewall.d/03_custom"
         echo ""
     fi
-    echo "# Bloqueio de remetente (cap_write_blacklist)"
-    echo "$MAILIQ_USER ALL=(root) NOPASSWD: /usr/bin/tee -a /etc/exim4/spammer_sender"
-    echo "$MAILIQ_USER ALL=(root) NOPASSWD: /usr/bin/test -w /etc/exim4"
-    echo ""
+    if [ "$IS_CPANEL" -eq 1 ] || [ ! -d /etc/exim4 ]; then
+        echo "# Bloqueio de remetente: indisponível neste ambiente."
+        echo "# A ação usa /etc/exim4/spammer_sender (pacote exim4 do Debian);"
+        echo "# em cPanel/WHM o bloqueio de remetente é pelo Exim Configuration"
+        echo "# Manager ou pela suspensão da conta. cap_write_blacklist ficará"
+        echo "# 'false' no --check e o painel desabilita o botão com o motivo."
+        echo ""
+    else
+        echo "# Bloqueio de remetente (cap_write_blacklist)"
+        echo "$MAILIQ_USER ALL=(root) NOPASSWD: /usr/bin/tee -a /etc/exim4/spammer_sender"
+        echo "$MAILIQ_USER ALL=(root) NOPASSWD: /usr/bin/test -w /etc/exim4"
+        echo ""
+    fi
     echo "# Bookkeeping interno (TTL de bloqueio, log de auditoria)"
     echo "$MAILIQ_USER ALL=(root) NOPASSWD: /usr/bin/tee -a /var/log/exim-monitor/actions.log"
     echo "$MAILIQ_USER ALL=(root) NOPASSWD: /usr/bin/tee /var/log/exim-monitor/ip_blocks.tsv*"
@@ -303,7 +333,7 @@ echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━�
 echo -e "  Host:            ${BOLD}$(hostname -f 2>/dev/null || hostname)${NC}"
 echo -e "  Usuário SSH:     ${BOLD}$MAILIQ_USER${NC}"
 echo -e "  Tipo de auth:    ${BOLD}chave (key)${NC}"
-echo -e "  Caminho remoto:  ${BOLD}/home/$MAILIQ_USER/diag-exim.sh${NC} ${DIM}(o painel envia por SFTP ao cadastrar/testar)${NC}"
+echo -e "  Caminho remoto:  ${BOLD}$USER_HOME/diag-exim.sh${NC} ${DIM}(o painel envia por SFTP ao cadastrar/testar — use este caminho no campo \"Caminho do script\")${NC}"
 echo ""
 
 if [ "$GENERATE_KEY_LOCALLY" -eq 1 ]; then

@@ -30,7 +30,7 @@ matriz completa de formatos de log validados vs. inferidos.
 ## Uso rápido
 
 ```bash
-curl -O https://raw.githubusercontent.com/ianfcunha/exim-monitor/official/diag-exim/diag-exim.sh
+curl -O https://raw.githubusercontent.com/ianfcunha/exim-monitor/main/diag-exim/diag-exim.sh
 chmod +x diag-exim.sh
 ./diag-exim.sh              # menu interativo — colorido, com detalhe por remetente/domínio
 ./diag-exim.sh --json       # coleta completa, saída em JSON
