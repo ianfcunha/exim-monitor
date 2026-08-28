@@ -73,7 +73,7 @@ def _get_incident_or_404(db: Session, incident_id: int, current_user: User) -> I
 
 def _incident_to_dict(
     incident: Incident, server_name: Optional[str] = None, include_events: bool = False,
-    db: Optional[Session] = None,
+    db: Optional[Session] = None, include_actions: bool = False,
 ) -> dict:
     # Impacto (Sessão 3, T1): incidente resolvido usa o snapshot congelado
     # em Incident.impact (freeze_impact(), chamado no fechamento); aberto
@@ -112,6 +112,27 @@ def _incident_to_dict(
         d["events"] = [
             {"event_type": e.event_type, "at": to_utc_iso(e.at), "actor": e.actor, "detail": e.detail}
             for e in incident.events
+        ]
+    if include_actions and db is not None:
+        # "Correções aplicadas" no Plano de correção — as ações que este
+        # incidente originou (via /fix/apply ou ActionPanel com
+        # incident_id). Só no detalhe, nunca em list_incidents.
+        rows = (
+            db.query(ActionHistory)
+            .filter(ActionHistory.incident_id == incident.id)
+            .order_by(ActionHistory.executed_at.asc())
+            .all()
+        )
+        d["actions"] = [
+            {
+                "executed_at": to_utc_iso(a.executed_at),
+                "actor": a.actor,
+                "action": a.action,
+                "param": a.param,
+                "success": a.success,
+                "revert_hint": a.revert_hint,
+            }
+            for a in rows
         ]
     return d
 
@@ -231,7 +252,10 @@ def get_shared_report(token: str, db: Session = Depends(get_db)):
 def get_incident(incident_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     incident = _get_incident_or_404(db, incident_id, current_user)
     server = incident.server
-    return _incident_to_dict(incident, server_name=server.name if server else None, include_events=True, db=db)
+    return _incident_to_dict(
+        incident, server_name=server.name if server else None,
+        include_events=True, include_actions=True, db=db,
+    )
 
 
 @router.get("/{incident_id}/report", summary="Relatório de incidente — HTML autocontido, imprimível", response_class=HTMLResponse)

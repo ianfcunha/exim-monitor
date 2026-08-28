@@ -12,13 +12,24 @@
  * enganoso. Segue o mesmo padrão já usado na Fila (Sessão 5): com mais
  * de um servidor cadastrado e nenhum selecionado, pede a escolha em vez
  * de inventar uma agregação.
+ *
+ * Sessão 6 / retorno #2 — a tela ganhou o que o diag-exim.sh já coleta e
+ * não aparecia em lugar nenhum: o funil de entrega (onde o e-mail se
+ * perde, não só a taxa final), as tabelas de "top ofensores do momento"
+ * (maior remetente/destino, domínios que mais adiam/rejeitam), os
+ * recursos do Exim (recolhidos por padrão) e o Log Viewer embutido,
+ * agora com escopo de servidor — antes o visualizador de log só existia
+ * atrás do "modo avançado" do painel clássico e chamava /messages/tail
+ * sem server_id.
  */
-import { LayoutGrid, RefreshCw } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  ChevronDown, Copy, Cpu, LayoutGrid, RefreshCw, ScrollText, Search as SearchIcon,
+} from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
-import { fetchHistory } from '../api/client'
+import { fetchFullStatus, fetchHistory, fetchLogTail } from '../api/client'
 import { Button } from '@/components/ui/button'
 import { useServer } from '../contexts/ServerContext'
 
@@ -26,6 +37,24 @@ const PERIODS = [
   { key: '6h', hours: 6 }, { key: '24h', hours: 24 }, { key: '7d', hours: 168 },
 ]
 const CRIT_SEVERITIES = new Set(['CRITICAL', 'HIGH', 'DEGRADED'])
+
+// Funil de entrega — cor semântica, não a paleta --sky do volume.
+const FUNNEL_SERIES = [
+  { key: 'Entregue',  color: 'var(--ok)' },
+  { key: 'Adiado',    color: 'var(--warn)' },
+  { key: 'Rejeitado', color: 'var(--danger)' },
+  { key: 'Erro DNS',  color: 'var(--dim)' },
+]
+
+// Cores por tipo de linha do log — mesma linguagem do LogViewerDrawer.
+const LOG_TYPE = {
+  delivered: { label: 'Entregues', color: 'var(--ok)',     dot: 'var(--ok)' },
+  rejected:  { label: 'Rejeitados', color: 'var(--danger)', dot: 'var(--danger)' },
+  deferred:  { label: 'Adiados',    color: 'var(--warn)',   dot: 'var(--warn)' },
+  sent:      { label: 'Enviados',   color: 'var(--sky)',    dot: 'var(--sky)' },
+  other:     { label: 'Outros',     color: 'var(--muted)',  dot: 'var(--dim)' },
+}
+const LOG_LIMITS = [100, 200, 300, 500]
 
 function fmtTimeShort(iso, hours) {
   const d = new Date(iso)
@@ -69,12 +98,21 @@ function Kpi({ label, value, sub, color = 'var(--text)' }) {
   )
 }
 
-function ChartCard({ title, sub, badge, children }) {
+function ChartCard({ title, sub, badge, legend, children }) {
   return (
     <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '22px 24px 12px' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{title}</span>
         <span style={{ fontSize: 12, color: 'var(--muted)' }}>{sub}</span>
+        {legend && (
+          <div style={{ display: 'flex', gap: 12, marginLeft: badge ? 0 : 'auto', flexWrap: 'wrap' }}>
+            {legend.map(l => (
+              <span key={l.key} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--muted)' }}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: l.color }} /> {l.key}
+              </span>
+            ))}
+          </div>
+        )}
         {badge && (
           <span style={{
             marginLeft: 'auto', fontSize: 11.5, fontWeight: 600, color: 'var(--danger)',
@@ -89,15 +127,255 @@ function ChartCard({ title, sub, badge, children }) {
   )
 }
 
+const chartTooltip = {
+  contentStyle: { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 11.5 },
+  labelStyle: { color: 'var(--muted)' },
+}
+
+// ── Tabela de "top ofensores" — um par rótulo/contagem, ou uma lista ────
+function OffenderTable({ title, rows, empty }) {
+  if (!rows || rows.length === 0) {
+    return (
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 18px' }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>{title}</div>
+        <div style={{ fontSize: 11.5, color: 'var(--dim)' }}>{empty ?? 'Sem dados neste ciclo.'}</div>
+      </div>
+    )
+  }
+  return (
+    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 18px' }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>{title}</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {rows.map((r, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5 }}>
+            <span style={{
+              flex: 1, minWidth: 0, color: 'var(--text)', fontFamily: "'JetBrains Mono', monospace",
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }} title={r.label}>
+              {r.label}
+            </span>
+            {r.count != null && (
+              <span style={{ flexShrink: 0, fontWeight: 700, color: 'var(--muted)', fontFamily: "'JetBrains Mono', monospace" }}>
+                {Number(r.count).toLocaleString('pt-BR')}
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Recursos do Exim — recolhido por padrão (pedido do cliente): quem
+// quiser inspecionar clica e abre. ────────────────────────────────────
+function EximResources({ snap }) {
+  const [open, setOpen] = useState(false)
+  const exim = snap?.exim ?? {}
+  const log = snap?.log ?? {}
+  const dist = snap?.queue?.size_distribution ?? {}
+
+  const items = [
+    { label: 'Processos exim', value: exim.processes ?? '—' },
+    { label: 'CPU total', value: exim.cpu_total != null ? `${exim.cpu_total}%` : '—' },
+    { label: 'Memória total', value: exim.mem_total != null ? `${exim.mem_total}%` : '—' },
+    { label: 'Uptime do exim', value: exim.uptime ?? '—' },
+    { label: 'Versão', value: exim.version ?? snap?.version ?? '—' },
+    { label: 'Tamanho do mainlog', value: log.mainlog_size_mb != null ? `${log.mainlog_size_mb} MB` : '—' },
+    { label: 'Reconhecimento do log', value: log.recognition_pct != null ? `${log.recognition_pct}%` : '—' },
+    { label: 'Mensagens > 1 MB na fila', value: dist.over_1mb ?? '—' },
+    { label: 'Mensagens > 5 MB na fila', value: dist.over_5mb ?? '—' },
+  ]
+
+  return (
+    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '16px 20px',
+          background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left',
+        }}
+      >
+        <Cpu size={14} color="var(--muted)" />
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', flex: 1 }}>Recursos do Exim</span>
+        <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>{open ? 'ocultar' : 'ver detalhes'}</span>
+        <ChevronDown size={14} color="var(--dim)" style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+      </button>
+      {open && (
+        <div style={{
+          padding: '4px 20px 18px', display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12,
+        }}>
+          {items.map(it => (
+            <div key={it.label}>
+              <div style={{ fontSize: 10, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: 3 }}>{it.label}</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', fontFamily: "'JetBrains Mono', monospace" }}>{String(it.value)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Log Viewer embutido — tail do mainlog COM escopo de servidor ────────
+function InlineLogViewer({ serverId }) {
+  const [entries, setEntries] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError]     = useState(null)
+  const [limit, setLimit]     = useState(200)
+  const [filter, setFilter]   = useState('all')
+  const [q, setQ]             = useState('')
+  const [auto, setAuto]       = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [copied, setCopied]   = useState(null)
+  const timer = useRef(null)
+
+  const load = useCallback((spin = false) => {
+    if (spin) setRefreshing(true)
+    setError(null)
+    fetchLogTail(limit, serverId ?? null)
+      .then(setEntries)
+      .catch(e => setError(e?.response?.data?.detail ?? e.message ?? 'Erro ao carregar o log.'))
+      .finally(() => { setLoading(false); setRefreshing(false) })
+  }, [limit, serverId])
+
+  useEffect(() => { setLoading(true); load() }, [load])
+  useEffect(() => {
+    clearInterval(timer.current)
+    if (auto) timer.current = setInterval(() => load(), 15_000)
+    return () => clearInterval(timer.current)
+  }, [auto, load])
+
+  const counts = useMemo(() => {
+    const c = { all: entries.length }
+    for (const e of entries) c[e.type] = (c[e.type] ?? 0) + 1
+    return c
+  }, [entries])
+
+  const visible = entries.filter(e => {
+    if (filter !== 'all' && e.type !== filter) return false
+    if (q && !e.raw.toLowerCase().includes(q.toLowerCase())) return false
+    return true
+  })
+
+  const copy = (text, i) => {
+    navigator.clipboard?.writeText(text).then(() => {
+      setCopied(i); setTimeout(() => setCopied(null), 1200)
+    })
+  }
+
+  return (
+    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 18px', flexWrap: 'wrap' }}>
+        <ScrollText size={14} color="var(--muted)" />
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>Log Viewer</span>
+        <span style={{ fontSize: 12, color: 'var(--muted)' }}>últimas linhas do mainlog</span>
+
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative' }}>
+            <SearchIcon size={12} color="var(--dim)" style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)' }} />
+            <input
+              value={q} onChange={e => setQ(e.target.value)} placeholder="filtrar…"
+              style={{
+                width: 150, boxSizing: 'border-box', padding: '5px 8px 5px 24px', fontSize: 11.5,
+                borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', outline: 'none',
+              }}
+            />
+          </div>
+          <select
+            value={limit} onChange={e => setLimit(Number(e.target.value))}
+            style={{ fontSize: 11.5, padding: '5px 6px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
+          >
+            {LOG_LIMITS.map(n => <option key={n} value={n}>{n} linhas</option>)}
+          </select>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--muted)', cursor: 'pointer', userSelect: 'none' }}>
+            <input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} style={{ accentColor: 'var(--sky)' }} />
+            auto
+          </label>
+          <button
+            onClick={() => load(true)} disabled={refreshing}
+            style={{ width: 28, height: 28, borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <RefreshCw size={12} style={{ animation: refreshing ? 'spin 1s linear infinite' : undefined }} />
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 6, padding: '0 18px 12px', flexWrap: 'wrap' }}>
+        {['all', 'delivered', 'sent', 'deferred', 'rejected', 'other'].map(t => {
+          const active = filter === t
+          const cfg = LOG_TYPE[t]
+          return (
+            <button
+              key={t} onClick={() => setFilter(t)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 5, padding: '3px 9px', borderRadius: 999,
+                fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap',
+                border: `1px solid ${active ? 'var(--sky)' : 'var(--border)'}`,
+                background: active ? 'var(--accent-bg)' : 'var(--surface)',
+                color: active ? 'var(--accent-fg)' : 'var(--muted)',
+              }}
+            >
+              {cfg && <span style={{ width: 6, height: 6, borderRadius: '50%', background: cfg.dot }} />}
+              {t === 'all' ? 'Todas' : cfg?.label ?? t}
+              <span style={{ opacity: 0.6 }}>{counts[t] ?? 0}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {error ? (
+        <div style={{ padding: '16px 18px', fontSize: 12, color: 'var(--danger)' }}>{error}</div>
+      ) : loading ? (
+        <div style={{ padding: '24px 18px', fontSize: 12, color: 'var(--dim)', textAlign: 'center' }}>Carregando…</div>
+      ) : visible.length === 0 ? (
+        <div style={{ padding: '24px 18px', fontSize: 12, color: 'var(--dim)', textAlign: 'center' }}>
+          Nenhuma linha corresponde ao filtro.
+        </div>
+      ) : (
+        <div style={{ maxHeight: 420, overflowY: 'auto', borderTop: '1px solid var(--border)' }}>
+          {visible.map((e, i) => {
+            const cfg = LOG_TYPE[e.type] ?? LOG_TYPE.other
+            return (
+              <div
+                key={i}
+                style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 8, padding: '4px 14px',
+                  borderBottom: '1px solid var(--surface)',
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 11, lineHeight: 1.6, wordBreak: 'break-all',
+                }}
+                onMouseEnter={ev => { ev.currentTarget.style.background = 'var(--surface)' }}
+                onMouseLeave={ev => { ev.currentTarget.style.background = 'transparent' }}
+              >
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: cfg.dot, flexShrink: 0, marginTop: 5 }} />
+                <span style={{ color: cfg.color, flex: 1 }}>{e.raw}</span>
+                <button
+                  onClick={() => copy(e.raw, i)}
+                  title="Copiar linha"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: copied === i ? 'var(--ok)' : 'var(--dim)', flexShrink: 0, padding: 2 }}
+                >
+                  <Copy size={11} />
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function MetricasPage() {
   const { activeServer, isFleet, servers, setActiveServer } = useServer()
   const [periodKey, setPeriodKey]   = useState('24h')
   const [rows, setRows]             = useState([])
+  const [snap, setSnap]             = useState(null)
   const [loading, setLoading]       = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
   const ambiguous = !activeServer && isFleet && servers.length > 1
   const hours = PERIODS.find(p => p.key === periodKey).hours
+  const scopedId = activeServer?.id ?? (servers.length === 1 ? servers[0]?.id : null)
 
   // serverId null é válido aqui: com um servidor só cadastrado (frota
   // de 1), o backend resolve sozinho (_resolve_server_id) — só recusa
@@ -106,33 +384,63 @@ export default function MetricasPage() {
   const load = useCallback((opts = {}) => {
     if (ambiguous) { setLoading(false); return }
     opts.manual ? setRefreshing(true) : setLoading(true)
-    fetchHistory(hours, 'quick', activeServer?.id ?? null)
-      .then(setRows).catch(() => setRows([]))
-      .finally(() => { setLoading(false); setRefreshing(false) })
+    const sid = activeServer?.id ?? null
+    Promise.allSettled([
+      fetchHistory(hours, 'quick', sid),
+      fetchFullStatus(sid),
+    ]).then(([h, s]) => {
+      setRows(h.status === 'fulfilled' ? h.value : [])
+      setSnap(s.status === 'fulfilled' ? s.value : null)
+    }).finally(() => { setLoading(false); setRefreshing(false) })
   }, [activeServer, hours, ambiguous])
 
   useEffect(() => { load() }, [load])
 
-  const { queuePts, delivPts, kpis } = useMemo(() => {
-    if (rows.length === 0) return { queuePts: [], delivPts: [], kpis: null }
+  const { queuePts, funnelPts, sendPts, kpis } = useMemo(() => {
+    if (rows.length === 0) return { queuePts: [], funnelPts: [], sendPts: [], kpis: null }
     const queuePts = rows.map(r => ({ time: fmtTimeShort(r.timestamp, hours), Fila: r.queue_total }))
-    const delivPts = rows.map(r => {
-      const total = (r.delivered ?? 0) + (r.rejected ?? 0) + (r.deferred ?? 0)
-      return { time: fmtTimeShort(r.timestamp, hours), Entrega: total > 0 ? Math.round((r.delivered / total) * 1000) / 10 : null }
-    })
+    const funnelPts = rows.map(r => ({
+      time: fmtTimeShort(r.timestamp, hours),
+      Entregue: r.delivered ?? 0, Adiado: r.deferred ?? 0,
+      Rejeitado: r.rejected ?? 0, 'Erro DNS': r.dns_errors ?? 0,
+    }))
+    const sendPts = rows.map(r => ({ time: fmtTimeShort(r.timestamp, hours), Enviadas: r.recent_sends ?? 0 }))
+
     const peak = rows.reduce((m, r) => (r.queue_total > m.queue_total ? r : m), rows[0])
-    const rates = delivPts.map(p => p.Entrega).filter(v => v != null)
-    const avgRate = rates.length ? rates.reduce((a, b) => a + b, 0) / rates.length : null
+    const delivRates = rows.map(r => {
+      const total = (r.delivered ?? 0) + (r.rejected ?? 0) + (r.deferred ?? 0)
+      return total > 0 ? (r.delivered / total) * 100 : null
+    }).filter(v => v != null)
+    const avgRate = delivRates.length ? delivRates.reduce((a, b) => a + b, 0) / delivRates.length : null
     const avgQueue = rows.reduce((s, r) => s + r.queue_total, 0) / rows.length
     const critEvents = rows.filter(r => CRIT_SEVERITIES.has(r.severity)).length
+    const totalSent = rows.reduce((s, r) => s + (r.recent_sends ?? 0), 0)
+    const totalDeferred = rows.reduce((s, r) => s + (r.deferred ?? 0), 0)
+    const totalRejected = rows.reduce((s, r) => s + (r.rejected ?? 0), 0)
     return {
-      queuePts, delivPts,
+      queuePts, funnelPts, sendPts,
       kpis: {
         peak: peak.queue_total, peakAt: fmtTimeShort(peak.timestamp, hours),
-        avgRate, avgQueue, critEvents,
+        avgRate, avgQueue, critEvents, totalSent, totalDeferred, totalRejected,
       },
     }
   }, [rows, hours])
+
+  const offenders = useMemo(() => {
+    if (!snap) return null
+    const list = (arr) => (Array.isArray(arr) ? arr : []).map(x =>
+      typeof x === 'string' ? { label: x } : { label: x.domain ?? x.name ?? x.ip ?? JSON.stringify(x), count: x.count ?? x.n }
+    )
+    return {
+      sender: snap.top_sender ? [{ label: snap.top_sender, count: snap.top_sender_count }] : [],
+      recipient: snap.top_recipient ? [{ label: snap.top_recipient, count: snap.top_recipient_count }] : [],
+      dest: snap.top_dest_domain ? [{ label: snap.top_dest_domain, count: snap.top_dest_domain_count }] : [],
+      auth: snap.top_auth_user ? [{ label: snap.top_auth_user, count: snap.top_auth_count }] : [],
+      defer: list(snap.top_defer_domains),
+      rejected: list(snap.top_rejected_domains),
+      authIps: list(snap.auth_ip_diversity),
+    }
+  }, [snap])
 
   if (ambiguous) return <ChooseServer servers={servers} onPick={setActiveServer} />
 
@@ -182,54 +490,111 @@ export default function MetricasPage() {
 
       {loading ? (
         <div style={{ padding: 40, textAlign: 'center', color: 'var(--dim)', fontSize: 13 }}>Carregando…</div>
-      ) : rows.length === 0 ? (
-        <p style={{ fontSize: 12, color: 'var(--dim)', textAlign: 'center', padding: '40px 0', fontStyle: 'italic' }}>
-          Sem dados suficientes neste período — aguarde alguns ciclos de coleta.
-        </p>
       ) : (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14 }} className="metricas-kpi">
-            <Kpi label="Pico da fila" value={kpis.peak.toLocaleString('pt-BR')} sub={`às ${kpis.peakAt}`} color="var(--danger)" />
-            <Kpi label="Entrega média" value={kpis.avgRate != null ? `${kpis.avgRate.toFixed(1).replace('.', ',')}%` : '—'} sub="meta 99%" color={kpis.avgRate != null && kpis.avgRate < 99 ? 'var(--warn)' : 'var(--ok)'} />
-            <Kpi label="Eventos críticos" value={kpis.critEvents} sub={`de ${rows.length} coletas`} />
-            <Kpi label="Fila média" value={Math.round(kpis.avgQueue).toLocaleString('pt-BR')} />
-          </div>
+          {rows.length === 0 ? (
+            <p style={{ fontSize: 12, color: 'var(--dim)', textAlign: 'center', padding: '24px 0', fontStyle: 'italic' }}>
+              Sem série temporal neste período — aguarde alguns ciclos de coleta.
+            </p>
+          ) : (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14 }} className="metricas-kpi">
+                <Kpi label="Pico da fila" value={kpis.peak.toLocaleString('pt-BR')} sub={`às ${kpis.peakAt}`} color="var(--danger)" />
+                <Kpi label="Entrega média" value={kpis.avgRate != null ? `${kpis.avgRate.toFixed(1).replace('.', ',')}%` : '—'} sub="meta 99%" color={kpis.avgRate != null && kpis.avgRate < 99 ? 'var(--warn)' : 'var(--ok)'} />
+                <Kpi label="Enviadas no período" value={kpis.totalSent.toLocaleString('pt-BR')} sub={`${kpis.totalDeferred.toLocaleString('pt-BR')} adiadas · ${kpis.totalRejected.toLocaleString('pt-BR')} rejeitadas`} />
+                <Kpi label="Fila média" value={Math.round(kpis.avgQueue).toLocaleString('pt-BR')} sub={`${kpis.critEvents} eventos críticos`} />
+              </div>
 
-          <ChartCard title="Volume da fila" sub={`mensagens acumuladas · ${periodKey}`} badge={`pico: ${kpis.peak.toLocaleString('pt-BR')}`}>
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={queuePts} margin={{ top: 4, right: 4, left: -14, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="metricasQueueFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="var(--sky)" stopOpacity={0.25} />
-                    <stop offset="100%" stopColor="var(--sky)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                <XAxis dataKey="time" tick={{ fontSize: 10.5, fill: 'var(--dim)' }} axisLine={{ stroke: 'var(--border)' }} tickLine={false} minTickGap={40} />
-                <YAxis tick={{ fontSize: 10.5, fill: 'var(--dim)' }} axisLine={false} tickLine={false} width={40} />
-                <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 11.5 }} labelStyle={{ color: 'var(--muted)' }} />
-                <Area type="monotone" dataKey="Fila" stroke="var(--sky)" strokeWidth={2} fill="url(#metricasQueueFill)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </ChartCard>
+              <ChartCard title="Volume da fila" sub={`mensagens acumuladas · ${periodKey}`} badge={`pico: ${kpis.peak.toLocaleString('pt-BR')}`}>
+                <ResponsiveContainer width="100%" height={200}>
+                  <AreaChart data={queuePts} margin={{ top: 4, right: 4, left: -14, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="metricasQueueFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="var(--sky)" stopOpacity={0.25} />
+                        <stop offset="100%" stopColor="var(--sky)" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                    <XAxis dataKey="time" tick={{ fontSize: 10.5, fill: 'var(--dim)' }} axisLine={{ stroke: 'var(--border)' }} tickLine={false} minTickGap={40} />
+                    <YAxis tick={{ fontSize: 10.5, fill: 'var(--dim)' }} axisLine={false} tickLine={false} width={40} />
+                    <Tooltip {...chartTooltip} />
+                    <Area type="monotone" dataKey="Fila" stroke="var(--sky)" strokeWidth={2} fill="url(#metricasQueueFill)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </ChartCard>
 
-          <ChartCard title="Taxa de entrega" sub={`% de mensagens entregues · ${periodKey}`}>
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={delivPts} margin={{ top: 4, right: 4, left: -14, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="metricasDelivFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="var(--sky)" stopOpacity={0.25} />
-                    <stop offset="100%" stopColor="var(--sky)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                <XAxis dataKey="time" tick={{ fontSize: 10.5, fill: 'var(--dim)' }} axisLine={{ stroke: 'var(--border)' }} tickLine={false} minTickGap={40} />
-                <YAxis domain={[80, 100]} tick={{ fontSize: 10.5, fill: 'var(--dim)' }} axisLine={false} tickLine={false} width={40} unit="%" />
-                <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 11.5 }} labelStyle={{ color: 'var(--muted)' }} formatter={v => [`${v}%`, 'Entrega']} />
-                <Area type="monotone" dataKey="Entrega" stroke="var(--sky)" strokeWidth={2} fill="url(#metricasDelivFill)" connectNulls />
-              </AreaChart>
-            </ResponsiveContainer>
-          </ChartCard>
+              <ChartCard
+                title="Funil de entrega"
+                sub={`para onde o e-mail foi, por ciclo · ${periodKey}`}
+                legend={FUNNEL_SERIES}
+              >
+                <ResponsiveContainer width="100%" height={200}>
+                  <AreaChart data={funnelPts} margin={{ top: 4, right: 4, left: -14, bottom: 0 }} stackOffset="none">
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                    <XAxis dataKey="time" tick={{ fontSize: 10.5, fill: 'var(--dim)' }} axisLine={{ stroke: 'var(--border)' }} tickLine={false} minTickGap={40} />
+                    <YAxis tick={{ fontSize: 10.5, fill: 'var(--dim)' }} axisLine={false} tickLine={false} width={40} />
+                    <Tooltip {...chartTooltip} />
+                    {FUNNEL_SERIES.map(s => (
+                      <Area key={s.key} type="monotone" dataKey={s.key} stackId="funnel"
+                            stroke={s.color} strokeWidth={1.5} fill={s.color} fillOpacity={0.18} />
+                    ))}
+                  </AreaChart>
+                </ResponsiveContainer>
+                {kpis.avgRate == null && (
+                  <p style={{ fontSize: 11, color: 'var(--dim)', margin: '4px 0 8px', lineHeight: 1.5 }}>
+                    Sem contagens de entrega neste período — o diag-exim.sh não conseguiu
+                    ler o mainlog em nenhum ciclo (fila continua sendo lida). O funil volta
+                    a preencher assim que o parser do log voltar.
+                  </p>
+                )}
+              </ChartCard>
+
+              <ChartCard title="Throughput de envio" sub={`mensagens processadas por ciclo · ${periodKey}`}>
+                <ResponsiveContainer width="100%" height={160}>
+                  <AreaChart data={sendPts} margin={{ top: 4, right: 4, left: -14, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="metricasSendFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="var(--ok)" stopOpacity={0.22} />
+                        <stop offset="100%" stopColor="var(--ok)" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                    <XAxis dataKey="time" tick={{ fontSize: 10.5, fill: 'var(--dim)' }} axisLine={{ stroke: 'var(--border)' }} tickLine={false} minTickGap={40} />
+                    <YAxis tick={{ fontSize: 10.5, fill: 'var(--dim)' }} axisLine={false} tickLine={false} width={40} />
+                    <Tooltip {...chartTooltip} />
+                    <Area type="monotone" dataKey="Enviadas" stroke="var(--ok)" strokeWidth={2} fill="url(#metricasSendFill)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </ChartCard>
+            </>
+          )}
+
+          {/* ── Top ofensores do momento (snapshot completo) ── */}
+          {offenders && (
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', margin: '4px 0 10px' }}>
+                Top ofensores agora
+                {snap?.timestamp && <span style={{ fontWeight: 400, color: 'var(--dim)', fontSize: 11.5 }}> · leitura de {fmtTimeShort(snap.timestamp, 24)}</span>}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12 }}>
+                <OffenderTable title="Maior remetente" rows={offenders.sender} empty="Nenhum remetente dominante." />
+                <OffenderTable title="Maior destino (domínio)" rows={offenders.dest} empty="Nenhum destino dominante." />
+                <OffenderTable title="Maior destinatário" rows={offenders.recipient} empty="Nenhum destinatário dominante." />
+                <OffenderTable title="Domínios que mais adiam" rows={offenders.defer} empty="Nenhum adiamento concentrado." />
+                <OffenderTable title="Domínios que mais rejeitam" rows={offenders.rejected} empty="Nenhuma rejeição concentrada." />
+                <OffenderTable title="Conta de auth mais ativa" rows={offenders.auth} empty="Sem autenticação relevante." />
+                {offenders.authIps.length > 0 && (
+                  <OffenderTable title="Diversidade de IPs de auth" rows={offenders.authIps} />
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── Recursos do Exim (recolhido) ── */}
+          {snap && <EximResources snap={snap} />}
+
+          {/* ── Log Viewer embutido ── */}
+          <InlineLogViewer serverId={scopedId} />
         </>
       )}
 

@@ -4,6 +4,15 @@
  *
  * Hook:
  *   const { role, isAdmin, username } = useAuth()
+ *
+ * O token vem por prop de <App> (o mesmo `useState` que decide entre a
+ * tela de Login e o app). Antes este provider lia `localStorage.getItem`
+ * direto no corpo do componente: no primeiro render logo após o login o
+ * token ainda não tinha sido persistido (o `useEffect` de App que grava
+ * no localStorage roda depois do render), então a árvore inteira montava
+ * como `role: 'viewer'` — menu de admin escondido, avatar placeholder —
+ * e só um F5 corrigia. Recebendo por prop, o provider re-renderiza no
+ * mesmo tick em que o token muda.
  */
 import { createContext, useContext, useMemo } from 'react'
 
@@ -17,8 +26,10 @@ function parseJwt(token) {
   }
 }
 
-export function AuthProvider({ children }) {
-  const token   = localStorage.getItem('exim_token')
+export function AuthProvider({ token: tokenProp, children }) {
+  // Fallback ao localStorage mantém o provider utilizável fora de App
+  // (testes) — em produção o valor sempre chega por prop.
+  const token   = tokenProp ?? (typeof localStorage !== 'undefined' ? localStorage.getItem('exim_token') : null)
   const payload = useMemo(() => parseJwt(token), [token])
 
   const value = {

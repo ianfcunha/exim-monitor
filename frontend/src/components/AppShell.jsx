@@ -27,7 +27,7 @@
  */
 import {
   Bell, CheckCircle2, ClipboardList, Inbox, Layers, LayoutGrid, LineChart,
-  LogOut, Moon, Server, Settings, ShieldCheck, Sun,
+  LogOut, Moon, Server, Settings, ShieldCheck, Sun, User,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
@@ -472,7 +472,7 @@ function NewShell({ children, onLogout, right, dense, isDark, onToggleTheme }) {
             fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center',
             letterSpacing: '0.02em', flexShrink: 0,
           }}>
-            {(username || 'IC').slice(0, 2).toUpperCase()}
+            {username ? username.slice(0, 2).toUpperCase() : <User size={12} />}
           </div>
           <Tooltip>
             <TooltipTrigger asChild>

@@ -77,7 +77,7 @@ export default function App() {
   return (
     <TooltipProvider delayDuration={300}>
     <ToastProvider>
-      <AuthProvider>
+      <AuthProvider token={token}>
         {/* Sessão 4, T8: o Router envolve o ServerProvider (e não o
             contrário) porque a seleção de servidor virou estado de URL —
             o provider precisa de useSearchParams. */}
@@ -101,8 +101,9 @@ export default function App() {
             {/* Sessão 6 — telas do handoff Mail IQ 2.0 */}
             <Route path="/frota"    element={shell(<FrotaPage />)} />
             <Route path="/metricas" element={shell(<MetricasPage />)} />
-            <Route path="/plano"     element={shell(<PlanoPage />)} />
-            <Route path="/plano/:id" element={shell(<PlanoPage />)} />
+            <Route path="/plano"           element={shell(<PlanoPage />)} />
+            <Route path="/plano/historico" element={shell(<PlanoPage view="historico" />)} />
+            <Route path="/plano/:id"       element={shell(<PlanoPage />)} />
 
             <Route path="/reputation" element={shell(<ReputationPage />)} />
             {/* O painel clássico deixou de ser um destino e virou a aba

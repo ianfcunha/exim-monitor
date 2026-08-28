@@ -20,12 +20,19 @@
  * máquina de estados append-only, com actor e timestamp) e do fluxo
  * plan()→apply() já validado em IncidentDetail — não de um checklist
  * fixo que o mockup inventa.
+ *
+ * Sessão 6 / retorno #2 — layout de 2 colunas: antes a tela mostrava UM
+ * incidente por vez (o mais severo, ou o do :id) e trocar exigia voltar
+ * à Triagem ou ao sino. Agora a coluna esquerda lista todos os
+ * incidentes ativos da frota + um atalho para o Histórico, e a direita
+ * mostra o plano completo do selecionado. /plano/:id continua sendo o
+ * deep link; /plano/historico abre a lista de planos já encerrados.
  */
 import {
-  Check, CheckCircle2, ClipboardList, Loader2, ShieldOff,
+  Check, CheckCircle2, ChevronLeft, ClipboardList, History, Loader2, ShieldOff, XCircle,
 } from 'lucide-react'
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   ackIncident, applyIncidentFix, fetchIncident, fetchIncidents,
   planAction, planIncidentFix, resolveIncident, runAction, silenceIncident,
@@ -42,6 +49,12 @@ import { useServer } from '../contexts/ServerContext'
 import { useToast } from '../contexts/ToastContext'
 
 const STATUS_ORDER = ['aberto', 'em_observacao', 'mitigado', 'resolvido']
+// Incidente "ativo" = qualquer coisa que não seja `resolvido`. `mitigado`
+// entra aqui de propósito: a correção foi aplicada mas o ciclo ainda não
+// fechou, e é justamente o momento em que se quer acompanhar de perto.
+const ACTIVE_STATUSES = new Set(['aberto', 'em_observacao', 'mitigado'])
+
+const ACTION_LABEL = Object.fromEntries(ACTIONS.map(a => [a.id, a.label]))
 
 const EVENT_LABELS = {
   opened: 'Incidente aberto', escalated: 'Agravado — condição piorou',
@@ -88,12 +101,12 @@ function NoActiveIncident() {
         </p>
         <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 18px', lineHeight: 1.55 }}>
           O plano de correção aparece aqui assim que um incidente for detectado
-          em qualquer servidor da frota. Para ver planos de incidentes já
-          resolvidos, use a Triagem.
+          em qualquer servidor da frota.
         </p>
-        <Link to="/triage">
-          <Button size="sm" variant="outline">Ir para a Triagem</Button>
-        </Link>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+          <Link to="/triage"><Button size="sm" variant="outline">Ir para a Triagem</Button></Link>
+          <Link to="/plano/historico"><Button size="sm" variant="outline"><History size={12} /> Ver histórico</Button></Link>
+        </div>
       </div>
     </div>
   )
@@ -460,91 +473,225 @@ function ActionOptions({ incident, server, isResolved, onApplied, onPhaseChange 
   )
 }
 
-export default function PlanoPage() {
-  const { id: routeId } = useParams()
+// ── "Correções aplicadas" — ActionHistory ligada a este incidente
+// (incident.actions, novo no detalhe). Diferente da Timeline (que é a
+// máquina de estados): aqui é o que um humano mandou executar, com
+// resultado real e como reverter.
+function AppliedFixes({ actions }) {
+  if (!actions || actions.length === 0) return null
+  return (
+    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '18px 20px' }}>
+      <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', marginBottom: 12 }}>Correções aplicadas</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {actions.map((a, i) => (
+          <div key={i} style={{
+            display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px',
+            borderRadius: 9, background: 'var(--surface)', border: '1px solid var(--border)',
+          }}>
+            {a.success
+              ? <CheckCircle2 size={14} color="var(--ok)" style={{ flexShrink: 0, marginTop: 1 }} />
+              : <XCircle size={14} color="var(--danger)" style={{ flexShrink: 0, marginTop: 1 }} />}
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>
+                {ACTION_LABEL[a.action] ?? a.action}
+                {a.param && <span style={{ color: 'var(--muted)', fontWeight: 400 }}> · {a.param}</span>}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>
+                {a.actor} · {fmtDateTime(a.executed_at)}{!a.success && ' · falhou'}
+              </div>
+              {a.revert_hint && (
+                <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 3, fontFamily: "'JetBrains Mono', monospace" }}>
+                  reverter: {a.revert_hint}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Coluna esquerda: incidentes ativos + atalho para o Histórico ────────
+function IncidentRail({ items, loading, selectedId, historyActive, onPick, onHistory }) {
+  return (
+    <div className="plano-rail" style={{
+      flexShrink: 0, width: 264, alignSelf: 'flex-start', position: 'sticky', top: 76,
+      display: 'flex', flexDirection: 'column', gap: 4,
+    }}>
+      <div style={{
+        fontSize: 10.5, letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 700,
+        color: 'var(--dim)', padding: '2px 10px 6px',
+      }}>
+        Ativos {items.length > 0 && `(${items.length})`}
+      </div>
+
+      {loading && items.length === 0 ? (
+        <div style={{ padding: '10px 10px', fontSize: 12, color: 'var(--dim)' }}>Carregando…</div>
+      ) : items.length === 0 ? (
+        <div style={{ padding: '10px 10px', fontSize: 12, color: 'var(--dim)', lineHeight: 1.5 }}>
+          Nenhum incidente ativo.
+        </div>
+      ) : (
+        items.map(inc => {
+          const sev = SEVERITY_STYLE[inc.severity] ?? SEVERITY_STYLE.atencao
+          const active = !historyActive && inc.id === selectedId
+          return (
+            <button
+              key={inc.id}
+              onClick={() => onPick(inc.id)}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left', padding: '9px 10px',
+                borderRadius: 9, border: `1px solid ${active ? 'var(--sky)' : 'transparent'}`,
+                background: active ? 'var(--accent-bg)' : 'transparent', cursor: 'pointer',
+              }}
+              onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--surface)' }}
+              onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 3 }}>
+                <span style={{
+                  width: 7, height: 7, borderRadius: '50%', background: sev.text, flexShrink: 0,
+                  animation: inc.status === 'aberto' ? 'pulse-sky 1.6s ease-in-out infinite' : undefined,
+                }} />
+                <span style={{
+                  fontSize: 12, fontWeight: active ? 700 : 600,
+                  color: active ? 'var(--accent-fg)' : 'var(--text)',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {incidentTitle(inc)}
+                </span>
+              </div>
+              <div style={{ fontSize: 10.5, color: 'var(--dim)', paddingLeft: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {inc.server_name ?? `servidor #${inc.server_id}`}
+                {' · '}{STATUS_LABELS[inc.status] ?? inc.status}
+                {' · '}{fmtAge(inc.last_seen)}
+              </div>
+            </button>
+          )
+        })
+      )}
+
+      <div style={{ height: 1, background: 'var(--border)', margin: '8px 10px' }} />
+
+      <button
+        onClick={onHistory}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+          padding: '9px 10px', borderRadius: 9, cursor: 'pointer',
+          border: `1px solid ${historyActive ? 'var(--sky)' : 'transparent'}`,
+          background: historyActive ? 'var(--accent-bg)' : 'transparent',
+          fontSize: 12, fontWeight: historyActive ? 700 : 600,
+          color: historyActive ? 'var(--accent-fg)' : 'var(--muted)',
+        }}
+        onMouseEnter={e => { if (!historyActive) e.currentTarget.style.background = 'var(--surface)' }}
+        onMouseLeave={e => { if (!historyActive) e.currentTarget.style.background = 'transparent' }}
+      >
+        <History size={13} /> Histórico de planos
+      </button>
+    </div>
+  )
+}
+
+// ── Histórico: incidentes resolvidos, abre o plano em modo leitura ──────
+function HistoryView({ rows, loading, onOpen }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div>
+        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text)' }}>
+          Histórico de planos de correção
+        </h2>
+        <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--muted)' }}>
+          Incidentes já encerrados — abra qualquer um para ver o plano, o que foi
+          executado e a linha do tempo, em modo leitura.
+        </p>
+      </div>
+
+      {loading ? (
+        <div style={{ padding: 32, textAlign: 'center', color: 'var(--dim)', fontSize: 13 }}>Carregando…</div>
+      ) : rows.length === 0 ? (
+        <div style={{
+          background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12,
+          padding: '28px 24px', textAlign: 'center', fontSize: 12.5, color: 'var(--muted)',
+        }}>
+          Nenhum incidente resolvido ainda.
+        </div>
+      ) : (
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+          {rows.map((inc, i) => {
+            const sev = SEVERITY_STYLE[inc.severity] ?? SEVERITY_STYLE.atencao
+            const closedAt = inc.resolved_at ?? inc.last_seen
+            const how = inc.resolution === 'expirada'
+              ? 'resolveu sozinho (parou de ser detectado)'
+              : inc.resolution === 'manual'
+                ? 'resolvido manualmente'
+                : 'encerrado'
+            return (
+              <button
+                key={inc.id}
+                onClick={() => onOpen(inc.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 12, width: '100%', textAlign: 'left',
+                  padding: '12px 16px', background: 'none', cursor: 'pointer',
+                  border: 'none', borderBottom: i < rows.length - 1 ? '1px solid var(--border)' : 'none',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--surface)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'none'}
+              >
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: sev.text, flexShrink: 0 }} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {incidentTitle(inc)}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{inc.display_id}</span>
+                    {' · '}{inc.server_name ?? `servidor #${inc.server_id}`}
+                    {' · '}{how}
+                  </div>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--dim)', flexShrink: 0, textAlign: 'right' }}>
+                  {fmtDateTime(closedAt)}
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Plano completo de UM incidente (o conteúdo antigo da página) ────────
+function PlanDetail({ incident, server, onRefresh, actionPhase, setActionPhase }) {
   const toast = useToast()
-  const { servers } = useServer()
-
-  const [incident, setIncident] = useState(null)
-  const [loading, setLoading]   = useState(true)
-  const [notFoundActive, setNotFoundActive] = useState(false)
-  const [busy, setBusy]         = useState(null)
-  // Feedback imediato de uma ação em andamento — ver PHASE_LABELS acima
-  // do Stepper. Some sozinho quando o refresh() pós-ação traz o
-  // `incident.status` já atualizado (ou volta a 'ocioso' se falhou).
-  const [actionPhase, setActionPhase] = useState('ocioso')
-
-  // Sem :id na rota — escolhe o incidente aberto mais severo da frota
-  // inteira (crítico antes de atenção, mais recente primeiro), o mesmo
-  // critério do banner de alerta do handoff.
-  const loadDefault = useCallback(() => {
-    setLoading(true)
-    fetchIncidents({ status: 'aberto' }).then(rows => {
-      if (rows.length === 0) { setIncident(null); setNotFoundActive(true); setLoading(false); return }
-      const best = [...rows].sort((a, b) => {
-        if (a.severity !== b.severity) return a.severity === 'critico' ? -1 : 1
-        return new Date(b.last_seen) - new Date(a.last_seen)
-      })[0]
-      return fetchIncident(best.id).then(d => { setIncident(d); setNotFoundActive(false) })
-    }).catch(() => { setIncident(null); setNotFoundActive(true) }).finally(() => setLoading(false))
-  }, [])
-
-  const loadById = useCallback((id) => {
-    setLoading(true)
-    fetchIncident(id).then(d => { setIncident(d); setNotFoundActive(false) })
-      .catch(() => { setIncident(null); setNotFoundActive(true) })
-      .finally(() => setLoading(false))
-  }, [])
-
-  useEffect(() => {
-    if (routeId) loadById(Number(routeId))
-    else loadDefault()
-  }, [routeId, loadById, loadDefault])
-
-  // Poll leve — mesmo motivo da Triagem: esta é a tela que fica aberta
-  // acompanhando o incidente em andamento.
-  useEffect(() => {
-    const id = setInterval(() => { routeId ? loadById(Number(routeId)) : loadDefault() }, 30_000)
-    return () => clearInterval(id)
-  }, [routeId, loadById, loadDefault])
-
-  const refresh = () => (routeId ? loadById(Number(routeId)) : loadDefault())
-
-  if (loading && !incident) {
-    return <div style={{ padding: 40, textAlign: 'center', color: 'var(--dim)', fontSize: 13 }}>Carregando…</div>
-  }
-  if (!incident || notFoundActive) {
-    return <NoActiveIncident />
-  }
+  const [busy, setBusy] = useState(null)
 
   const sev = SEVERITY_STYLE[incident.severity] ?? SEVERITY_STYLE.atencao
   const isResolved = incident.status === 'resolvido'
-  const server = servers.find(s => s.id === incident.server_id)
 
   const events = [...(incident.events ?? [])].sort((a, b) => new Date(a.at) - new Date(b.at))
   const actors = [...new Set(events.map(e => e.actor).filter(a => a && a !== 'system'))]
 
   const doAck = async () => {
     setBusy('ack')
-    try { await ackIncident(incident.id); refresh() }
+    try { await ackIncident(incident.id); onRefresh() }
     catch (err) { toast({ type: 'err', msg: err?.response?.data?.detail || 'Erro ao confirmar ciência.' }) }
     finally { setBusy(null) }
   }
   const doSilence = async () => {
     setBusy('silence')
-    try { await silenceIncident(incident.id, 60); toast({ type: 'ok', msg: 'Silenciado por 60 minutos.' }); refresh() }
+    try { await silenceIncident(incident.id, 60); toast({ type: 'ok', msg: 'Silenciado por 60 minutos.' }); onRefresh() }
     catch (err) { toast({ type: 'err', msg: err?.response?.data?.detail || 'Erro ao silenciar.' }) }
     finally { setBusy(null) }
   }
   const doResolve = async () => {
     setBusy('resolve')
-    try { await resolveIncident(incident.id, 'manual'); toast({ type: 'ok', msg: 'Incidente resolvido.' }); refresh() }
+    try { await resolveIncident(incident.id, 'manual'); toast({ type: 'ok', msg: 'Incidente resolvido.' }); onRefresh() }
     catch (err) { toast({ type: 'err', msg: err?.response?.data?.detail || 'Erro ao resolver.' }) }
     finally { setBusy(null) }
   }
-  return (
-    <div style={{ maxWidth: 1280, margin: '0 auto', padding: '20px 24px 32px', width: '100%', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* ── Banner ── */}
       <div style={{
         background: sev.bg, border: `1.5px solid ${sev.border}`, borderRadius: 12,
@@ -635,9 +782,13 @@ export default function PlanoPage() {
 
       {/* ── Ações disponíveis — escolhe uma opção, plan()→apply() nela ── */}
       <ActionOptions
+        key={incident.id}
         incident={incident} server={server} isResolved={isResolved}
-        onApplied={refresh} onPhaseChange={setActionPhase}
+        onApplied={onRefresh} onPhaseChange={setActionPhase}
       />
+
+      {/* ── Correções aplicadas (ActionHistory deste incidente) ── */}
+      <AppliedFixes actions={incident.actions} />
 
       {/* ── Responsáveis + Timeline ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }} className="plano-2col">
@@ -680,8 +831,156 @@ export default function PlanoPage() {
           ))}
         </div>
       </div>
+    </div>
+  )
+}
 
-      <style>{`@media (max-width: 900px) { .plano-2col { grid-template-columns: 1fr !important; } }`}</style>
+export default function PlanoPage({ view }) {
+  const { id: routeId } = useParams()
+  const navigate = useNavigate()
+  const { search } = useLocation()
+  const { servers } = useServer()
+
+  const isHistory = view === 'historico'
+
+  const [activeList, setActiveList] = useState([])
+  const [listLoading, setListLoading] = useState(true)
+  const [historyRows, setHistoryRows] = useState([])
+
+  const [incident, setIncident] = useState(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [notFound, setNotFound] = useState(false)
+  const [actionPhase, setActionPhase] = useState('ocioso')
+
+  const goto = useCallback((path) => navigate(`${path}${search}`), [navigate, search])
+
+  // Lista de todos os incidentes (rail + histórico saem do mesmo fetch —
+  // limite padrão 200, mais que suficiente pra uma frota de laboratório).
+  const loadList = useCallback(() => {
+    fetchIncidents({})
+      .then(rows => {
+        setActiveList(rows.filter(r => ACTIVE_STATUSES.has(r.status)))
+        setHistoryRows(
+          rows.filter(r => r.status === 'resolvido')
+            .sort((a, b) => new Date(b.resolved_at ?? b.last_seen) - new Date(a.resolved_at ?? a.last_seen))
+        )
+      })
+      .catch(() => { setActiveList([]); setHistoryRows([]) })
+      .finally(() => { setListLoading(false) })
+  }, [])
+
+  const loadDetail = useCallback((id) => {
+    setDetailLoading(true)
+    fetchIncident(id)
+      .then(d => { setIncident(d); setNotFound(false) })
+      .catch(() => { setIncident(null); setNotFound(true) })
+      .finally(() => setDetailLoading(false))
+  }, [])
+
+  useEffect(() => { loadList() }, [loadList])
+  // Poll leve — esta tela fica aberta acompanhando o incidente.
+  useEffect(() => {
+    const t = setInterval(loadList, 30_000)
+    return () => clearInterval(t)
+  }, [loadList])
+
+  // Sem :id e não é histórico → manda pro incidente ativo mais severo
+  // (crítico antes de atenção, mais recente primeiro). Se não houver
+  // nenhum, fica no empty state.
+  useEffect(() => {
+    if (isHistory || routeId || listLoading) return
+    if (activeList.length === 0) { setIncident(null); return }
+    const best = [...activeList].sort((a, b) => {
+      if (a.severity !== b.severity) return a.severity === 'critico' ? -1 : 1
+      return new Date(b.last_seen) - new Date(a.last_seen)
+    })[0]
+    navigate(`/plano/${best.id}${search}`, { replace: true })
+  }, [isHistory, routeId, listLoading, activeList, navigate, search])
+
+  // Carrega/atualiza o detalhe do :id selecionado.
+  useEffect(() => {
+    if (isHistory || !routeId) { setIncident(null); return }
+    loadDetail(Number(routeId))
+  }, [isHistory, routeId, loadDetail])
+
+  useEffect(() => {
+    if (isHistory || !routeId) return
+    const t = setInterval(() => loadDetail(Number(routeId)), 30_000)
+    return () => clearInterval(t)
+  }, [isHistory, routeId, loadDetail])
+
+  const refresh = useCallback(() => {
+    loadList()
+    if (routeId) loadDetail(Number(routeId))
+  }, [loadList, loadDetail, routeId])
+
+  const selectedId = routeId ? Number(routeId) : null
+  const server = incident ? servers.find(s => s.id === incident.server_id) : null
+
+  // Empty state em tela cheia só quando NÃO há nada ativo e não estamos
+  // no histórico — aí nem vale desenhar as duas colunas.
+  if (!isHistory && !routeId && !listLoading && activeList.length === 0) {
+    return <NoActiveIncident />
+  }
+
+  return (
+    <div style={{
+      maxWidth: 1400, margin: '0 auto', padding: '20px 24px 40px', width: '100%',
+      display: 'flex', gap: 24, alignItems: 'flex-start',
+    }} className="plano-shell">
+      <IncidentRail
+        items={activeList}
+        loading={listLoading}
+        selectedId={selectedId}
+        historyActive={isHistory}
+        onPick={(id) => goto(`/plano/${id}`)}
+        onHistory={() => goto('/plano/historico')}
+      />
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {isHistory ? (
+          <>
+            <button
+              onClick={() => goto('/plano')}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5, marginBottom: 12,
+                background: 'none', border: 'none', cursor: 'pointer', color: 'var(--dim)', fontSize: 12, padding: 0,
+              }}
+            >
+              <ChevronLeft size={13} /> Voltar aos ativos
+            </button>
+            <HistoryView rows={historyRows} loading={listLoading && historyRows.length === 0} onOpen={(id) => goto(`/plano/${id}`)} />
+          </>
+        ) : detailLoading && !incident ? (
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--dim)', fontSize: 13 }}>Carregando…</div>
+        ) : notFound || !incident ? (
+          <div style={{
+            background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12,
+            padding: '28px 24px', textAlign: 'center', fontSize: 12.5, color: 'var(--muted)',
+          }}>
+            Incidente não encontrado ou já removido.{' '}
+            <button onClick={() => goto('/plano')} style={{ background: 'none', border: 'none', color: 'var(--sky)', cursor: 'pointer', fontSize: 12.5 }}>
+              Ver incidentes ativos
+            </button>
+          </div>
+        ) : (
+          <PlanDetail
+            incident={incident} server={server} onRefresh={refresh}
+            actionPhase={actionPhase} setActionPhase={setActionPhase}
+          />
+        )}
+      </div>
+
+      <style>{`
+        @media (max-width: 960px) {
+          .plano-shell { flex-direction: column; }
+          .plano-rail {
+            position: static !important; width: 100% !important;
+            max-height: 40vh; overflow-y: auto;
+          }
+          .plano-2col { grid-template-columns: 1fr !important; }
+        }
+      `}</style>
     </div>
   )
 }

@@ -50,6 +50,11 @@ def get_history(
             "rejected":     s.rejected,
             "deferred":     s.deferred,
             "recent_sends": s.recent_sends,
+            # Sem coluna própria — vivem no `data` JSONB. O funil de
+            # entrega da tela de Métricas precisa de dns_errors; a
+            # composição da fila precisa de frozen.
+            "dns_errors":   (s.data or {}).get("log", {}).get("dns_errors", 0),
+            "frozen":       (s.data or {}).get("queue", {}).get("frozen", 0),
         }
         for s in rows
     ]
