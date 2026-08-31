@@ -14,5 +14,3 @@ resend==2.0.0
 # Fase 1 — Fundação sólida
 alembic==1.13.1
 slowapi==0.1.9
-# Servidor de produção
-uwsgi==2.0.26

@@ -1,4 +1,3 @@
-version: '3.9'
 
 services:
 
@@ -43,7 +42,7 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
-      - ./backend:/app               # permite editar uwsgi.ini sem rebuild
+      - ./backend:/app               # permite editar codigo sem rebuild
       - ~/.ssh:/root/.ssh:ro         # chave SSH do host para acesso ao EXIM
       - ./diag-exim:/app/diag-exim:ro   # fonte única (pacote open-core) — enviado por SFTP ao cadastrar servidor. Mount de DIRETÓRIO (não do arquivo): git pull / editor troca o inode do arquivo e um mount de arquivo único fica preso no inode antigo até restart.
     env_file:

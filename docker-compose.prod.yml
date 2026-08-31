@@ -8,7 +8,6 @@
 #   2. Copiar .env.example para .env e preencher os valores
 #   3. Definir DOMAIN no .env ou exportar: export DOMAIN=mail.seudominio.com
 
-version: '3.9'
 
 services:
 
@@ -42,7 +41,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
       network: host
-    command: ["uwsgi", "--ini", "uwsgi.ini"]
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
     restart: unless-stopped
     depends_on:
       postgres:

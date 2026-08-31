@@ -58,6 +58,52 @@ else
 fi
 ok "Docker e Compose disponiveis"
 
+# ── Prepara o diretorio do repositorio ANTES de qualquer pergunta ─────────
+# Precisa existir cedo para: (a) reaproveitar segredos de uma instalacao
+# anterior (.env), (b) nao perder as respostas se o clone falhar depois.
+REPO_URL="${REPO_URL:-https://github.com/ianfcunha/exim-monitor.git}"
+REPO_BRANCH="${REPO_BRANCH:-main}"
+INSTALL_DIR="$HOME/exim-monitor"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
+if [[ -f "$SCRIPT_DIR/docker-compose.yml" ]]; then
+  INSTALL_DIR="$SCRIPT_DIR"
+  info "Usando diretorio local: $INSTALL_DIR"
+  git -C "$INSTALL_DIR" pull --ff-only 2>/dev/null || true
+elif [[ -d "$INSTALL_DIR/.git" ]]; then
+  info "Atualizando repositorio existente em $INSTALL_DIR..."
+  git -C "$INSTALL_DIR" pull --ff-only || true
+else
+  info "Clonando repositorio (branch $REPO_BRANCH) em $INSTALL_DIR..."
+  git clone -b "$REPO_BRANCH" "$REPO_URL" "$INSTALL_DIR"
+fi
+cd "$INSTALL_DIR"
+
+# ── Reaproveita segredos de uma instalacao anterior ──────────────────────
+# Rodar o install.sh de novo NAO pode trocar estes valores:
+#  - POSTGRES_PASSWORD: o volume de dados do Postgres ja foi inicializado
+#    com a senha antiga; uma senha nova daria "password authentication
+#    failed for user exim" e o backend entraria em loop de restart.
+#  - SSH_ENCRYPTION_KEY: cifra as credenciais SSH dos servidores no banco;
+#    troca-la torna todos os servidores ja cadastrados indecifraveis.
+#  - JWT_SECRET: troca-la desloga todo mundo (menos grave, mas evitavel).
+REUSED_SECRETS=0
+_envget() { [[ -f "$1" ]] && grep -E "^$2=" "$1" | head -1 | cut -d= -f2- || true; }
+_OLD_ENV="$INSTALL_DIR/backend/.env"
+OLD_PG_PASS="$(_envget "$_OLD_ENV" POSTGRES_PASSWORD)"
+[[ -z "$OLD_PG_PASS" ]] && OLD_PG_PASS="$(_envget "$INSTALL_DIR/.env" POSTGRES_PASSWORD)"
+if [[ -z "$OLD_PG_PASS" && -n "$(_envget "$_OLD_ENV" DATABASE_URL)" ]]; then
+  # extrai a senha de dentro do DATABASE_URL (postgresql://exim:SENHA@host...)
+  OLD_PG_PASS="$(_envget "$_OLD_ENV" DATABASE_URL | sed -E 's#.*://[^:]+:([^@]*)@.*#\1#')"
+fi
+OLD_JWT="$(_envget "$_OLD_ENV" JWT_SECRET)"
+OLD_SSH_KEY="$(_envget "$_OLD_ENV" SSH_ENCRYPTION_KEY)"
+if [[ -n "$OLD_PG_PASS" || -n "$OLD_SSH_KEY" ]]; then
+  REUSED_SECRETS=1
+  warn "Instalacao anterior detectada em $INSTALL_DIR — reaproveitando os"
+  warn "segredos existentes (senha do banco, chave de cifra SSH, JWT)."
+fi
+
 # ── Variaveis de ambiente (defaults) ──────────────────────────────────────
 USE_SSL="n"
 REVERSE_PROXY="n"
@@ -127,16 +173,21 @@ while true; do
 done
 
 # ── Senha do banco ────────────────────────────────────────────────────────
-echo ""
-ask "3. Senha do banco de dados PostgreSQL"
-read -rsp "   Senha PostgreSQL (default: gerada automaticamente): " PG_PASS; echo
-if [[ -z "$PG_PASS" ]]; then
-  PG_PASS=$(openssl rand -base64 24 | tr -d '=+/' | head -c 24)
-  info "Senha gerada: $PG_PASS (salva no .env)"
+if [[ -n "$OLD_PG_PASS" ]]; then
+  PG_PASS="$OLD_PG_PASS"
+  info "Senha do PostgreSQL reaproveitada do .env existente (o volume de dados ja usa ela)."
+else
+  echo ""
+  ask "3. Senha do banco de dados PostgreSQL"
+  read -rsp "   Senha PostgreSQL (default: gerada automaticamente): " PG_PASS; echo
+  if [[ -z "$PG_PASS" ]]; then
+    PG_PASS=$(openssl rand -base64 24 | tr -d '=+/' | head -c 24)
+    info "Senha gerada: $PG_PASS (salva no .env)"
+  fi
 fi
 
-JWT_SECRET=$(openssl rand -hex 32)
-SSH_ENCRYPTION_KEY=$(openssl rand -base64 32 | tr '+/' '-_')
+JWT_SECRET="${OLD_JWT:-$(openssl rand -hex 32)}"
+SSH_ENCRYPTION_KEY="${OLD_SSH_KEY:-$(openssl rand -base64 32 | tr '+/' '-_')}"
 
 # ── Resumo e confirmacao ───────────────────────────────────────────────────
 echo ""
@@ -159,28 +210,6 @@ echo ""
 read -rp "  Confirmar instalacao? [S/n]: " CONFIRM
 CONFIRM="${CONFIRM:-s}"
 [[ "$CONFIRM" =~ ^[Nn]$ ]] && { warn "Instalacao cancelada."; exit 0; }
-
-# ── Clona ou atualiza repositorio ─────────────────────────────────────────
-echo ""
-info "Preparando arquivos..."
-
-REPO_URL="${REPO_URL:-https://github.com/ianfcunha/exim-monitor.git}"
-REPO_BRANCH="${REPO_BRANCH:-main}"
-INSTALL_DIR="$HOME/exim-monitor"
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
-if [[ -f "$SCRIPT_DIR/docker-compose.yml" ]]; then
-  INSTALL_DIR="$SCRIPT_DIR"
-  info "Usando diretorio local: $INSTALL_DIR"
-elif [[ -d "$INSTALL_DIR/.git" ]]; then
-  info "Atualizando repositorio existente em $INSTALL_DIR..."
-  git -C "$INSTALL_DIR" pull --ff-only || true
-else
-  info "Clonando repositorio (branch $REPO_BRANCH) em $INSTALL_DIR..."
-  git clone -b "$REPO_BRANCH" "$REPO_URL" "$INSTALL_DIR"
-fi
-
-cd "$INSTALL_DIR"
 
 # ── Gera backend/.env ─────────────────────────────────────────────────────
 # Sem SSH_HOST/SSH_USER/SSH_KEY_PATH aqui de proposito — o painel nao
@@ -215,14 +244,39 @@ POSTGRES_PASSWORD=$PG_PASS
 ENV
 ok ".env raiz criado"
 
+# ── Volume de dados orfao (senha do banco desalinhada) ───────────────────
+# Se existe um volume pg_data de uma instalacao anterior mas NAO reaproveitamos
+# a senha (nenhum .env foi encontrado), o Postgres vai ignorar a senha nova
+# ("Skipping initialization") e o backend fica em loop com "password
+# authentication failed for user exim". Detecta e oferece limpar.
+PG_VOL="$($COMPOSE_CMD ls -q 2>/dev/null >/dev/null; docker volume ls -q 2>/dev/null | grep -E 'exim.?monitor.*pg_data|pg_data' | head -1 || true)"
+if [[ "$REUSED_SECRETS" -eq 0 && -n "$PG_VOL" ]]; then
+  echo ""
+  warn "Encontrei um volume de banco de uma instalacao anterior ($PG_VOL),"
+  warn "mas sem o .env correspondente — a senha nova nao vai bater com ele."
+  read -rp "  Apagar esse volume e comecar o banco do zero? (perde dados) [s/N]: " WIPE_ANSWER
+  if [[ "${WIPE_ANSWER:-n}" =~ ^[Ss]$ ]]; then
+    $COMPOSE_CMD down -v --remove-orphans 2>/dev/null || true
+    docker volume rm "$PG_VOL" 2>/dev/null || true
+    ok "Volume antigo removido — o banco sera reinicializado com a senha nova."
+  else
+    warn "Mantido. Se o backend entrar em loop de restart, rode:"
+    warn "  $COMPOSE_CMD down -v && bash install.sh"
+  fi
+fi
+
 # ── Sobe os containers ────────────────────────────────────────────────────
 echo ""
 info "Construindo e subindo containers (pode demorar alguns minutos na primeira vez)..."
 
+# --remove-orphans limpa containers de um modo anterior (ex.: caddy de uma
+# tentativa com HTTPS que agora roda sem, ou vice-versa).
+COMPOSE_UP_FLAGS="-d --build --remove-orphans"
+
 if [[ "$USE_SSL" == "y" ]]; then
-  $COMPOSE_CMD -f docker-compose.prod.yml up -d --build
+  $COMPOSE_CMD -f docker-compose.prod.yml up $COMPOSE_UP_FLAGS
 else
-  $COMPOSE_CMD up -d --build
+  $COMPOSE_CMD up $COMPOSE_UP_FLAGS
 fi
 
 ok "Containers iniciados"

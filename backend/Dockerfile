@@ -1,9 +1,9 @@
 FROM python:3.12-slim
 
-# uWSGI precisa de gcc + python3-dev para compilar
-# psycopg2-binary precisa de libpq-dev (cliente PostgreSQL)
+# gcc + libs de build para wheels que eventualmente compilem do source
+# (a maioria das deps ja vem como wheel manylinux; psycopg2-binary embute o libpq)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc python3-dev libpq-dev \
+    gcc python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -15,4 +15,7 @@ COPY . .
 
 EXPOSE 8000
 
-CMD ["uwsgi", "--ini", "uwsgi.ini"]
+# Servidor ASGI de producao. O docker-compose.prod.yml passa o mesmo
+# comando com --proxy-headers (atras do Caddy). Um unico worker de
+# proposito: o coletor em background usa cache em memoria no processo.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
