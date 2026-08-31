@@ -43,6 +43,28 @@ _DDL_ALEMBIC_VERSION = """
 """
 
 
+def _seed_admin_user(conn) -> None:
+    """
+    Garante que o admin definido em .env (ADMIN_USERNAME/ADMIN_PASSWORD)
+    exista como linha na tabela users. Idempotente (ON CONFLICT DO NOTHING).
+
+    Necessário tanto no bootstrap de banco novo quanto no caminho de
+    migração legado — sem a linha real, auth.py devolve um User sintético
+    com id=0 e toda FK pra users.id (ex.: servers.owner_id) quebra.
+    """
+    from sqlalchemy import text
+
+    from .auth import pwd_context
+    from .config import settings as cfg
+
+    pw_hash = pwd_context.hash(cfg.admin_password[:72])
+    conn.execute(text("""
+        INSERT INTO users (email, username, password_hash, role, is_active, email_verified, token_version, created_at)
+        VALUES (:email, :username, :pw, 'admin', TRUE, TRUE, 0, NOW())
+        ON CONFLICT (username) DO NOTHING
+    """), {"email": cfg.admin_email, "username": cfg.admin_username, "pw": pw_hash})
+
+
 def run_migrations() -> None:
     """
     Garante que o banco esteja no schema correto usando o engine da aplicacao
@@ -74,6 +96,9 @@ def run_migrations() -> None:
                 text("INSERT INTO alembic_version (version_num) VALUES (:v) ON CONFLICT DO NOTHING"),
                 {"v": _SCHEMA_VERSION},
             )
+            # Sem esta linha o login cai no User sintético id=0 (auth.py) e
+            # criar servidor (servers.owner_id -> users.id) estoura 500.
+            _seed_admin_user(conn)
             logger.info("Banco de dados pronto (schema %s)", _SCHEMA_VERSION)
             return
 
@@ -85,6 +110,7 @@ def run_migrations() -> None:
                 text("INSERT INTO alembic_version (version_num) VALUES (:v) ON CONFLICT DO NOTHING"),
                 {"v": _SCHEMA_VERSION},
             )
+            _seed_admin_user(conn)
             return
 
         # ── Verificar versao atual ────────────────────────────────────────
@@ -169,13 +195,7 @@ def run_migrations() -> None:
 
             # ── Migrar admin do .env para tabela users ────────────────
             from .config import settings as cfg
-            from .auth import pwd_context
-            pw_hash = pwd_context.hash(cfg.admin_password[:72])
-            conn.execute(text("""
-                INSERT INTO users (email, username, password_hash, role, is_active, email_verified, created_at)
-                VALUES (:email, :username, :pw, 'admin', TRUE, TRUE, NOW())
-                ON CONFLICT (username) DO NOTHING
-            """), {"email": cfg.admin_email, "username": cfg.admin_username, "pw": pw_hash})
+            _seed_admin_user(conn)
 
             admin_row = conn.execute(
                 text("SELECT id FROM users WHERE username = :u"), {"u": cfg.admin_username}
@@ -854,6 +874,16 @@ async def retention_loop() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     run_migrations()
+    # Idempotente e barato — garante o admin do .env como linha real em
+    # users em TODO boot, inclusive num banco que ja estava carimbado na
+    # versao atual (onde run_migrations retorna cedo e nao chega a semear).
+    # Sem isso o login cai no User sintetico id=0 e criar servidor da 500.
+    try:
+        from .database import engine
+        with engine.begin() as _conn:
+            _seed_admin_user(_conn)
+    except Exception:
+        logger.exception("Falha ao garantir o usuario admin (seguindo mesmo assim)")
     logger.info("Banco de dados pronto")
 
     collector_task = asyncio.create_task(background_collector())
