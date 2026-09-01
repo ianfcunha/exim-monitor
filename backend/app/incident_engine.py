@@ -119,7 +119,11 @@ def _log_evidence(server_cfg: Optional[Dict[str, Any]], hint: Dict[str, Any]) ->
                 "unavailable_reason": "sem conexão SSH com o servidor no momento da abertura — "
                                       "as linhas de log não puderam ser lidas"}
     try:
-        entries = get_log_entries(hint["log_filter"], limit=300, server_cfg=server_cfg)
+        # Servidores movimentados geram milhares de linhas por minuto — 300
+        # cobria só alguns segundos e a linha da entidade quase nunca caía
+        # nessa janela (mais ainda numa fila travada, onde a mensagem em
+        # backoff só gera log novo a cada retry, de 15 em 15 min ou mais).
+        entries = get_log_entries(hint["log_filter"], limit=1500, server_cfg=server_cfg)
     except SSHError as exc:
         logger.debug("Falha ao buscar evidência (%s): %s", hint, exc)
         return {"kind": "log_lines", "lines": [],
@@ -127,20 +131,71 @@ def _log_evidence(server_cfg: Optional[Dict[str, Any]], hint: Dict[str, Any]) ->
 
     match = hint.get("match") or ""
     total = len(entries)
-    if match:
-        entries = [e for e in entries if match in e.get("raw", "")]
-    lines = [e["raw"] for e in entries[:_EVIDENCE_LINES_LIMIT]]
+    matched = [e for e in entries if match in e.get("raw", "")] if match else entries
+    lines = [e["raw"] for e in matched[:_EVIDENCE_LINES_LIMIT]]
     if lines:
         return {"kind": "log_lines", "lines": lines, "log_filter": hint.get("log_filter"), "match": match}
+
+    # Nenhuma linha cita a entidade, mas HÁ linhas do tipo certo: em vez
+    # de um painel vazio, mostra as recentes desse tipo como contexto e
+    # deixa claro que nenhuma menciona a entidade.
+    if match and entries:
+        return {
+            "kind": "log_lines",
+            "lines": [e["raw"] for e in entries[:_EVIDENCE_LINES_LIMIT]],
+            "log_filter": hint.get("log_filter"), "match": match,
+            "note": (
+                f"nenhuma das {total} linhas recentes de '{hint.get('log_filter')}' cita "
+                f"'{match}' — numa fila travada a mensagem em backoff só gera log a cada "
+                f"nova tentativa. Abaixo, o '{hint.get('log_filter')}' recente do servidor "
+                f"como contexto."
+            ),
+        }
     return {
         "kind": "log_lines", "lines": [], "log_filter": hint.get("log_filter"), "match": match,
         "unavailable_reason": (
-            f"nenhuma das {total} linhas recentes de '{hint.get('log_filter')}' menciona "
-            f"'{match}' — o evento pode ter saído da janela de log lida"
+            f"nenhuma linha recente do tipo '{hint.get('log_filter')}' menciona '{match}'"
             if match else
             f"não há linhas recentes do tipo '{hint.get('log_filter')}' no mainlog"
         ),
     }
+
+
+def evidence_hint_from_incident(incident) -> Optional[Dict[str, Any]]:
+    """
+    Reconstrói o evidence_hint de linhas de log a partir de um incidente
+    já gravado — usado para recalcular a evidência ao vivo no detalhe
+    (get_incident) quando a que foi congelada na abertura veio vazia
+    (janela de log curta, entidade em backoff). Espelha o que cada
+    detector emite em detectors.py.
+
+    Só cobre os tipos cuja evidência são linhas de log. Reputação
+    (dnsbl/cert/dns_auth) retorna None — aquela evidência vem de
+    histórico de checagem, não do mainlog.
+    """
+    m = incident.metrics or {}
+    ent = incident.entity or ""
+
+    if incident.type == "auth_abuse":
+        return {"kind": "log_lines", "log_filter": "sent", "match": ent}
+
+    if incident.type == "dest_deferral":
+        dom = ent.split(":", 1)[1] if ent.startswith("domain:") else ent
+        return {"kind": "log_lines", "log_filter": "deferred", "match": dom}
+
+    if incident.type == "queue_stuck":
+        if incident.subtype == "frozen":
+            return {"kind": "log_lines", "log_filter": "deferred", "match": ""}
+        cause = m.get("cause")
+        if cause == "destino":
+            dom = m.get("top_dest_domain") or (ent.split(":", 1)[1] if ":" in ent else ent)
+            return {"kind": "log_lines", "log_filter": "deferred", "match": dom}
+        if cause == "remetente":
+            snd = m.get("top_sender") or (ent.split(":", 1)[1] if ":" in ent else ent)
+            return {"kind": "log_lines", "log_filter": "sent", "match": snd}
+        return {"kind": "log_lines", "log_filter": "deferred", "match": ""}
+
+    return None
 
 
 def _build_evidence(db, server_id: int, server_cfg: Optional[Dict[str, Any]],

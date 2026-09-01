@@ -201,6 +201,15 @@ function LogEvidence({ evidence }) {
   }
   return (
     <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
+      {evidence.note && (
+        <div style={{
+          margin: '2px 14px 8px', padding: '8px 10px', borderRadius: 7,
+          background: 'var(--surface)', border: '1px solid var(--border)',
+          fontSize: 10.5, color: 'var(--muted)', lineHeight: 1.45,
+        }}>
+          {evidence.note}
+        </div>
+      )}
       {lines.map((line, i) => (
         <div
           key={i}

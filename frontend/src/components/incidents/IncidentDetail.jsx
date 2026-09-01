@@ -33,7 +33,10 @@ function Stat({ label, value }) {
       <div style={{ fontSize: 9.5, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>
         {label}
       </div>
-      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <div
+        title={String(value)}
+        style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', overflowWrap: 'anywhere', lineHeight: 1.35 }}
+      >
         {value}
       </div>
     </div>
@@ -50,6 +53,8 @@ const METRIC_LABELS = {
   baseline_floor: 'Piso do baseline', frozen_count: 'Frozen', floor: 'Piso',
   deferred_count: 'Deferidos', share_of_total: 'Fração do total', total_deferred: 'Total deferido',
   ip: 'IP', domain: 'Domínio', cert_valid: 'Certificado válido',
+  cause: 'Causa', top_sender: 'Maior remetente', top_dest_domain: 'Maior destino',
+  auth_count: 'Envios na janela',
 }
 
 function MetricsGrid({ metrics }) {

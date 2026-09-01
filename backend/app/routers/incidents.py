@@ -33,6 +33,7 @@ from ..database import (
 )
 from ..detectors import DEFAULT_THRESHOLDS
 from ..health import compute_fleet_health
+from ..incident_engine import _build_evidence, evidence_hint_from_incident
 from ..incident_impact import compute_impact, freeze_impact, normalize_impact
 from ..incident_notify import notify_incident_event
 from ..incident_report import render_incident_report_html
@@ -248,9 +249,40 @@ def get_shared_report(token: str, db: Session = Depends(get_db)):
     return HTMLResponse(content=_render_report(db, incident))
 
 
+_OPEN_STATUSES = ("aberto", "em_observacao", "mitigado")
+
+
+def _maybe_refresh_evidence(db: Session, incident: Incident) -> None:
+    """
+    A evidência é congelada na abertura do incidente. Para incidentes de
+    linha de log ainda abertos cuja evidência veio vazia (janela de log
+    curta na hora, entidade em backoff), recalcula ao vivo aqui — uma
+    vez, best-effort: uma falha de SSH não pode quebrar o detalhe.
+    """
+    if incident.status not in _OPEN_STATUSES:
+        return
+    ev = incident.evidence or {}
+    kind = ev.get("kind") or ("log_lines" if ev.get("lines") else None)
+    if ev.get("lines") or (kind not in (None, "log_lines")):
+        return  # já tem linhas, ou é evidência de outro tipo (dnsbl/cert/...)
+
+    hint = evidence_hint_from_incident(incident)
+    if not hint:
+        return
+    try:
+        cfg = build_server_cfg(incident.server) if incident.server else None
+        fresh = _build_evidence(db, incident.server_id, cfg, hint)
+    except Exception:  # noqa: BLE001 — best-effort, mantém a evidência atual
+        return
+    if fresh.get("lines"):
+        incident.evidence = fresh
+        db.commit()
+
+
 @router.get("/{incident_id}", summary="Detalhe do incidente (com histórico de eventos)")
 def get_incident(incident_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     incident = _get_incident_or_404(db, incident_id, current_user)
+    _maybe_refresh_evidence(db, incident)
     server = incident.server
     return _incident_to_dict(
         incident, server_name=server.name if server else None,
