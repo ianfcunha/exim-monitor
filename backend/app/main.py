@@ -18,6 +18,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from .collector import background_collector
+from .ssh import close_all_pooled
 from .config import settings
 from .database import run_retention
 from .limiter import limiter
@@ -907,6 +908,7 @@ async def lifespan(app: FastAPI):
             await task
         except asyncio.CancelledError:
             pass
+    close_all_pooled()
     logger.info("Tasks de background encerradas")
 
 

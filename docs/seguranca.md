@@ -149,6 +149,22 @@ silêncio. Se `mailiq-bootstrap.sh` não rodou ainda, ou rodou parcialmente,
 isso aparece imediatamente — não é preciso esperar uma ação real falhar
 pra descobrir.
 
+## Frequência de conexão SSH
+
+O backend mantém **uma conexão SSH viva por servidor** (pool com keepalive),
+reaproveitada por todos os comandos do ciclo de coleta (heartbeat a cada
+30 s, coleta completa a cada 5 min, motor de incidentes e telas sob demanda).
+Na prática é **um login SSH por servidor a cada boot do backend** — não um
+por comando.
+
+Isso importa em servidores cPanel/WHM com CSF: o `lfd` tem
+`LF_SSH_EMAIL_ALERT` ligado por padrão e manda um e-mail
+("SSH login alert for user mailiq") a cada login aceito. Com uma conexão
+por comando isso enchia a fila do Exim de alertas; com o pool, o volume
+cai para praticamente zero. Se ainda quiser silenciar por completo, é
+config do seu CSF (`LF_SSH_EMAIL_ALERT` / allowlist do lfd) — o Mail IQ
+não mexe nisso.
+
 ## Conectar como root (não recomendado)
 
 O painel aceita `ssh_user=root`, mas exige confirmação explícita

@@ -21,6 +21,8 @@ import io
 import json
 import os
 import re
+import socket
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -148,24 +150,138 @@ def _get_client(server_cfg: Optional[Dict[str, Any]] = None) -> paramiko.SSHClie
     return client
 
 
+# ── Pool de conexões SSH ──────────────────────────────────────────────────
+#
+# O coletor (collector.py) chamava _run/_run_raw abrindo uma conexão nova a
+# cada vez: a cada ciclo quick (30s) são run_quick + expire_blocks +
+# expire_quarantine, e o ciclo full ainda dispara o motor de incidentes e as
+# telas sob demanda (Log Viewer, fila). Sem pool, cada uma vira um login SSH
+# — e num servidor cPanel/WHM o lfd do CSF dispara um e-mail "SSH login alert
+# for user mailiq" por login, enchendo a fila do Exim (relato do piloto i7).
+#
+# Com o pool cada servidor mantém UMA conexão viva (keepalive de 30s),
+# multiplexando um canal novo por comando. Passa a ser um login por
+# (re)conexão — não por comando. paramiko.SSHClient.exec_command é seguro de
+# chamar concorrentemente sobre o mesmo Transport (abre um canal por chamada).
+#
+# Conexões one-shot de propósito (não entram no pool): test_connection e
+# deploy_script — cadastro/teste explícito, querem medir/observar a conexão
+# fresca e o fingerprint.
+
+_pool: Dict[tuple, paramiko.SSHClient] = {}
+_pool_lock = threading.Lock()                    # protege _pool e _key_locks
+_key_locks: Dict[tuple, threading.Lock] = {}     # 1 lock por servidor p/ (re)conexão
+
+
+def _pool_key(cfg: Dict[str, Any]) -> tuple:
+    return (cfg["host"], cfg["port"], cfg.get("ssh_user"))
+
+
+def _key_lock(key: tuple) -> threading.Lock:
+    with _pool_lock:
+        return _key_locks.setdefault(key, threading.Lock())
+
+
+def _client_alive(client: paramiko.SSHClient) -> bool:
+    tr = client.get_transport()
+    if tr is None or not tr.is_active():
+        return False
+    try:
+        tr.send_ignore()   # levanta erro se o socket já morreu
+        return True
+    except Exception:
+        return False
+
+
+def _pooled_client(cfg: Dict[str, Any]) -> paramiko.SSHClient:
+    """Devolve a conexão viva do servidor, (re)conectando se necessário."""
+    key = _pool_key(cfg)
+    with _key_lock(key):
+        client = _pool.get(key)
+        if client is not None and _client_alive(client):
+            return client
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
+            _pool.pop(key, None)
+        client = _get_client(cfg)
+        tr = client.get_transport()
+        if tr is not None:
+            tr.set_keepalive(30)
+        _pool[key] = client
+        return client
+
+
+def _evict(cfg: Dict[str, Any]) -> None:
+    """Descarta a conexão do pool — a próxima chamada reconecta."""
+    key = _pool_key(cfg)
+    with _key_lock(key):
+        client = _pool.pop(key, None)
+    if client is not None:
+        try:
+            client.close()
+        except Exception:
+            pass
+
+
+def close_all_pooled() -> None:
+    """Fecha todas as conexões do pool (shutdown da app — ver lifespan)."""
+    with _pool_lock:
+        keys = list(_pool)
+    for key in keys:
+        with _key_lock(key):
+            client = _pool.pop(key, None)
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
+
+
+def _remote_exec(cfg: Dict[str, Any], cmd: str, timeout: int) -> tuple:
+    """
+    Roda `cmd` na conexão do pool do servidor e devolve (stdout, stderr).
+
+    Se a conexão tiver caído (keepalive perdido, servidor reiniciado),
+    reconecta e tenta mais uma vez. TimeoutError (comando não respondeu no
+    prazo) sobe direto — não é falha de conexão e cada chamador tem a
+    própria mensagem.
+    """
+    last_exc: Optional[Exception] = None
+    for _attempt in (1, 2):
+        client = _pooled_client(cfg)
+        try:
+            _stdin, stdout, stderr = client.exec_command(cmd, timeout=timeout)
+            out = stdout.read().decode("utf-8", errors="replace")
+            err = stderr.read().decode("utf-8", errors="replace")
+            return out, err
+        except (TimeoutError, socket.timeout):
+            raise
+        except (paramiko.SSHException, EOFError, OSError) as exc:
+            last_exc = exc
+            _evict(cfg)   # força reconexão na tentativa seguinte
+    raise SSHError(
+        f"Não foi possível executar comando em {cfg['host']}:{cfg['port']} — {last_exc}"
+    ) from last_exc
+
+
 def _run(args: str, server_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Executa o script com os argumentos fornecidos via SSH."""
     cfg = server_cfg or _default_cfg()
     cmd = f"bash {cfg['script_path']} {args}"
-    client = _get_client(cfg)
     try:
-        _stdin, stdout, stderr = client.exec_command(cmd, timeout=90)
-        try:
-            output = stdout.read().decode("utf-8", errors="replace").strip()
-            error  = stderr.read().decode("utf-8", errors="replace").strip()
-        except TimeoutError as exc:
-            raise SSHError(
-                f"Comando '{args}' não respondeu em 90s no servidor remoto "
-                f"({cfg['host']}) — script pode estar desatualizado, travado "
-                f"ou esse argumento não é suportado pela versão instalada lá."
-            ) from exc
-    finally:
-        client.close()
+        output, error = _remote_exec(cfg, cmd, timeout=90)
+    except (TimeoutError, socket.timeout) as exc:
+        raise SSHError(
+            f"Comando '{args}' não respondeu em 90s no servidor remoto "
+            f"({cfg['host']}) — script pode estar desatualizado, travado "
+            f"ou esse argumento não é suportado pela versão instalada lá."
+        ) from exc
+
+    output = output.strip()
+    error  = error.strip()
 
     if not output:
         raise SSHError(
@@ -185,15 +301,12 @@ def _run(args: str, server_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, An
 def _run_raw(cmd: str, timeout: int = 20,
              server_cfg: Optional[Dict[str, Any]] = None) -> str:
     """Executa comando arbitrário via SSH e retorna stdout como string."""
-    client = _get_client(server_cfg)
+    cfg = server_cfg or _default_cfg()
     try:
-        _stdin, stdout, _stderr = client.exec_command(cmd, timeout=timeout)
-        try:
-            return stdout.read().decode("utf-8", errors="replace")
-        except TimeoutError as exc:
-            raise SSHError(f"Comando não respondeu em {timeout}s no servidor remoto.") from exc
-    finally:
-        client.close()
+        out, _err = _remote_exec(cfg, cmd, timeout=timeout)
+        return out
+    except (TimeoutError, socket.timeout) as exc:
+        raise SSHError(f"Comando não respondeu em {timeout}s no servidor remoto.") from exc
 
 
 # ── Deploy do script ──────────────────────────────────────────────────────
