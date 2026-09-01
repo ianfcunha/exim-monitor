@@ -19,10 +19,18 @@ cujas verificações não puderam ser feitas não é "ok" — é
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from .database import Incident, Server, get_latest_check_results
+from .database import Incident, Server, get_check_history, get_latest_check_results
 from .detectors import STATUS_DESCONHECIDO
 
 OPEN_STATUSES = ("aberto", "em_observacao", "mitigado")
+
+# Um check só derruba o servidor para "indeterminado" depois de ficar
+# DESCONHECIDO por esta quantidade de leituras seguidas. Um blip isolado
+# (um DNSBL que não respondeu num ciclo, o snapshot "full" que chegou
+# vazio uma vez logo após cadastrar o servidor) não deve fazer o selo
+# piscar "normal" -> "não verificado" -> "normal". Mesma histerese que o
+# incident_engine já aplica para abrir/fechar incidente.
+_UNKNOWN_CONSECUTIVE = 3
 
 # Vocabulário único de severidade em toda a interface (Tarefa 10): a
 # Triagem já usava CRÍTICO/ATENÇÃO; a configuração de alertas usava
@@ -58,6 +66,17 @@ def _plural(n: int, singular: str, plural: str) -> str:
     return f"{n} {singular if n == 1 else plural}"
 
 
+def _check_persistently_unknown(db, server_id: int, check_key: str) -> bool:
+    """True só se as últimas _UNKNOWN_CONSECUTIVE leituras deste check
+    forem TODAS desconhecidas. Enquanto não houver leituras suficientes
+    (servidor recém-cadastrado), retorna False — não marca "indeterminado"
+    por falta de histórico, deixa o estado seguir os incidentes / OK."""
+    history = get_check_history(db, server_id, check_key, _UNKNOWN_CONSECUTIVE)
+    if len(history) < _UNKNOWN_CONSECUTIVE:
+        return False
+    return all(h.status == STATUS_DESCONHECIDO for h in history)
+
+
 def compute_server_health(db, server_id: int, server_name: Optional[str] = None) -> Dict[str, Any]:
     """
     Estado de um servidor, derivado dos incidentes abertos e das últimas
@@ -79,6 +98,7 @@ def compute_server_health(db, server_id: int, server_name: Optional[str] = None)
          "observed_at": c.observed_at.isoformat() + "Z"}
         for c in get_latest_check_results(db, server_id)
         if c.status == STATUS_DESCONHECIDO
+        and _check_persistently_unknown(db, server_id, c.check_key)
     ]
 
     if n_critico:
