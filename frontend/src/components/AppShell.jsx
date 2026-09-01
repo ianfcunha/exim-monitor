@@ -35,6 +35,7 @@ import { fetchIncidents, fetchIncidentsSummary } from '../api/client'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { SEVERITY_STYLE, fmtAge, incidentTitle } from './incidents/incidentLabels'
+import CollectionFreshness from './CollectionFreshness'
 import ServerSelector from './ServerSelector'
 import { useAuth } from '../contexts/AuthContext'
 import { useServer } from '../contexts/ServerContext'
@@ -150,32 +151,43 @@ function ModeBadge() {
   )
 }
 
+// Frescor da coleta no escopo atual, visível em toda tela (o cliente
+// deixa o painel aberto para monitorar). Usa o mesmo /incidents/summary
+// da Triagem — agora com last_collected_at / collection_status vindos de
+// health.py — e faz seu próprio poll de 30s (a mesma cadência do
+// coletor). Antes lia ssh_status da lista de servidores do contexto, que
+// só carrega uma vez e envelhecia sem ninguém perceber.
 function CollectionState() {
   const { activeServer, isFleet, servers } = useServer()
-  const list = isFleet ? servers : (activeServer ? [activeServer] : [])
-  if (list.length === 0) return null
+  const scopeId = isFleet ? null : (activeServer?.id ?? null)
+  const [sum, setSum] = useState(null)
 
-  const broken = list.filter(s => s.ssh_status !== 'ok')
-  const color = broken.length === 0 ? 'var(--ok)' : 'var(--danger)'
-  const label = broken.length === 0
-    ? 'Coleta ativa'
-    : `${broken.length} servidor${broken.length === 1 ? '' : 'es'} sem coleta`
+  useEffect(() => {
+    if (servers.length === 0) { setSum(null); return }
+    let alive = true
+    const load = () => fetchIncidentsSummary(scopeId)
+      .then(s => { if (alive) setSum(s) })
+      .catch(() => {})
+    load()
+    const id = setInterval(load, 30_000)
+    return () => { alive = false; clearInterval(id) }
+  }, [scopeId, servers.length])
+
+  if (!sum || servers.length === 0) return null
+
+  const broken = (sum.servers ?? []).filter(s => s.collection_status && s.collection_status !== 'ok')
+  const error = broken.length
+    ? broken.map(s => `${s.server_name}: ${s.collection_error || s.collection_status}`).join(' · ')
+    : sum.collection_error
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <div className="hidden md:flex items-center gap-1.5"
-             style={{ fontSize: 11, color, flexShrink: 0, whiteSpace: 'nowrap' }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
-          {label}
-        </div>
-      </TooltipTrigger>
-      <TooltipContent>
-        {broken.length === 0
-          ? 'Todos os servidores no escopo estão respondendo à coleta.'
-          : broken.map(s => `${s.name}: ${s.ssh_error_msg || s.ssh_status}`).join(' · ')}
-      </TooltipContent>
-    </Tooltip>
+    <div className="hidden md:flex">
+      <CollectionFreshness
+        collectedAt={sum.last_collected_at}
+        status={sum.collection_status}
+        error={error}
+      />
+    </div>
   )
 }
 

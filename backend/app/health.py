@@ -90,6 +90,21 @@ def compute_server_health(db, server_id: int, server_name: Optional[str] = None)
         .order_by(Incident.last_seen.desc())
         .all()
     )
+
+    # Frescor da coleta — o cliente deixa o painel aberto para monitorar e
+    # precisa saber há quanto tempo o dado na tela é (o coletor roda quick
+    # a cada 30s / full a cada 5min; last_connected_at é atualizado a cada
+    # ciclo que responde). ssh_status distingue "coletando" de "parada".
+    srv = db.get(Server, server_id)
+    last_collected_at = (
+        srv.last_connected_at.isoformat() + "Z"
+        if srv and srv.last_connected_at else None
+    )
+    collection_status = srv.ssh_status if srv else None
+    collection_error = (
+        srv.ssh_error_msg
+        if srv and srv.ssh_status and srv.ssh_status != "ok" else None
+    )
     n_critico = sum(1 for i in incidents if i.severity == "critico")
     n_atencao = sum(1 for i in incidents if i.severity == "atencao")
 
@@ -123,6 +138,9 @@ def compute_server_health(db, server_id: int, server_name: Optional[str] = None)
         "open_critico": n_critico,
         "open_atencao": n_atencao,
         "unknown_checks": unknown_checks,
+        "last_collected_at": last_collected_at,
+        "collection_status": collection_status,
+        "collection_error": collection_error,
         "incidents": [
             {"id": i.id, "display_id": i.display_id, "type": i.type, "subtype": i.subtype,
              "severity": i.severity, "status": i.status, "entity": i.entity}
@@ -143,6 +161,22 @@ def compute_fleet_health(db, servers: List[Server]) -> Dict[str, Any]:
     unverified = [h for h in per_server if h["state"] == STATE_INDETERMINADO]
 
     state = _worst([h["state"] for h in per_server]) if per_server else STATE_OK
+
+    # Frescor da coleta no escopo. Um servidor só: é o dado dele. Vários:
+    # a coleta mais atrasada (ISO 8601 em UTC ordena cronologicamente) e
+    # "error" se qualquer um parou de responder — o pior caso, nunca a média.
+    if len(per_server) == 1:
+        last_collected_at = per_server[0]["last_collected_at"]
+        collection_status = per_server[0]["collection_status"]
+    else:
+        collected = [h["last_collected_at"] for h in per_server if h["last_collected_at"]]
+        last_collected_at = min(collected) if collected else None
+        if any(h["collection_status"] not in ("ok", None) for h in per_server):
+            collection_status = "error"
+        elif collected:
+            collection_status = "ok"
+        else:
+            collection_status = None
 
     if len(per_server) == 1:
         # Escopo de um servidor só: a frase é a DELE, não uma versão de
@@ -170,5 +204,7 @@ def compute_fleet_health(db, servers: List[Server]) -> Dict[str, Any]:
         "open_atencao": n_atencao,
         "servers_affected": affected,
         "servers": per_server,
+        "last_collected_at": last_collected_at,
+        "collection_status": collection_status,
         "computed_at": datetime.utcnow().isoformat() + "Z",
     }
