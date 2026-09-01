@@ -7,18 +7,27 @@
  * backend expõe `last_collected_at` / `collection_status` em
  * /api/incidents/summary e /api/status/health (health.py).
  *
- * Este componente só formata: recebe o timestamp e o status já prontos,
- * e faz um tick próprio a cada 10s para o "há Xs" andar sozinho mesmo
- * entre um poll e outro. Cor: normal enquanto está dentro da cadência
- * esperada, âmbar quando passou do previsto, vermelho quando a coleta
- * está claramente parada ou falhando.
+ * Vive só no header da casca (AppShell) — visível em toda tela. Estava
+ * também no cabeçalho da Triagem; o cliente achou redundante e pediu
+ * para manter só o do header.
+ *
+ * Este componente só formata: recebe o timestamp e o status já prontos e
+ * faz um tick próprio a cada 10s para o "há Xs" andar sozinho entre um
+ * poll e outro. Dois estados por pedido explícito do cliente: check
+ * verde quando a coleta está normal, alerta vermelho quando está
+ * falhando (ou parada há muito tempo).
  */
-import { AlertTriangle, RefreshCw } from 'lucide-react'
+import { AlertTriangle, CheckCircle2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 const CADENCE_NOTE =
   'O painel coleta sozinho: verificação leve a cada 30s, diagnóstico completo a cada 5min.'
+
+// Sem uma coleta bem-sucedida há mais que isto, tratamos como falha
+// mesmo que o ssh_status ainda não tenha virado "error" (ex.: coletor
+// travado). 15min = 3x o ciclo completo.
+const STALE_LIMIT_S = 900
 
 function ageLabel(diffS) {
   if (diffS < 60) return `há ${Math.max(diffS, 0)}s`
@@ -36,30 +45,22 @@ export default function CollectionFreshness({ collectedAt, status, error }) {
     return () => clearInterval(id)
   }, [])
 
-  const failing = status && status !== 'ok' && status !== 'unknown'
   const diffS = collectedAt
     ? Math.floor((Date.now() - new Date(collectedAt).getTime()) / 1000)
     : null
+  const statusFailing = status && status !== 'ok' && status !== 'unknown'
+  const failing = statusFailing || diffS == null || diffS >= STALE_LIMIT_S
 
-  let color = 'var(--dim)'
+  const color = failing ? 'var(--danger)' : 'var(--ok)'
+  const Icon = failing ? AlertTriangle : CheckCircle2
   let text
-  if (diffS == null) {
-    color = failing ? 'var(--danger)' : 'var(--dim)'
-    text = failing ? 'coleta com falha' : 'sem coleta ainda'
-  } else {
-    text = `atualizado ${ageLabel(diffS)}`
-    if (failing || diffS >= 900) {
-      color = 'var(--danger)'
-      if (failing) text = `sem atualizar ${ageLabel(diffS)}`
-    } else if (diffS >= 360) {
-      color = 'var(--warn)'
-    }
-  }
+  if (diffS == null) text = 'coleta com falha'
+  else if (failing) text = `sem atualizar ${ageLabel(diffS)}`
+  else text = `coletando · atualizado ${ageLabel(diffS)}`
 
   const exact = collectedAt
     ? new Date(collectedAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'medium' })
     : null
-  const Icon = (failing || (diffS != null && diffS >= 900)) ? AlertTriangle : RefreshCw
 
   return (
     <Tooltip>
@@ -76,7 +77,7 @@ export default function CollectionFreshness({ collectedAt, status, error }) {
         {exact
           ? <>Última coleta bem-sucedida: <strong>{exact}</strong>.</>
           : 'Ainda não houve uma coleta bem-sucedida neste escopo.'}
-        {failing && error ? <><br />Falha atual: {error}</> : null}
+        {failing && error ? <><br />Falha: {error}</> : null}
         <br />{CADENCE_NOTE}
       </TooltipContent>
     </Tooltip>

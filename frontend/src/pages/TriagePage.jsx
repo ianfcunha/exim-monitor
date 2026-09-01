@@ -18,7 +18,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { fetchIncident, fetchIncidents, fetchIncidentsSummary, resolveIncident, silenceIncident } from '../api/client'
 import { Button } from '@/components/ui/button'
-import CollectionFreshness from '../components/CollectionFreshness'
 import HealthSeal from '../components/HealthSeal'
 import EvidencePanel from '../components/incidents/EvidencePanel'
 import IncidentDetail from '../components/incidents/IncidentDetail'
@@ -179,15 +178,9 @@ export default function TriagePage() {
         justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
       }}>
         <HealthSeal health={summary} />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <CollectionFreshness
-            collectedAt={summary?.last_collected_at}
-            status={summary?.collection_status}
-          />
-          <Button size="sm" variant="outline" onClick={load} disabled={loading}>
-            <RefreshCw size={12} style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} /> Atualizar
-          </Button>
-        </div>
+        <Button size="sm" variant="outline" onClick={load} disabled={loading}>
+          <RefreshCw size={12} style={{ animation: loading ? 'spin 1s linear infinite' : undefined }} /> Atualizar
+        </Button>
       </div>
 
       <div className="triage-grid" style={{

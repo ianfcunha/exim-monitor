@@ -63,10 +63,6 @@ fi
 echo
 echo "── A UI consome o indicador ─────────────────────────────────"
 
-grep -q "CollectionFreshness" frontend/src/pages/TriagePage.jsx \
-    && ok "TriagePage renderiza CollectionFreshness" \
-    || fail "TriagePage não usa CollectionFreshness"
-
 grep -q "CollectionFreshness" frontend/src/components/AppShell.jsx \
     && ok "AppShell (casca, toda tela) renderiza CollectionFreshness" \
     || fail "AppShell não usa CollectionFreshness"
@@ -74,6 +70,11 @@ grep -q "CollectionFreshness" frontend/src/components/AppShell.jsx \
 grep -q "last_collected_at" frontend/src/components/AppShell.jsx \
     && ok "AppShell lê last_collected_at do summary" \
     || fail "AppShell não lê last_collected_at"
+
+# O cliente pediu para NÃO duplicar o indicador na Triagem — só no header.
+grep -q "CollectionFreshness" frontend/src/pages/TriagePage.jsx \
+    && fail "CollectionFreshness voltou para a Triagem (era para ficar só no header)" \
+    || ok "Triagem não duplica o indicador do header"
 
 echo
 echo "  PASS: $PASS   FAIL: $FAIL"
