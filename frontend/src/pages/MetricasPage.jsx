@@ -23,15 +23,21 @@
  * sem server_id.
  */
 import {
-  ChevronDown, Copy, Cpu, LayoutGrid, RefreshCw, ScrollText, Search as SearchIcon,
+  ChevronDown, Copy, Cpu, Download, LayoutGrid, RefreshCw, ScrollText, Search as SearchIcon,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
-import { fetchFullStatus, fetchHistory, fetchLogTail } from '../api/client'
+import { exportLogMessages, fetchFullStatus, fetchHistory, fetchLogTail } from '../api/client'
 import { Button } from '@/components/ui/button'
 import { useServer } from '../contexts/ServerContext'
+
+const isoDaysAgo = (n) => {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  return d.toISOString().slice(0, 10)
+}
 
 const PERIODS = [
   { key: '6h', hours: 6 }, { key: '24h', hours: 24 }, { key: '7d', hours: 168 },
@@ -230,6 +236,48 @@ function InlineLogViewer({ serverId }) {
   const [copied, setCopied]   = useState(null)
   const timer = useRef(null)
 
+  const [showExport, setShowExport]     = useState(false)
+  const [exportStart, setExportStart]   = useState(() => isoDaysAgo(7))
+  const [exportEnd, setExportEnd]       = useState(() => isoDaysAgo(0))
+  const [exportAccount, setExportAccount] = useState('')
+  const [exportFormat, setExportFormat] = useState('csv')
+  const [exporting, setExporting]       = useState(false)
+  const [exportError, setExportError]   = useState(null)
+
+  const handleExport = async () => {
+    setExporting(true)
+    setExportError(null)
+    try {
+      const params = { start: exportStart, end: exportEnd, format: exportFormat }
+      if (exportAccount.trim()) params.account = exportAccount.trim()
+      if (filter !== 'all') params.type = filter
+      const res = await exportLogMessages(params, serverId ?? null)
+      const cd = res.headers?.['content-disposition'] ?? ''
+      const match = cd.match(/filename="?([^"]+)"?/)
+      const filename = match?.[1] ?? `exim-log_${exportStart}_${exportEnd}.${exportFormat}`
+      const url = window.URL.createObjectURL(res.data)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+      setShowExport(false)
+    } catch (e) {
+      let msg = e?.message ?? 'Erro ao exportar log.'
+      const data = e?.response?.data
+      if (data instanceof Blob) {
+        try { msg = JSON.parse(await data.text())?.detail ?? msg } catch { /* corpo não-JSON */ }
+      } else if (data?.detail) {
+        msg = data.detail
+      }
+      setExportError(msg)
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const load = useCallback((spin = false) => {
     if (spin) setRefreshing(true)
     setError(null)
@@ -293,6 +341,18 @@ function InlineLogViewer({ serverId }) {
             auto
           </label>
           <button
+            onClick={() => setShowExport(v => !v)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5, height: 28, padding: '0 9px', fontSize: 11.5,
+              borderRadius: 7, cursor: 'pointer',
+              border: `1px solid ${showExport ? 'var(--accent-border)' : 'var(--border)'}`,
+              background: showExport ? 'var(--accent-bg)' : 'var(--surface)',
+              color: showExport ? 'var(--accent-fg)' : 'var(--muted)',
+            }}
+          >
+            <Download size={12} /> Exportar
+          </button>
+          <button
             onClick={() => load(true)} disabled={refreshing}
             style={{ width: 28, height: 28, borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           >
@@ -300,6 +360,59 @@ function InlineLogViewer({ serverId }) {
           </button>
         </div>
       </div>
+
+      {showExport && (
+        <div style={{
+          margin: '0 18px 12px', padding: '12px 14px', borderRadius: 9,
+          border: '1px solid var(--border)', background: 'var(--surface)',
+          display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 10,
+        }}>
+          <label style={{ fontSize: 10.5, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+            De
+            <input type="date" value={exportStart} max={exportEnd}
+              onChange={e => setExportStart(e.target.value)}
+              style={{ fontSize: 11.5, padding: '4px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)' }} />
+          </label>
+          <label style={{ fontSize: 10.5, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+            Até
+            <input type="date" value={exportEnd} min={exportStart} max={isoDaysAgo(0)}
+              onChange={e => setExportEnd(e.target.value)}
+              style={{ fontSize: 11.5, padding: '4px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)' }} />
+          </label>
+          <label style={{ fontSize: 10.5, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+            Conta (opcional)
+            <input type="text" placeholder="usuario@dominio.com" value={exportAccount}
+              onChange={e => setExportAccount(e.target.value)}
+              style={{ width: 170, fontSize: 11.5, padding: '4px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)' }} />
+          </label>
+          <label style={{ fontSize: 10.5, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+            Formato
+            <select value={exportFormat} onChange={e => setExportFormat(e.target.value)}
+              style={{ fontSize: 11.5, padding: '4px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)' }}>
+              <option value="csv">CSV</option>
+              <option value="txt">TXT</option>
+            </select>
+          </label>
+          <button
+            onClick={handleExport} disabled={exporting}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5, height: 28, padding: '0 12px', fontSize: 11.5, fontWeight: 600,
+              borderRadius: 7, border: '1px solid var(--accent-border)', background: 'var(--accent-bg)', color: 'var(--accent-fg)',
+              cursor: exporting ? 'default' : 'pointer', opacity: exporting ? 0.6 : 1,
+            }}
+          >
+            <Download size={12} /> {exporting ? 'Exportando…' : 'Baixar'}
+          </button>
+          {filter !== 'all' && (
+            <span style={{ fontSize: 10.5, color: 'var(--dim)', flexBasis: '100%' }}>
+              Só o tipo “{LOG_TYPE[filter]?.label ?? filter}” (segue o filtro selecionado acima).
+            </span>
+          )}
+          {exportError && (
+            <span style={{ fontSize: 10.5, color: 'var(--danger)', flexBasis: '100%' }}>{exportError}</span>
+          )}
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 6, padding: '0 18px 12px', flexWrap: 'wrap' }}>
         {['all', 'delivered', 'sent', 'deferred', 'rejected', 'other'].map(t => {
