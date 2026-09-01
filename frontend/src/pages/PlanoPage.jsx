@@ -43,7 +43,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import {
-  SEVERITY_STYLE, STATUS_LABELS, fmtAge, incidentTitle,
+  SEVERITY_STYLE, STATUS_LABELS, fmtAge, incidentTitle, triggerExplanation,
 } from '../components/incidents/incidentLabels'
 import { useServer } from '../contexts/ServerContext'
 import { useToast } from '../contexts/ToastContext'
@@ -743,7 +743,7 @@ function PlanDetail({ incident, server, onRefresh, actionPhase, setActionPhase }
           <Row label="Detecção" value={fmtDateTime(incident.first_seen)} mono />
           <Row label="Última confirmação" value={fmtDateTime(incident.last_seen)} mono />
           {incident.triggered_by && (
-            <Row label="Regra" value={`${incident.triggered_by.rule} · limite ${String(incident.triggered_by.threshold)} · observado ${String(incident.triggered_by.observed)}`} mono />
+            <Row label="Por que abriu" value={triggerExplanation(incident)} />
           )}
           {incident.unverified_since && (
             <div style={{

@@ -15,7 +15,7 @@ import { Link } from 'react-router-dom'
 import { ackIncident, resolveIncident, silenceIncident } from '../../api/client'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { SEVERITY_STYLE, STATUS_LABELS, STATUS_STYLE, incidentTitle } from './incidentLabels'
+import { SEVERITY_STYLE, STATUS_LABELS, STATUS_STYLE, incidentTitle, triggerExplanation } from './incidentLabels'
 import ThresholdEditor from './ThresholdEditor'
 import { useToast } from '../../contexts/ToastContext'
 
@@ -47,14 +47,19 @@ function Stat({ label, value }) {
 // resto (arrays, objetos aninhados) fica só implícito na descrição do
 // suggested_fix, não teria uma forma boa de Stat card.
 const METRIC_LABELS = {
-  distinct_ips: 'IPs distintos', volume: 'Volume', baseline: 'Baseline',
+  distinct_ips: 'IPs diferentes', volume: 'Volume', baseline: 'Volume normal',
   blocklists_listed: 'Blocklists', missing: 'Faltando (SPF/DKIM/DMARC)',
-  days_remaining: 'Dias p/ cert expirar', queue_total: 'Fila total',
-  baseline_floor: 'Piso do baseline', frozen_count: 'Frozen', floor: 'Piso',
-  deferred_count: 'Deferidos', share_of_total: 'Fração do total', total_deferred: 'Total deferido',
+  days_remaining: 'Dias p/ o certificado vencer', queue_total: 'Mensagens na fila',
+  baseline_floor: 'Limite p/ alertar', frozen_count: 'Mensagens congeladas', floor: 'Limite p/ alertar',
+  deferred_count: 'Entregas adiadas', share_of_total: 'Fração adiada', total_deferred: 'Total adiado',
   ip: 'IP', domain: 'Domínio', cert_valid: 'Certificado válido',
-  cause: 'Causa', top_sender: 'Maior remetente', top_dest_domain: 'Maior destino',
+  cause: 'O que está segurando', top_sender: 'Maior remetente', top_dest_domain: 'Maior destino',
   auth_count: 'Envios na janela',
+}
+
+// Valores que também são jargão, não só a chave.
+const VALUE_LABELS = {
+  cause: { destino: 'Destino recusando / atrasando', remetente: 'Concentrada num remetente', indeterminada: 'Sem padrão claro' },
 }
 
 function MetricsGrid({ metrics }) {
@@ -62,9 +67,10 @@ function MetricsGrid({ metrics }) {
   if (entries.length === 0) return null
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 8 }}>
-      {entries.map(([k, v]) => (
-        <Stat key={k} label={METRIC_LABELS[k] ?? k} value={typeof v === 'boolean' ? (v ? 'sim' : 'não') : String(v)} />
-      ))}
+      {entries.map(([k, v]) => {
+        const raw = typeof v === 'boolean' ? (v ? 'sim' : 'não') : String(v)
+        return <Stat key={k} label={METRIC_LABELS[k] ?? k} value={VALUE_LABELS[k]?.[raw] ?? raw} />
+      })}
     </div>
   )
 }
@@ -308,12 +314,12 @@ export default function IncidentDetail({ incident, onChanged }) {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap',
         }}>
           <span>
-            Por que isto virou incidente: regra <strong style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{incident.triggered_by.rule}</strong>,
-            limite <strong>{String(incident.triggered_by.threshold)}</strong>, observado <strong>{String(incident.triggered_by.observed)}</strong>.
+            <strong style={{ color: 'var(--text)' }}>Por que isto virou incidente:</strong>{' '}
+            {triggerExplanation(incident)}
           </span>
           <Popover open={thresholdsOpen} onOpenChange={setThresholdsOpen}>
             <PopoverTrigger asChild>
-              <Button size="sm" variant="outline"><Settings2 size={11} /> Ajustar limite</Button>
+              <Button size="sm" variant="outline"><Settings2 size={11} /> Ajustar quando alertar</Button>
             </PopoverTrigger>
             <PopoverContent align="end">
               <ThresholdEditor serverId={incident.server_id} type={incident.type} onClose={() => setThresholdsOpen(false)} />

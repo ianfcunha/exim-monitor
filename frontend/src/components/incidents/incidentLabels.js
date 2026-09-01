@@ -84,6 +84,37 @@ export function incidentTitle(incident) {
   }
 }
 
+// Frase em português do porquê de um incidente ter aberto — substitui o
+// nome interno da regra ("queue_stuck.consecutive_growth") no detalhe.
+export function triggerExplanation(incident) {
+  const t = incident?.triggered_by
+  if (!t) return null
+  const obs = String(t.observed)
+  const lim = String(t.threshold)
+  switch (t.rule) {
+    case 'queue_stuck.consecutive_growth':
+      return `A fila ficou parada acima de ${lim} mensagens por vários ciclos seguidos — chegou a ${obs}.`
+    case 'queue_stuck.frozen_growth':
+      return `Mais de ${lim} mensagens congeladas (não saem sozinhas) por vários ciclos seguidos — ${obs} agora.`
+    case 'auth_abuse.distinct_ips':
+      return `A conta autenticou de ${obs} IPs diferentes na janela — o normal para ela é até ${lim}.`
+    case 'auth_abuse.volume_multiplier':
+      return `A conta enviou ${obs}× o volume normal dela (alerta a partir de ${lim}×).`
+    case 'dest_deferral.share_of_total':
+      return `${Math.round(Number(t.observed) * 100)}% das entregas para esse destino estão sendo adiadas (alerta a partir de ${Math.round(Number(t.threshold) * 100)}%).`
+    case 'reputation.blocklist':
+      return `O IP de saída do servidor apareceu em ${obs === '1' ? 'uma blocklist pública' : `${obs} blocklists públicas`}.`
+    case 'reputation.cert_expired':
+      return 'O certificado TLS do servidor já venceu.'
+    case 'reputation.cert_expiring':
+      return `O certificado TLS do servidor vence em ${obs} dias.`
+    case 'reputation.dns_auth_missing':
+      return 'Faltam registros de autenticação de e-mail (SPF, DKIM ou DMARC) no domínio.'
+    default:
+      return `Limite ${lim}, observado ${obs}.`
+  }
+}
+
 export const SEVERITY_STYLE = {
   critico: { border: 'var(--danger-border)', bg: 'var(--danger-bg)', text: 'var(--danger)', label: 'Crítico' },
   atencao: { border: 'var(--warn-border)', bg: 'var(--warn-bg)', text: 'var(--warn)', label: 'Atenção' },

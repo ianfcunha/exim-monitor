@@ -10,7 +10,7 @@ import { Switch } from '@/components/ui/switch'
 import { useAuth } from '../contexts/AuthContext'
 
 const LINKS = [
-  { to: '/settings/alerts',      Icon: Bell,          title: 'Alertas',      desc: 'E-mail, Telegram, webhook, thresholds e relatório semanal.', adminOnly: true },
+  { to: '/settings/alerts',      Icon: Bell,          title: 'Alertas',      desc: 'E-mail, Telegram, webhook, sensibilidade dos alertas e relatório semanal.', adminOnly: true },
   { to: '/settings/servers',     Icon: Server,        title: 'Servidores',   desc: 'Cadastre e gerencie os servidores monitorados.',              adminOnly: true },
   { to: '/settings/users',       Icon: Users,         title: 'Usuários',     desc: 'Convide membros e gerencie permissões de acesso.',            adminOnly: true },
   { to: '/settings/history',     Icon: History,       title: 'Histórico',    desc: 'Auditoria de ações executadas em cada servidor.',             adminOnly: true },
