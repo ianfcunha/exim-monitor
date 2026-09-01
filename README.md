@@ -165,6 +165,8 @@ install.sh             instalador do painel (gera .env, sobe Docker Compose,
                        configura proxy) — não toca em nenhum servidor EXIM
 LICENSE                comercial — cobre tudo neste repositório EXCETO diag-exim/
 docs/
+  manual.md             manual do painel — cada tela e os conceitos por
+                        trás delas; a doc que você passa a quem vai operar
   seguranca.md          sudoers de referência completo, pra auditar antes
                         de instalar
   compatibilidade.md    matriz de formatos de log validados vs. inferidos
