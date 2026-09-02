@@ -2,9 +2,13 @@ FROM python:3.12-slim
 
 # gcc + libs de build para wheels que eventualmente compilem do source
 # (a maioria das deps ja vem como wheel manylinux; psycopg2-binary embute o libpq)
+# gcc/python3-dev: wheels que eventualmente compilem.
+# postgresql-client: pg_dump/psql para o dump pré-migração (run_migrations)
+# e para o pacote de diagnóstico. A base é Debian trixie (client 17), que
+# faz dump de servidores 16 sem problema.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc python3-dev \
-    && rm -rf /var/lib/apt/lists/*
+      gcc python3-dev postgresql-client \
+ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

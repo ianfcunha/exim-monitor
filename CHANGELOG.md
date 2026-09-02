@@ -30,10 +30,24 @@ bate com a tag git `vX.Y.Z` e com a tag das imagens Docker.
   entra na imagem via `MAILIQ_BUILD_SHA` (aparece em `/api/version`).
 - A imagem do backend passa a embutir `diag-exim/` em `/app/diag-exim/`
   (o CI copia antes do build) — necessário para o deploy sem repositório.
+- Dump automático do banco **antes** de aplicar migrations num banco
+  existente que está atrás da versão atual (`pre-migration-<de>-<para>-<ts>.sql`
+  em `/app/backups`). Falha do dump só avisa, não bloqueia.
+- `tests/test_migrations.sh` + workflow **Migrations** no CI: prova
+  idempotência (segundo boot é no-op; `alembic_version` carimbado para
+  trás sobe de volta a 024 sem duplicar nem apagar dados) em Postgres
+  descartável.
+- Imagem do backend passa a incluir `postgresql-client` (`pg_dump`/`psql`).
 
 ### Alterado
 - CI migrado do Docker Hub para o `ghcr.io` (pacotes privados de graça,
   autenticação pelo `GITHUB_TOKEN` nativo).
+- `run_migrations()`: se a aplicação de uma migration falha, a transação
+  reverte (o banco não fica meio-migrado) e o startup é abortado com o
+  caminho do dump pré-migração no log.
+- Backfills de dados das migrations 003, 023 e 024 passam a rodar só
+  quando a coluna que acompanham é nova — re-rodar a migration não
+  recomputa overrides de alerta nem reapaga histórico.
 
 ## [1.0.0] — 2026-09-02
 

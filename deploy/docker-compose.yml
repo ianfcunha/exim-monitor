@@ -47,6 +47,7 @@ services:
         condition: service_healthy
     volumes:
       - ~/.ssh:/root/.ssh:ro   # chaves SSH do host (fallback); o painel gera as suas próprias por servidor
+      - ./backups:/app/backups # dumps pré-migração escritos pelo backend (o backup.sh também escreve aqui)
     env_file:
       - .env
     environment:

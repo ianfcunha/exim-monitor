@@ -45,6 +45,7 @@ services:
       - ./backend:/app               # permite editar codigo sem rebuild
       - ~/.ssh:/root/.ssh:ro         # chave SSH do host para acesso ao EXIM
       - ./diag-exim:/app/diag-exim:ro   # fonte única (pacote open-core) — enviado por SFTP ao cadastrar servidor. Mount de DIRETÓRIO (não do arquivo): git pull / editor troca o inode do arquivo e um mount de arquivo único fica preso no inode antigo até restart.
+      - ./backups:/app/backups         # dumps pré-migração (run_migrations)
     env_file:
       - ./backend/.env
     environment:

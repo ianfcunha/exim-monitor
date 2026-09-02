@@ -1,0 +1,45 @@
+# .github/workflows/migrations.yml
+# Prova que run_migrations() é idempotente e não perde dados:
+#   - banco novo → schema 024
+#   - segundo boot → no-op
+#   - alembic carimbado para trás (018) → sobe de volta para 024 sem
+#     duplicar nem apagar dados; e repetível
+#
+# tests/test_migrations.sh sobe um Postgres descartável e roda
+# run_migrations() dentro da imagem do backend.
+
+name: Migrations
+
+on:
+  push:
+    branches: [main]
+    tags:     ['v*.*.*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  idempotency:
+    name: Idempotência e integridade
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stage diag-exim into backend build context
+        run: cp -r diag-exim backend/diag-exim
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image (local)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          load: true
+          tags: mailiq-backend:citest
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+
+      - name: Run migration idempotency suite
+        env:
+          MAILIQ_BACKEND_IMAGE: mailiq-backend:citest
+        run: bash tests/test_migrations.sh

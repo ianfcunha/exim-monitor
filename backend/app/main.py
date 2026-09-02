@@ -67,7 +67,124 @@ def _seed_admin_user(conn) -> None:
     """), {"email": cfg.admin_email, "username": cfg.admin_username, "pw": pw_hash})
 
 
+def _column_exists(conn, table: str, column: str) -> bool:
+    """True se `table.column` já existe. Usado para rodar os backfills de
+    dados de uma migration SÓ quando a coluna que os acompanha é nova —
+    sem isso, re-rodar a migration (ex.: alembic_version carimbado para
+    trás) recomputaria overrides ou reapagaria linhas."""
+    from sqlalchemy import text
+    row = conn.execute(
+        text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = :t AND column_name = :c"
+        ),
+        {"t": table, "c": column},
+    ).fetchone()
+    return row is not None
+
+
+def _pre_migration_backup(from_label: str, to_version: str):
+    """
+    Dump do banco ANTES de aplicar migrations num banco existente que está
+    atrás da versão atual. A migration em si é transacional (um erro
+    reverte tudo), mas o dump é a rede de segurança para o caso de a
+    versão nova subir, migrar, e só então se mostrar ruim.
+
+    Falha do dump NÃO bloqueia a migration (o deploy/upgrade.sh já roda um
+    backup completo antes) — só emite aviso alto. Retorna o caminho do
+    dump, ou None.
+    """
+    import os
+    import shutil
+    import subprocess
+    from datetime import datetime, timezone
+    from urllib.parse import urlparse
+
+    if os.getenv("MAILIQ_SKIP_PREMIGRATION_DUMP", "").lower() in ("1", "true", "yes"):
+        logger.info("Dump pré-migração pulado (MAILIQ_SKIP_PREMIGRATION_DUMP definido).")
+        return None
+    if not shutil.which("pg_dump"):
+        logger.warning(
+            "pg_dump não encontrado na imagem — seguindo SEM dump pré-migração. "
+            "A migration reverte sozinha em caso de erro; ainda assim, rode "
+            "deploy/backup.sh antes de atualizar."
+        )
+        return None
+
+    url = urlparse(settings.database_url)
+    out_dir = os.getenv("MAILIQ_BACKUP_DIR", "/app/backups")
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+    except OSError as exc:
+        logger.warning("Não consegui criar %s (%s) — sem dump pré-migração.", out_dir, exc)
+        return None
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    path = os.path.join(out_dir, f"pre-migration-{from_label}-para-{to_version}-{ts}.sql")
+    env = {**os.environ, "PGPASSWORD": url.password or ""}
+    cmd = [
+        "pg_dump",
+        "-h", url.hostname or "localhost",
+        "-p", str(url.port or 5432),
+        "-U", url.username or "exim",
+        "--no-owner", "--no-privileges",
+        (url.path.lstrip("/") or "exim_monitor"),
+    ]
+    logger.info("Dump pré-migração (%s → %s): %s", from_label, to_version, path)
+    try:
+        with open(path, "wb") as fh:
+            subprocess.run(cmd, env=env, stdout=fh, stderr=subprocess.PIPE, check=True, timeout=600)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+        stderr = getattr(exc, "stderr", b"") or b""
+        logger.warning(
+            "Dump pré-migração falhou (%s) — seguindo mesmo assim. stderr: %s",
+            exc, stderr.decode("utf-8", "replace")[:500],
+        )
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        return None
+    logger.info("Dump pré-migração salvo (%d bytes).", os.path.getsize(path))
+    return path
+
+
 def run_migrations() -> None:
+    """
+    Aplica as migrations com uma rede de segurança: se o banco existe e
+    está atrás da versão atual, tira um dump antes; se a aplicação falha,
+    a transação reverte e o startup é abortado (o container não serve um
+    banco meio-migrado).
+    """
+    from sqlalchemy import inspect, text
+
+    from .database import engine
+
+    dump_path = None
+    try:
+        with engine.connect() as conn:
+            tables = inspect(conn).get_table_names()
+            if "snapshots" in tables and "alembic_version" in tables:
+                current = {r[0] for r in conn.execute(text("SELECT version_num FROM alembic_version"))}
+                if _SCHEMA_VERSION not in current:
+                    dump_path = _pre_migration_backup("+".join(sorted(current)) or "sem-versao", _SCHEMA_VERSION)
+    except Exception:
+        logger.exception("Falha ao verificar o estado do schema antes da migration")
+        raise
+
+    try:
+        _apply_migrations()
+    except Exception:
+        logger.error(
+            "MIGRATION FALHOU — a transação foi revertida, o banco NÃO foi "
+            "alterado, e o startup será abortado. %s",
+            f"Dump pré-migração em: {dump_path}" if dump_path
+            else "Não havia dump pré-migração; restaure de deploy/backup.sh se necessário.",
+        )
+        raise
+
+
+def _apply_migrations() -> None:
     """
     Garante que o banco esteja no schema correto usando o engine da aplicacao
     diretamente, sem criar um engine secundario via Alembic CLI (que pode travar
@@ -205,7 +322,10 @@ def run_migrations() -> None:
             admin_id = admin_row[0] if admin_row else None
 
             # ── Migrar servidor do .env para tabela servers ───────────
-            if admin_id:
+            # Só se a tabela ainda estiver vazia — re-rodar esta migration
+            # (schema carimbado para trás) não pode duplicar o servidor.
+            servers_empty = conn.execute(text("SELECT NOT EXISTS (SELECT 1 FROM servers)")).scalar()
+            if admin_id and servers_empty:
                 from .crypto import encrypt_secret
                 ssh_secret = encrypt_secret(cfg.ssh_password or "")
                 auth_type  = "password" if cfg.ssh_password else "key"
@@ -769,6 +889,11 @@ def run_migrations() -> None:
 
         if "022" in current and "023" not in current:
             logger.info("Aplicando migration 022 → 023 (canal de alerta global com override por servidor, Sessão 4 T10)...")
+            # O backfill abaixo recomputa os overrides a partir do estado
+            # atual dos canais — só pode rodar quando as colunas são novas.
+            # Re-rodar viraria "override" um canal que o usuário desligou
+            # de propósito mas cujo campo (ex.: email_to) ainda tem valor.
+            overrides_are_new = not _column_exists(conn, "alert_settings", "email_override")
             for column in ("email_override", "telegram_override", "webhook_override"):
                 conn.execute(text(f"""
                     ALTER TABLE alert_settings
@@ -781,14 +906,16 @@ def run_migrations() -> None:
             # exatamente o que já disparava. A herança do global passa a
             # valer só para servidor que nunca teve aquele canal
             # configurado — e para os que vierem depois.
-            promoted = conn.execute(text("""
-                UPDATE alert_settings SET
-                    email_override    = (email_enabled OR email_to <> '' OR smtp_password <> '' OR resend_api_key <> ''),
-                    telegram_override = (telegram_enabled OR telegram_bot_token <> '' OR telegram_chat_id <> ''),
-                    webhook_override  = (webhook_url <> '')
-                WHERE server_id IS NOT NULL
-                RETURNING server_id
-            """)).fetchall()
+            promoted = []
+            if overrides_are_new:
+                promoted = conn.execute(text("""
+                    UPDATE alert_settings SET
+                        email_override    = (email_enabled OR email_to <> '' OR smtp_password <> '' OR resend_api_key <> ''),
+                        telegram_override = (telegram_enabled OR telegram_bot_token <> '' OR telegram_chat_id <> ''),
+                        webhook_override  = (webhook_url <> '')
+                    WHERE server_id IS NOT NULL
+                    RETURNING server_id
+                """)).fetchall()
 
             conn.execute(text("DELETE FROM alembic_version"))
             conn.execute(
@@ -807,6 +934,10 @@ def run_migrations() -> None:
             # que a verificação em navegador viu como "opened repetido de
             # duas a quatro vezes". Com a FK, apagar o incidente apaga as
             # notificações dele.
+            # O backfill + limpeza de órfãs abaixo só pode rodar quando a
+            # coluna é nova. Re-rodar (schema carimbado para trás) apagaria
+            # alert_history legítimo que ainda não tivesse incident_id.
+            incident_id_is_new = not _column_exists(conn, "alert_history", "incident_id")
             conn.execute(text("""
                 ALTER TABLE alert_history
                     ADD COLUMN IF NOT EXISTS incident_id INTEGER
@@ -816,32 +947,34 @@ def run_migrations() -> None:
                 CREATE INDEX IF NOT EXISTS ix_alert_history_incident ON alert_history (incident_id)
             """))
 
-            # Retroativo: liga as linhas já gravadas ao incidente cujo
-            # display_id aparece no fim de `problem`. As que não casarem
-            # (incidente já apagado) são justamente as órfãs — apagadas
-            # abaixo, porque referenciam um INC-### que ninguém consegue
-            # abrir.
-            # `:INC-` não pode aparecer literal no SQL: text() lê `:INC`
-            # como bind parameter e o startup morre com "A value is
-            # required for bind parameter 'INC'". Vai como parâmetro.
-            conn.execute(
-                text("""
-                    UPDATE alert_history a SET incident_id = i.id
-                      FROM incidents i
-                     WHERE a.incident_id IS NULL
-                       AND a.problem LIKE :pat
-                       AND split_part(a.problem, :sep, 2) = i.id::text
-                """),
-                {"pat": "%:INC-%", "sep": ":INC-"},
-            )
-            orphans = conn.execute(
-                text("""
-                    DELETE FROM alert_history
-                     WHERE incident_id IS NULL AND problem LIKE :pat
-                    RETURNING id
-                """),
-                {"pat": "%:INC-%"},
-            ).fetchall()
+            orphans = []
+            if incident_id_is_new:
+                # Retroativo: liga as linhas já gravadas ao incidente cujo
+                # display_id aparece no fim de `problem`. As que não casarem
+                # (incidente já apagado) são justamente as órfãs — apagadas
+                # abaixo, porque referenciam um INC-### que ninguém consegue
+                # abrir.
+                # `:INC-` não pode aparecer literal no SQL: text() lê `:INC`
+                # como bind parameter e o startup morre com "A value is
+                # required for bind parameter 'INC'". Vai como parâmetro.
+                conn.execute(
+                    text("""
+                        UPDATE alert_history a SET incident_id = i.id
+                          FROM incidents i
+                         WHERE a.incident_id IS NULL
+                           AND a.problem LIKE :pat
+                           AND split_part(a.problem, :sep, 2) = i.id::text
+                    """),
+                    {"pat": "%:INC-%", "sep": ":INC-"},
+                )
+                orphans = conn.execute(
+                    text("""
+                        DELETE FROM alert_history
+                         WHERE incident_id IS NULL AND problem LIKE :pat
+                        RETURNING id
+                    """),
+                    {"pat": "%:INC-%"},
+                ).fetchall()
 
             conn.execute(text("DELETE FROM alembic_version"))
             conn.execute(
