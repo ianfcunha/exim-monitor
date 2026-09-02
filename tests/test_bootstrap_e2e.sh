@@ -61,6 +61,11 @@ if [ -z "$REAL_HOST" ]; then
 fi
 
 AUTH_H="Authorization: Bearer $TOKEN"
+
+# T6/T9: cadastrar servidor pode ser recusado pela licença — pular com o
+# motivo, em vez de falhar por algo que este teste não mede.
+source "$(dirname "${BASH_SOURCE[0]}")/_license_guard.sh"
+skip_if_license_blocks
 NEW_ID=""
 cleanup() {
     [ -n "$NEW_ID" ] && curl -s -X DELETE "$API_URL/api/servers/$NEW_ID" -H "$AUTH_H" >/dev/null 2>&1

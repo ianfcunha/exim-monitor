@@ -12,11 +12,11 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_current_user
 from ..collector import _cache, _empty_cache_entry, _save_snapshot, get_full, get_quick
-from ..crypto import decrypt_secret
 from ..database import User, get_db, get_server_owned_by, get_servers_for_user
 from ..health import compute_server_health
 from ..limiter import limiter
 from ..ssh import SSHError, run_full as ssh_run_full
+from ..ssh_access import server_cfg_or_503
 
 router = APIRouter(prefix="/api/status", tags=["status"])
 
@@ -62,19 +62,18 @@ def _resolve_server_id(server_id: Optional[int], db: Session, current_user: User
 
 
 def _get_server_cfg(server_id: int, db: Session, current_user: User) -> dict:
-    """Retorna dict de configuração SSH para o servidor."""
+    """
+    Config SSH do servidor.
+
+    T9: era um dict montado à mão, duplicando build_server_cfg() e sem
+    tratar SecretDecryptionError — POST /status/refresh estourava 500 com
+    o erro cru em vez do "Erro de credencial" que os demais routers já
+    devolviam. Agora usa o caminho único (ver app/ssh_access.py).
+    """
     server = get_server_owned_by(db, server_id, current_user)
     if not server:
         raise HTTPException(404, f"Servidor {server_id} não encontrado.")
-    return {
-        "host":                 server.host,
-        "port":                 server.port,
-        "ssh_user":             server.ssh_user,
-        "ssh_auth_type":        server.ssh_auth_type,
-        "ssh_secret":           decrypt_secret(server.ssh_secret),
-        "script_path":          server.script_path,
-        "host_key_fingerprint": server.ssh_host_key_fingerprint,
-    }
+    return server_cfg_or_503(db, server)
 
 
 @router.get("/quick", summary="Status leve para polling de dashboard")
@@ -156,6 +155,7 @@ def status_health(
         raise HTTPException(400, "Nenhum servidor configurado.")
     server = get_server_owned_by(db, sid, current_user)
     return compute_server_health(db, sid, server.name if server else None)
+
 
 @router.get("/collector", summary="Estado do coletor e do watchdog")
 def status_collector(

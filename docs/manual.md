@@ -396,6 +396,10 @@ painel. Depois de editar o arquivo:
 docker compose up -d backend
 ```
 
+`up -d` e não `restart`: o `restart` reaproveita o container existente e
+**não relê o `.env`** — a licença nova seria ignorada em silêncio, e o
+painel continuaria mostrando o estado antigo.
+
 O estado novo aparece em Configurações → Geral e no log do backend. Se o
 token não for aceito, a tela diz o motivo.
 

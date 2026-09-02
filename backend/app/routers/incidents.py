@@ -38,6 +38,7 @@ from ..incident_impact import compute_impact, freeze_impact, normalize_impact
 from ..incident_notify import notify_incident_event
 from ..incident_report import render_incident_report_html
 from ..ssh import SSHError, run_action
+from ..ssh_access import mark_credential_error, server_cfg_or_503
 
 router = APIRouter(prefix="/api/incidents", tags=["incidents"])
 
@@ -157,15 +158,9 @@ def _reject_if_observation_mode(db: Session, incident: Incident, actor: str, act
 
 
 def _server_cfg_for(db: Session, incident: Incident):
-    server = incident.server
-    if not server:
+    if not incident.server:
         raise HTTPException(404, "Servidor do incidente não encontrado.")
-    try:
-        return build_server_cfg(server)
-    except SecretDecryptionError as exc:
-        server.ssh_status, server.ssh_error_msg = "credential_error", str(exc)[:500]
-        db.commit()
-        raise HTTPException(503, str(exc)) from exc
+    return server_cfg_or_503(db, incident.server)
 
 
 def _render_report(db: Session, incident: Incident) -> str:
@@ -271,6 +266,14 @@ def _maybe_refresh_evidence(db: Session, incident: Incident) -> None:
         return
     try:
         cfg = build_server_cfg(incident.server) if incident.server else None
+    except SecretDecryptionError as exc:
+        # Best-effort continua best-effort — abrir o incidente não pode
+        # falhar por causa disto. Mas o motivo não some: o servidor fica
+        # marcado, e a tela de Servidores passa a dizer "Erro de
+        # credencial" em vez de o operador só notar a evidência velha.
+        mark_credential_error(db, incident.server, exc)
+        return
+    try:
         fresh = _build_evidence(db, incident.server_id, cfg, hint)
     except Exception:  # noqa: BLE001 — best-effort, mantém a evidência atual
         return

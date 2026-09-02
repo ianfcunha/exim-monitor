@@ -33,6 +33,11 @@ bate com a tag git `vX.Y.Z` e com a tag das imagens Docker.
   relógio empurrado à mão: os três modos de falha, as recuperações sem
   repetição, servidor recém-cadastrado que não conta como silencioso,
   servidor removido enquanto mudo, cooldown e independência do limiar.
+- `app/ssh_access.py` — caminho único para montar a config SSH de um
+  servidor e reportar segredo ilegível.
+- `tests/_license_guard.sh` — testes que criam servidor descartável
+  agora pulam com o motivo quando a licença está no teto, em vez de
+  falharem por um motivo alheio ao que medem.
 - **Licença de uso**, verificada offline (assinatura Ed25519, chave pública
   embutida no backend). O painel não fala com nenhum servidor de
   licenciamento — funciona em rede fechada, sem telemetria. O token vai em
@@ -101,6 +106,24 @@ bate com a tag git `vX.Y.Z` e com a tag das imagens Docker.
   por que os demais (stack de dev / Exim real) não rodam ainda.
 
 ### Alterado
+- `decrypt_secret()` falha alto desde a Sessão 1, mas isso só resolve se
+  TODO chamador tratar — e o bloco de tratamento estava copiado em quatro
+  routers e **ausente em dois**. `messages.py` (Log Viewer) e `status.py`
+  (coleta forçada) montavam o dict de config à mão, sem passar por
+  `build_server_cfg()`, e respondiam **500 com o erro cru** quando a
+  `SSH_ENCRYPTION_KEY` não batia com o segredo salvo — exatamente o
+  sintoma que a mudança da Sessão 1 existia para eliminar, sobrevivendo
+  nos dois lugares que esqueceram de adotá-la. Os seis caminhos agora
+  passam por `ssh_access.server_cfg_or_503()`: **503 com o motivo
+  legível** e o servidor marcado como "Erro de credencial" na hora.
+  Verificado nos dois sentidos — o código anterior devolvia 500, o atual
+  devolve 503 com a frase que diz o que fazer.
+- A atualização de evidência de incidente (best-effort, engolia tudo)
+  passa a marcar o servidor quando o motivo é segredo ilegível: continua
+  não quebrando a abertura do incidente, mas o erro não some mais.
+- `docs/manual.md` e `deploy/.env.example` avisam que trocar a licença
+  exige `docker compose up -d backend`, não `restart` — `restart`
+  reaproveita o container e não relê o `.env`.
 - CI migrado do Docker Hub para o `ghcr.io` (pacotes privados de graça,
   autenticação pelo `GITHUB_TOKEN` nativo).
 - `run_migrations()`: se a aplicação de uma migration falha, a transação

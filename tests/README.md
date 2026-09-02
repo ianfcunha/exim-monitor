@@ -67,3 +67,21 @@ docker compose up -d
 bash tests/test_incidents_api.sh
 ```
 
+## Testes que criam servidor descartável
+
+`test_credential_failure_api.sh`, `test_bootstrap_e2e.sh` e
+`test_server_privilege_api.sh` cadastram um servidor só para o teste. Desde
+a licença soft (T6), `POST /api/servers` pode recusar isso — instalação no
+teto de servidores ou com a licença vencida. Os três consultam
+`GET /api/license` primeiro (`tests/_license_guard.sh`) e **pulam com o
+motivo** em vez de falharem: um vermelho por um motivo alheio ao que o
+teste mede é pior que um "pulado" explicado.
+
+Para rodá-los numa instalação no teto, emita uma licença de teste:
+
+```bash
+./tools/issue-license.py issue --customer dev --servers 10 --months 1
+```
+
+e ponha o token em `MAILIQ_LICENSE`, no `.env`. Depois: `docker compose up
+-d backend` (não `restart` — ele não relê o `.env`).

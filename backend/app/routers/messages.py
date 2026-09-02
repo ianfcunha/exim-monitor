@@ -15,29 +15,26 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_user
-from ..crypto import decrypt_secret
 from ..database import User, get_db, get_server_owned_by
 from ..limiter import limiter
 from ..ssh import SSHError, get_log_entries, get_log_entries_ranged, get_log_tail, get_queue_items
+from ..ssh_access import server_cfg_or_503
 
 router = APIRouter(prefix="/api/messages", tags=["messages"])
 
 
 def _get_server_cfg(server_id: Optional[int], db: Session, current_user: User):
+    # T9: este dict era montado à mão aqui, duplicando build_server_cfg(),
+    # e SEM tratar SecretDecryptionError — o Log Viewer respondia 500 com
+    # um erro cru quando a SSH_ENCRYPTION_KEY não batia com o segredo
+    # salvo, que é justamente o sintoma que a Sessão 1 eliminou nos outros
+    # routers. Agora passa pelo mesmo caminho de todo mundo.
     if server_id is None:
         return None
     server = get_server_owned_by(db, server_id, current_user)
     if not server:
         raise HTTPException(404, f"Servidor {server_id} não encontrado.")
-    return {
-        "host":                 server.host,
-        "port":                 server.port,
-        "ssh_user":             server.ssh_user,
-        "ssh_auth_type":        server.ssh_auth_type,
-        "ssh_secret":           decrypt_secret(server.ssh_secret),
-        "script_path":          server.script_path,
-        "host_key_fingerprint": server.ssh_host_key_fingerprint,
-    }
+    return server_cfg_or_503(db, server)
 
 
 @router.get("/queue", summary="Itens na fila EXIM")

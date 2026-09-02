@@ -9,6 +9,13 @@
 # (status="credential_error", nunca "error" genérico) corrompendo de
 # propósito o ssh_secret de um servidor de teste via SQL direto.
 #
+# T9 (M1): falhar alto só resolve se TODO chamador tratar. O bloco de
+# tratamento estava copiado em quatro routers e AUSENTE em dois —
+# messages.py (Log Viewer) e status.py (coleta forçada) montavam o dict
+# de config à mão e devolviam 500 com o erro cru. Este teste passou a
+# cobrir também esses caminhos: todo endpoint que precisa de SSH tem que
+# responder 503 com o motivo legível, nunca 500.
+#
 # Roda contra a API + Postgres reais do dev stack. Cria e remove seu
 # próprio servidor de teste.
 # ============================================================
@@ -26,8 +33,10 @@ if [ ! -f "$SCRIPT_DIR/backend/.env" ]; then
     echo "backend/.env não encontrado — pulando (precisa do dev stack rodando)."
     exit 0
 fi
-ADMIN_USER=$(grep '^ADMIN_USERNAME=' "$SCRIPT_DIR/backend/.env" | cut -d= -f2)
-ADMIN_PASS=$(grep '^ADMIN_PASSWORD=' "$SCRIPT_DIR/backend/.env" | cut -d= -f2)
+# -f2- (não -f2): segredo gerado pelo install.sh pode conter '=' e cortar
+# no primeiro separador produz uma senha truncada silenciosamente.
+ADMIN_USER=$(grep '^ADMIN_USERNAME=' "$SCRIPT_DIR/backend/.env" | cut -d= -f2-)
+ADMIN_PASS=$(grep '^ADMIN_PASSWORD=' "$SCRIPT_DIR/backend/.env" | cut -d= -f2-)
 
 TOKEN=$(curl -s -X POST "$API_URL/api/auth/login" \
     -H "Content-Type: application/x-www-form-urlencoded" \
@@ -43,6 +52,11 @@ if ! (cd "$SCRIPT_DIR" && docker compose exec -T postgres psql -U exim -d exim_m
 fi
 
 AUTH_H="Authorization: Bearer $TOKEN"
+
+# T6/T9: cadastrar servidor pode ser recusado pela licença — pular com o
+# motivo, em vez de falhar por algo que este teste não mede.
+source "$(dirname "${BASH_SOURCE[0]}")/_license_guard.sh"
+skip_if_license_blocks
 NEW_ID=""
 cleanup() { [ -n "$NEW_ID" ] && curl -s -X DELETE "$API_URL/api/servers/$NEW_ID" -H "$AUTH_H" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
@@ -91,6 +105,31 @@ if [ -n "$OTHER_ID" ]; then
 else
     echo "  (nenhum outro servidor cadastrado pra checar — pulando essa checagem)"
 fi
+
+# ── T9: todo endpoint que precisa de SSH trata o segredo ilegível ──
+# 503 com o motivo, nunca 500 com erro cru. Antes do T9, os dois
+# primeiros (Log Viewer e coleta forçada) davam 500.
+check_endpoint() {
+    local desc="$1" method="$2" path="$3"
+    local code body
+    body=$(curl -s -o /tmp/credtest.body -w '%{http_code}' -X "$method" "$API_URL$path" -H "$AUTH_H")
+    code="$body"
+    local detail; detail=$(jq -r '.detail // ""' /tmp/credtest.body 2>/dev/null)
+    if [ "$code" = "503" ] && echo "$detail" | grep -qi "SSH_ENCRYPTION_KEY"; then
+        ok "$desc: 503 com o motivo real (chave de criptografia)"
+    else
+        fail "$desc: esperava 503 citando SSH_ENCRYPTION_KEY, veio $code — ${detail:0:120}"
+    fi
+}
+
+check_endpoint "GET  /messages/queue (Log Viewer)"  GET  "/api/messages/queue?server_id=$NEW_ID"
+check_endpoint "GET  /messages/tail"                GET  "/api/messages/tail?server_id=$NEW_ID"
+check_endpoint "POST /status/refresh (coleta forçada)" POST "/api/status/refresh?server_id=$NEW_ID"
+check_endpoint "POST /actions/clean-frozen/plan"    POST "/api/actions/clean-frozen/plan?server_id=$NEW_ID"
+rm -f /tmp/credtest.body
+
+# Nenhum desses caminhos pode ter respondido 500: o erro é conhecido e
+# tem tratamento — 500 significaria que alguém esqueceu de novo.
 
 echo
 echo "── $PASS passou, $FAIL falhou ──"

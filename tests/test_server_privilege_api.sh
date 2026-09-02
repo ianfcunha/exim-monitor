@@ -37,6 +37,11 @@ if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
 fi
 
 AUTH_H="Authorization: Bearer $TOKEN"
+
+# T6/T9: cadastrar servidor pode ser recusado pela licença — pular com o
+# motivo, em vez de falhar por algo que este teste não mede.
+source "$(dirname "${BASH_SOURCE[0]}")/_license_guard.sh"
+skip_if_license_blocks
 CT_H="Content-Type: application/json"
 NEW_ID=""
 api() { curl -s -o /tmp/priv_test_body.$$ -w '%{http_code}' "$@"; }
