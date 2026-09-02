@@ -36,6 +36,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { SEVERITY_STYLE, fmtAge, incidentTitle } from './incidents/incidentLabels'
 import CollectionFreshness from './CollectionFreshness'
+import LicenseBanner from './LicenseBanner'
 import ServerSelector from './ServerSelector'
 import { useAuth } from '../contexts/AuthContext'
 import { useServer } from '../contexts/ServerContext'
@@ -402,6 +403,8 @@ function ClassicShell({ children, onLogout, right, dense }) {
         </nav>
       </header>
 
+      <LicenseBanner />
+
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
                     padding: dense ? 0 : undefined }}>
         {children}
@@ -500,6 +503,10 @@ function NewShell({ children, onLogout, right, dense, isDark, onToggleTheme }) {
           </Tooltip>
         </div>
       </header>
+
+      {/* Fora do <header> sticky de propósito: a faixa de licença rola com
+          a página em vez de comer altura fixa em toda tela. */}
+      <LicenseBanner />
 
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
                     padding: dense ? 0 : undefined }}>

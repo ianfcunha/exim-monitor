@@ -7,6 +7,7 @@
 import { AlertTriangle, Bell, ChevronRight, History, Layers, Moon, Server, Sparkles, Sun, Users } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 import { Switch } from '@/components/ui/switch'
+import LicenseCard from '../components/LicenseCard'
 import { useAuth } from '../contexts/AuthContext'
 
 const LINKS = [
@@ -29,6 +30,11 @@ export default function GeneralSettings({ isDark, onToggleTheme, advanced, onTog
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Primeiro bloco da tela: é o dado que o suporte pede antes de
+          qualquer outro, e onde o cliente confere quantos servidores ainda
+          cabem. Só renderiza para admin — o contexto fica null pro viewer. */}
+      <LicenseCard />
+
       <div style={{
         background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12,
         padding: '20px 20px 16px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)',

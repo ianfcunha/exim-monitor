@@ -114,7 +114,9 @@ class LicenseStatus:
                 "novos está suspenso até a licença ser corrigida."
             )
         if self.state == STATE_EXPIRED:
-            venc = self.expires_at.date().isoformat() if self.expires_at else "?"
+            # dd/mm/aaaa: esta frase vai inteira para a tela e para o corpo
+            # do 403 — data em ISO no meio de texto em português destoa.
+            venc = self.expires_at.strftime("%d/%m/%Y") if self.expires_at else "?"
             return (
                 f"A licença venceu em {venc}. Servidores já cadastrados seguem "
                 "sendo monitorados normalmente; apenas o cadastro de novos está "

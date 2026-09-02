@@ -236,4 +236,10 @@ export const shareIncidentReport = (id, hours = 168) =>
 // painel e pelo upgrade.sh para confirmar o que subiu.
 export const fetchVersion = () => api.get('/version').then(r => r.data)
 
+// Estado da licença (admin only). O backend confere o token offline; a UI
+// só lê. `can_add_server` e `block_reason` vêm prontos de lá — a decisão de
+// bloquear mora num lugar só (backend/app/license.py::block_reason), então
+// o que o botão desabilitado diz é exatamente o que a API responderia.
+export const fetchLicense = () => api.get('/license').then(r => r.data)
+
 export default api

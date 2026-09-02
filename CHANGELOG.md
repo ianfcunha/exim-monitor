@@ -25,6 +25,20 @@ bate com a tag git `vX.Y.Z` e com a tag das imagens Docker.
   interno). `new-key` gera o par de assinatura, `issue` emite o token,
   `verify` confere contra a mesma chave pública que o backend usa. A chave
   privada mora fora do repositório (default `~/.mailiq/license-signing-key.pem`).
+- **Licença visível no painel** (só Admin): bloco "Licença" em
+  Configurações → Geral com cliente, identificador, vencimento, dias
+  restantes e servidores em uso do total contratado; faixa no topo do
+  painel quando o estado não é `ok` — âmbar quando ainda dá tempo (vence
+  em ≤14 dias, cortesia correndo), vermelha quando venceu ou o token não
+  confere. O texto sempre diz, na mesma frase, o que **não** acontece: o
+  monitoramento não para. No estado normal a faixa não aparece.
+  O botão "Adicionar servidor" fica desabilitado com o motivo no tooltip
+  quando o limite é atingido — em vez de deixar o clique falhar depois.
+  O motivo vem pronto do backend, então é literalmente o mesmo texto que
+  a API responderia.
+- `docs/manual.md` — seção "Configurações → Geral: a licença": o que a
+  licença cobre, o que acontece (e o que não acontece) quando vence, a
+  cortesia de instalação e como instalar/renovar o token.
 - `tests/test_license.sh` (no CI): token válido, payload adulterado,
   assinatura de outra chave, vencida, vencendo em ≤14 dias, teto de
   servidores (N passa, N+1 recusa) e as duas pontas da cortesia.

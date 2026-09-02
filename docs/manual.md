@@ -89,7 +89,7 @@ propósito — ninguém abre um painel de e-mail quando está tudo bem.
 | **Métricas** | Volume de fila e taxa de entrega ao longo das horas, funil de entrega, maiores ofensores do momento, recursos do Exim e visualizador de log. |
 | **Plano de correção** | O mesmo fluxo de correção da Triagem, apresentado como um plano por incidente — com etapas, linha do tempo e histórico dos planos encerrados. |
 | **Reputação** | Estado de blocklists, SPF/DKIM/DMARC e certificado TLS por servidor, com histórico de entrada e saída de cada lista. |
-| **Configurações** | Alertas, servidores, usuários, histórico de auditoria e manutenção. Só Admin. |
+| **Configurações** | Licença, alertas, servidores, usuários, histórico de auditoria e manutenção. Só Admin. |
 
 O painel clássico de fila ainda existe, agora como a aba **Fila** —
 gráficos históricos e atalhos extras aparecem quando o "modo avançado" é
@@ -347,6 +347,57 @@ para o histórico; à direita, o plano completo do selecionado, com:
 - As mesmas opções de correção do catálogo de ações, com o mesmo preview.
 
 `/plano/historico` abre a lista de planos já encerrados.
+
+---
+
+## Configurações → Geral: a licença
+
+O primeiro bloco de **Configurações → Geral** mostra o estado da licença
+desta instalação (só Admin): cliente, identificador da licença, até quando
+vale, quantos dias faltam e quantos servidores estão em uso do total
+contratado.
+
+A licença é conferida **no próprio servidor**, sem consultar a internet. O
+painel não fala com nenhum servidor de licenciamento e não envia dado
+nenhum para fora — funciona igual numa rede fechada.
+
+### O que acontece quando a licença vence
+
+Quase nada, de propósito. Uma licença vencida, inválida ou ausente:
+
+- **não** desliga o painel;
+- **não** o deixa somente-leitura;
+- **não** interrompe a coleta dos servidores já cadastrados;
+- **não** apaga, esconde nem degrada dado nenhum.
+
+O único efeito é que o botão **Adicionar servidor** fica desabilitado, com
+o motivo no tooltip, e a API recusa o cadastro de servidores novos. Tudo o
+que já está monitorado continua exatamente como estava.
+
+Uma faixa no topo do painel avisa quando algo precisa de atenção: âmbar
+quando ainda dá tempo (vence em até 14 dias, ou a instalação está em
+cortesia), vermelha quando já venceu ou o token não confere. No estado
+normal a faixa não aparece.
+
+### Instalação sem licença
+
+Uma instalação nova sem licença configurada entra em **cortesia**: 1
+servidor por 30 dias, contados da instalação. É o suficiente para rodar um
+piloto antes de existir contrato. Terminada a cortesia, vale a mesma regra
+de sempre — o que já está cadastrado continua sendo monitorado, e só o
+cadastro de servidores novos fica suspenso.
+
+### Instalar ou renovar a licença
+
+A licença é um token que vai na variável `MAILIQ_LICENSE`, no `.env` do
+painel. Depois de editar o arquivo:
+
+```bash
+docker compose up -d backend
+```
+
+O estado novo aparece em Configurações → Geral e no log do backend. Se o
+token não for aceito, a tela diz o motivo.
 
 ---
 

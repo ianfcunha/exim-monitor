@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-route
 import { TooltipProvider } from '@/components/ui/tooltip'
 import AppShell from './components/AppShell'
 import { AuthProvider } from './contexts/AuthContext'
+import { LicenseProvider } from './contexts/LicenseContext'
 import { ServerProvider } from './contexts/ServerContext'
 import { ToastProvider } from './contexts/ToastContext'
 import { useAdvancedMode } from './hooks/useAdvancedMode'
@@ -83,6 +84,9 @@ export default function App() {
             o provider precisa de useSearchParams. */}
         <BrowserRouter>
         <ServerProvider>
+        {/* Dentro do Router: o provider é lido pelo banner da casca e pela
+            tela de Servidores, ambos abaixo daqui. */}
+        <LicenseProvider>
           <Routes>
             {/* Triagem é a tela inicial — "ninguém abre um painel de
                 e-mail quando está tudo bem". */}
@@ -124,6 +128,7 @@ export default function App() {
 
             <Route path="*" element={<ScopedRedirect to="/triage" />} />
           </Routes>
+        </LicenseProvider>
         </ServerProvider>
         </BrowserRouter>
       </AuthProvider>

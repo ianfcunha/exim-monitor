@@ -8,6 +8,7 @@ import { createServer, deleteServer, fetchServers, testServerConn, updateServer 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { useLicense } from '../contexts/LicenseContext'
 import { useServer } from '../contexts/ServerContext'
 
 const SSH_STATUS = {
@@ -221,6 +222,11 @@ function ServerForm({ initial, onSave, onCancel, saving }) {
 /* ── Principal ── */
 export default function ServersPage() {
   const { refresh: refreshCtx } = useServer()
+  // Licença: quem decide se cabe mais um servidor é o backend. A tela só
+  // repete `can_add_server`/`block_reason` — assim o motivo no tooltip é
+  // exatamente o mesmo texto que o POST /api/servers responderia.
+  const { license, refresh: refreshLicense } = useLicense()
+  const licenseBlocks = license ? !license.can_add_server : false
   const [servers, setServers]     = useState([])
   const [loading, setLoading]     = useState(true)
   const [showForm, setShowForm]   = useState(false)
@@ -263,6 +269,7 @@ export default function ServersPage() {
       setEditTarget(null)
       await load()
       refreshCtx()
+      refreshLicense()
     } catch (e) {
       setError(e?.response?.data?.detail ?? e.message ?? 'Erro ao salvar.')
     } finally {
@@ -276,6 +283,7 @@ export default function ServersPage() {
       await deleteServer(id)
       await load()
       refreshCtx()
+      refreshLicense()
     } catch (e) {
       setError(e?.response?.data?.detail ?? e.message)
     }
@@ -340,10 +348,33 @@ export default function ServersPage() {
             </TooltipTrigger>
             <TooltipContent>Atualizar lista</TooltipContent>
           </Tooltip>
-          <button onClick={() => { setEditTarget(null); setShowForm(true) }}
-            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700, border: 'none', background: 'var(--sky)', color: '#fff', cursor: 'pointer' }}>
-            <Plus size={13} /> Adicionar servidor
-          </button>
+          {/* Desabilitado com motivo em vez de deixar o clique falhar
+              depois — mesmo padrão do modo observação nas ações. */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span style={{ display: 'inline-flex' }}>
+                <button
+                  onClick={() => { setEditTarget(null); setShowForm(true) }}
+                  disabled={licenseBlocks}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px',
+                    borderRadius: 8, fontSize: 12, fontWeight: 700, border: 'none',
+                    background: licenseBlocks ? 'var(--border)' : 'var(--sky)',
+                    color: licenseBlocks ? 'var(--dim)' : '#fff',
+                    cursor: licenseBlocks ? 'not-allowed' : 'pointer',
+                  }}>
+                  <Plus size={13} /> Adicionar servidor
+                </button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              {licenseBlocks
+                ? license.block_reason
+                : (license
+                    ? `${license.servers_used} de ${license.max_servers} servidores em uso.`
+                    : 'Cadastrar um novo servidor monitorado')}
+            </TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
