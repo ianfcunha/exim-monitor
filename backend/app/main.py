@@ -26,6 +26,7 @@ from .monthly_report import monthly_report_loop
 from .reports import weekly_report_loop
 from .routers import actions, auth, history, incidents, messages, reputation, security, servers, status, users
 from .routers import settings as settings_router
+from .version import APP_VERSION, version_info
 
 logging.basicConfig(
     level=logging.INFO,
@@ -947,7 +948,7 @@ _guard_production_secrets()
 
 app = FastAPI(
     title="EXIM Monitor API",
-    version="1.2.0",
+    version=APP_VERSION,
     description=(
         "API REST para monitoramento e gerenciamento do servidor de e-mail EXIM. "
         "Baseada no script diag-exim.sh v4.8+."
@@ -988,4 +989,14 @@ app.include_router(settings_router.router)
 
 @app.get("/api/health", tags=["meta"])
 def health():
-    return {"status": "ok", "version": "1.2.0"}
+    return {"status": "ok", "version": APP_VERSION}
+
+
+@app.get("/api/version", tags=["meta"])
+def version():
+    """
+    Versão em execução — sem autenticação de propósito: o `upgrade.sh` e o
+    rodapé do painel consultam isto para confirmar o que subiu. Não expõe
+    nada sensível (versão, sha de build, hora de início, versão do schema).
+    """
+    return {**version_info(), "schema_version": _SCHEMA_VERSION}

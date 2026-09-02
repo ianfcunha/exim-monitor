@@ -31,7 +31,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { fetchIncidents, fetchIncidentsSummary } from '../api/client'
+import { fetchIncidents, fetchIncidentsSummary, fetchVersion } from '../api/client'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { SEVERITY_STYLE, fmtAge, incidentTitle } from './incidents/incidentLabels'
@@ -511,10 +511,24 @@ function NewShell({ children, onLogout, right, dense, isDark, onToggleTheme }) {
   )
 }
 
+// Versão em execução no rodapé — é o que o operador lê antes de abrir um
+// chamado e o que o suporte pede primeiro. Busca uma vez; se falhar,
+// simplesmente não mostra (não vale poluir o rodapé com erro).
+function useAppVersion() {
+  const [v, setV] = useState(null)
+  useEffect(() => {
+    let alive = true
+    fetchVersion().then(d => { if (alive) setV(d) }).catch(() => {})
+    return () => { alive = false }
+  }, [])
+  return v
+}
+
 function FooterStatusBar({ incidentCount }) {
   const { servers, isFleet, activeServer } = useServer()
   const list = isFleet ? servers : (activeServer ? [activeServer] : [])
   const activeCount = list.filter(s => s.is_enabled).length
+  const version = useAppVersion()
 
   return (
     <footer style={{
@@ -533,11 +547,30 @@ function FooterStatusBar({ incidentCount }) {
       <span className="hidden sm:flex" style={{ alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--muted)' }}>
         <Server size={10} /> {activeCount} servidor{activeCount === 1 ? '' : 'es'} ativo{activeCount === 1 ? '' : 's'}
       </span>
-      <span className="hidden md:inline" style={{
-        marginLeft: 'auto', fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5,
-        color: 'var(--dim)', letterSpacing: '0.03em',
-      }}>
-        © {new Date().getFullYear()} Mail IQ by AVILI · Todos os direitos reservados
+      <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+        {version && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span style={{
+                fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5,
+                color: 'var(--dim)', letterSpacing: '0.03em', cursor: 'default',
+              }}>
+                v{version.version}{version.build_sha && version.build_sha !== 'dev' ? ` · ${version.build_sha}` : ''}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              Mail IQ v{version.version}
+              {version.build_sha && version.build_sha !== 'dev' && ` (build ${version.build_sha})`}
+              {' · '}schema {version.schema_version}
+            </TooltipContent>
+          </Tooltip>
+        )}
+        <span className="hidden md:inline" style={{
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5,
+          color: 'var(--dim)', letterSpacing: '0.03em',
+        }}>
+          © {new Date().getFullYear()} Mail IQ by AVILI · Todos os direitos reservados
+        </span>
       </span>
     </footer>
   )

@@ -13,6 +13,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# SHA do commit publicado — o CI passa via --build-arg MAILIQ_BUILD_SHA=$GITHUB_SHA.
+# Sem isso (build local / compose sem CI) o backend reporta build_sha="dev".
+ARG MAILIQ_BUILD_SHA=""
+ENV MAILIQ_BUILD_SHA=$MAILIQ_BUILD_SHA
+
 EXPOSE 8000
 
 # Servidor ASGI de producao. O docker-compose.prod.yml passa o mesmo

@@ -231,4 +231,9 @@ export const fetchIncidentReportHtml = (id) =>
 export const shareIncidentReport = (id, hours = 168) =>
   api.post(`/incidents/${id}/report/share`, { hours }).then(r => r.data)
 
+// ── Meta ───────────────────────────────────────────────────────────────────
+// Versão em execução — endpoint público (sem Bearer). Usado no rodapé do
+// painel e pelo upgrade.sh para confirmar o que subiu.
+export const fetchVersion = () => api.get('/version').then(r => r.data)
+
 export default api
