@@ -156,3 +156,20 @@ def status_health(
         raise HTTPException(400, "Nenhum servidor configurado.")
     server = get_server_owned_by(db, sid, current_user)
     return compute_server_health(db, sid, server.name if server else None)
+
+@router.get("/collector", summary="Estado do coletor e do watchdog")
+def status_collector(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Estado do processo que coleta — não de um servidor monitorado.
+
+    Existe porque "há quanto tempo este servidor foi coletado" (em
+    /status/health) não distingue as duas causas possíveis: o servidor
+    parou de responder, ou o coletor inteiro parou de rodar. São
+    problemas diferentes, com donos diferentes, e a segunda é a que o
+    painel silenciava até o watchdog existir (ver app/watchdog.py).
+    """
+    from ..watchdog import collector_health
+
+    return collector_health()

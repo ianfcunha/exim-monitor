@@ -17,8 +17,8 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from .collector import background_collector
 from .ssh import close_all_pooled
+from .watchdog import start_collector, stop_collector, watchdog_loop
 from .config import settings
 from .database import run_retention
 from .limiter import limiter
@@ -1035,7 +1035,11 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("Falha ao verificar a licenca (seguindo mesmo assim)")
 
-    collector_task = asyncio.create_task(background_collector())
+    # O coletor nasce pelo watchdog, nao por create_task direto: depois de
+    # um religamento a task e outra, e um unico lugar precisa saber qual e
+    # a viva (ver watchdog.stop_collector).
+    start_collector()
+    watchdog_task = asyncio.create_task(watchdog_loop())
     retention_task = asyncio.create_task(retention_loop())
     weekly_report_task = asyncio.create_task(weekly_report_loop())
     monthly_report_task = asyncio.create_task(monthly_report_loop())
@@ -1047,15 +1051,18 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    collector_task.cancel()
+    watchdog_task.cancel()
     retention_task.cancel()
     weekly_report_task.cancel()
     monthly_report_task.cancel()
-    for task in (collector_task, retention_task, weekly_report_task, monthly_report_task):
+    for task in (watchdog_task, retention_task, weekly_report_task, monthly_report_task):
         try:
             await task
         except asyncio.CancelledError:
             pass
+    # Depois do watchdog: encerrar o coletor primeiro so faria o watchdog
+    # enxergar uma task morta e religa-la no meio do shutdown.
+    await stop_collector()
     close_all_pooled()
     logger.info("Tasks de background encerradas")
 

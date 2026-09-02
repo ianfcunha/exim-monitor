@@ -10,6 +10,29 @@ bate com a tag git `vX.Y.Z` e com a tag das imagens Docker.
 ## [Não lançado]
 
 ### Adicionado
+- **Watchdog do coletor** — o painel inteiro dependia de uma
+  `asyncio.Task` continuar rodando. Se ela morresse ou travasse, as telas
+  seguiam servindo o último snapshot, o selo de saúde seguia verde e
+  nenhum alerta disparava, porque alerta é disparado *pela* coleta: a
+  falha do monitoramento era indistinguível de "está tudo bem". Agora um
+  loop separado verifica a cada 60s e cobre os três modos de falha:
+  task morta (religa e alerta, com a exceção que a matou no log), task
+  viva mas sem concluir ciclo (religa e alerta), e servidor que parou de
+  responder apesar do coletor saudável (alerta deadman com aviso de
+  recuperação quando volta).
+- **Alertas operacionais** — categoria à parte, para quando o problema é
+  o próprio monitoramento. Não passam pelo `severity_threshold`: o
+  limiar existe para o operador dosar o barulho sobre a saúde do e-mail,
+  não para silenciar "o painel parou de enxergar". Cooldown próprio de
+  30 min, e a mensagem de recuperação ignora o cooldown.
+- `GET /api/status/collector` — estado do coletor e do watchdog (último
+  ciclo, ciclos concluídos, religamentos, servidores mudos). Existe
+  porque "há quanto tempo este servidor foi coletado" não distingue
+  "o servidor sumiu" de "o coletor parou" — problemas diferentes.
+- `tests/test_watchdog.sh` (no CI) — 29 asserções com coletor falso e
+  relógio empurrado à mão: os três modos de falha, as recuperações sem
+  repetição, servidor recém-cadastrado que não conta como silencioso,
+  servidor removido enquanto mudo, cooldown e independência do limiar.
 - **Licença de uso**, verificada offline (assinatura Ed25519, chave pública
   embutida no backend). O painel não fala com nenhum servidor de
   licenciamento — funciona em rede fechada, sem telemetria. O token vai em

@@ -21,6 +21,10 @@ um defeito real e cita, no cabeçalho, o dado que o causou.
 - `test_license.sh` — assinatura, estados e o único bloqueio da licença
   (`license.py` só usa `cryptography`; assina com uma chave de teste
   gerada na hora, então não depende da chave de produção).
+- `test_watchdog.sh` — os três modos de falha silenciosa do coletor, com
+  um coletor falso e o relógio empurrado à mão. Stub de `config`,
+  `database`, `alerts` e `collector`: roda só com a stdlib, então uma
+  falha aqui é sempre do watchdog, nunca do ambiente.
 
 ## O que NÃO roda no CI (e por quê)
 
@@ -62,3 +66,4 @@ bash tests/test_migrations.sh
 docker compose up -d
 bash tests/test_incidents_api.sh
 ```
+

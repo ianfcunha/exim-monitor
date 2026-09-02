@@ -378,6 +378,144 @@ async def check_and_alert(severity: str, problem: str, queue_total: int,
         db.close()
 
 
+# ── Alertas operacionais (o monitoramento falhando) ────────────────────────
+# Categoria à parte de propósito. `check_and_alert` só dispara quando a
+# SEVERIDADE DA ENTREGA sobe — e por definição ela nunca sobe quando o
+# problema é que ninguém está mais medindo nada. Um coletor parado ou um
+# servidor que sumiu produz silêncio, e silêncio hoje é indistinguível de
+# "está tudo bem". Isto é o alerta que quebra esse silêncio.
+#
+# Duas diferenças em relação ao alerta normal:
+#
+#  1. NÃO passa por `severity_threshold`. O limiar existe para o operador
+#     escolher quanto barulho quer sobre a saúde do e-mail; ele não pode
+#     silenciar "o painel parou de enxergar". Se o canal está ativo, sai.
+#  2. Cooldown próprio por (tipo, servidor), independente do cooldown de
+#     severidade — um coletor parado não pode consumir a janela do alerta
+#     de fila, nem o contrário.
+
+# Cooldown dos avisos operacionais. Fixo (não é o cooldown_minutes do
+# usuário): repetir "o coletor ainda está parado" de 30 em 30 minutos é
+# útil; de 30 em 30 segundos é ruído que faz desligar o canal.
+_OPERATIONAL_COOLDOWN = timedelta(minutes=30)
+
+# Último envio por (kind, server_id). A recuperação ("voltou a coletar")
+# ignora o cooldown — é uma boa notícia e só sai uma vez por episódio.
+_operational_sent_at: Dict[tuple, datetime] = {}
+
+
+def clear_operational_cooldown(kind: str, server_id: Optional[int]) -> None:
+    """Encerra o episódio: o próximo problema deste tipo alerta na hora."""
+    _operational_sent_at.pop((kind, server_id), None)
+
+
+async def send_operational_alert(
+    kind: str,
+    title: str,
+    detail: str,
+    server_id: Optional[int] = None,
+    resolved: bool = False,
+) -> bool:
+    """
+    Avisa que o MONITORAMENTO está com problema (coletor parado, servidor
+    silencioso), ou que voltou ao normal (`resolved=True`).
+
+    Retorna True se pelo menos um canal aceitou a mensagem. Nunca levanta:
+    é chamado de dentro do watchdog, e uma falha de e-mail não pode
+    derrubar quem vigia o coletor.
+    """
+    now = datetime.utcnow()
+    key = (kind, server_id)
+
+    if not resolved:
+        last = _operational_sent_at.get(key)
+        if last is not None and (now - last) < _OPERATIONAL_COOLDOWN:
+            return False
+
+    severity = "OK" if resolved else "CRITICAL"
+    problem = f"{kind}_resolvido" if resolved else kind
+    icon = "✅" if resolved else "🚨"
+    sent_any = False
+
+    db = SessionLocal()
+    try:
+        cfg = get_effective_alert_settings(db, server_id=server_id)
+        server_name = None
+        if server_id is not None:
+            server = db.get(Server, server_id)
+            server_name = server.name if server else None
+
+        subject = f"[Mail IQ] {title}"
+        html = _operational_email_html(title, detail, server_name, resolved)
+        text = (
+            f"{icon} <b>Mail IQ — {title}</b>\n\n"
+            + (f"<b>Servidor:</b> {server_name}\n" if server_name else "")
+            + f"{detail}\n\n"
+            f"<b>Hora:</b> {now.strftime('%d/%m/%Y %H:%M')} UTC"
+        )
+
+        if cfg.email_enabled and cfg.email_to and (cfg.resend_api_key or cfg.smtp_password):
+            try:
+                await asyncio.to_thread(_send_raw_email, cfg, subject, html)
+                sent_any = True
+                _record_history("email", severity, problem, 0, True, server_id=server_id)
+            except Exception as exc:
+                logger.error("Falha ao enviar alerta operacional por e-mail: %s", exc)
+                _record_history("email", severity, problem, 0, False, str(exc)[:500], server_id=server_id)
+
+        if cfg.telegram_enabled and cfg.telegram_bot_token and cfg.telegram_chat_id:
+            try:
+                await asyncio.to_thread(telegram_post, cfg, text)
+                sent_any = True
+                _record_history("telegram", severity, problem, 0, True, server_id=server_id)
+            except Exception as exc:
+                logger.error("Falha ao enviar alerta operacional por Telegram: %s", exc)
+                _record_history("telegram", severity, problem, 0, False, str(exc)[:500], server_id=server_id)
+
+        if cfg.webhook_url:
+            try:
+                await asyncio.to_thread(
+                    _send_webhook_sync, cfg, severity, problem, 0, server_id, server_name
+                )
+                sent_any = True
+                _record_history("webhook", severity, problem, 0, True, server_id=server_id)
+            except Exception as exc:
+                logger.error("Falha ao enviar alerta operacional por webhook: %s", exc)
+                _record_history("webhook", severity, problem, 0, False, str(exc)[:500], server_id=server_id)
+    except Exception:
+        logger.exception("Falha ao montar o alerta operacional %s", kind)
+    finally:
+        db.close()
+
+    if resolved:
+        _operational_sent_at.pop(key, None)
+    elif sent_any:
+        _operational_sent_at[key] = now
+
+    return sent_any
+
+
+def _operational_email_html(title: str, detail: str, server_name: Optional[str],
+                            resolved: bool) -> str:
+    color = "#1F7A4C" if resolved else "#A32D2D"
+    return f"""
+<!DOCTYPE html><html><body style="font-family:sans-serif;background:#f8f8f6;margin:0;padding:24px">
+<div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;
+            border:0.5px solid #d3d1c7;overflow:hidden">
+  <div style="background:{color};padding:20px 28px">
+    <h1 style="color:#fff;margin:0;font-size:18px">Mail IQ &mdash; {title}</h1>
+  </div>
+  <div style="padding:24px 28px">
+    {f'<p style="margin:0 0 12px;color:#2c2c2a;font-size:15px">Servidor: <strong>{server_name}</strong></p>' if server_name else ''}
+    <p style="margin:0;color:#2c2c2a;font-size:14px;line-height:1.6">{detail}</p>
+  </div>
+  <div style="background:#f8f8f6;padding:12px 28px;font-size:11px;color:#aaa">
+    Enviado automaticamente em {datetime.utcnow().strftime("%d/%m/%Y %H:%M")} UTC
+  </div>
+</div>
+</body></html>"""
+
+
 async def send_test_email(cfg: AlertSettings) -> None:
     """Envia e-mail de teste — usado pelo endpoint POST /api/settings/test/email."""
     await asyncio.to_thread(

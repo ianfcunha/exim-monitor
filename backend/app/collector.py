@@ -20,6 +20,7 @@ from .crypto import SecretDecryptionError
 from .database import Server, SessionLocal, Snapshot, build_server_cfg
 from .incident_engine import run_incident_cycle
 from .ssh import SSHError, expire_blocks, expire_quarantine, run_full, run_quick
+from .watchdog import note_cycle
 
 logger = logging.getLogger(__name__)
 
@@ -241,6 +242,11 @@ async def background_collector() -> None:
 
             tick = (tick + 1) % ticks_per_full
             logger.debug("Ciclo %s concluído — %d servidor(es)", mode, len(servers))
+
+            # Pulso para o watchdog. No FIM do ciclo, depois do gather:
+            # marcar no começo faria um ciclo que travou no meio da coleta
+            # parecer sinal de vida — exatamente a falha que se quer pegar.
+            note_cycle(mode)
 
         except Exception as exc:
             logger.error("Erro no loop do coletor: %s", exc, exc_info=True)
