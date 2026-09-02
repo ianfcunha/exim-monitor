@@ -13,9 +13,9 @@
 # Preserva o volume do Caddy (não re-emite o certificado).
 # =============================================================================
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || exit 1
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 ok()   { echo -e "${GREEN}  ✓ $*${NC}"; }
 info() { echo -e "${BLUE}  → $*${NC}"; }
 warn() { echo -e "${YELLOW}  ⚠ $*${NC}"; }

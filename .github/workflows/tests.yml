@@ -1,0 +1,84 @@
+# .github/workflows/tests.yml
+# Cobertura de regressão em todo push/PR. O que NÃO roda aqui (testes que
+# precisam do stack de dev ou de Exim/iptables reais) está documentado em
+# tests/README.md.
+
+name: Tests
+
+on:
+  push:
+    branches: [main]
+    tags:     ['v*.*.*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install deps
+        run: pip install -r backend/requirements.txt
+
+      - name: Compile-check
+        run: python -m compileall -q backend/app
+
+      - name: Import smoke
+        working-directory: backend
+        env:
+          ENVIRONMENT: development
+          DATABASE_URL: postgresql://x:x@localhost:5432/x
+        run: python -c "import app.main; print('APP_VERSION', app.main.APP_VERSION)"
+
+      - name: Acceptance tests (subconjunto autocontido)
+        run: bash tests/run-ci.sh
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+  shell:
+    name: Shell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax check every *.sh
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            bash -n "$f" || { echo "::error file=$f::erro de sintaxe"; fail=1; }
+          done < <(git ls-files '*.sh')
+          exit $fail
+
+      - name: shellcheck (deploy/ + instaladores)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          shellcheck -S warning -e SC1091 \
+            deploy/install.sh deploy/upgrade.sh deploy/backup.sh deploy/restore.sh \
+            install.sh mailiq-bootstrap.sh

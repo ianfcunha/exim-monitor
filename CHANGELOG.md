@@ -38,6 +38,12 @@ bate com a tag git `vX.Y.Z` e com a tag das imagens Docker.
   trás sobe de volta a 024 sem duplicar nem apagar dados) em Postgres
   descartável.
 - Imagem do backend passa a incluir `postgresql-client` (`pg_dump`/`psql`).
+- Workflow **Tests** no CI (todo push/PR): job backend (`compileall` +
+  `import app.main` + `tests/run-ci.sh` — detectores, reconhecimento de
+  log, sanidade de checagem), job frontend (`npm ci` + `npm run build`),
+  job shell (`bash -n` em todo `*.sh` + shellcheck nos instaladores).
+- `tests/README.md` — categoriza os 27 testes e diz o que roda no CI e
+  por que os demais (stack de dev / Exim real) não rodam ainda.
 
 ### Alterado
 - CI migrado do Docker Hub para o `ghcr.io` (pacotes privados de graça,
