@@ -10,6 +10,24 @@ bate com a tag git `vX.Y.Z` e com a tag das imagens Docker.
 ## [Não lançado]
 
 ### Adicionado
+- **Licença de uso**, verificada offline (assinatura Ed25519, chave pública
+  embutida no backend). O painel não fala com nenhum servidor de
+  licenciamento — funciona em rede fechada, sem telemetria. O token vai em
+  `MAILIQ_LICENSE` no `.env`; `GET /api/license` (admin) mostra cliente,
+  vencimento, dias restantes e servidores usados/contratados.
+  A licença é **soft de propósito**: vencida, inválida ou ausente ela nunca
+  trava o painel, nunca o deixa somente-leitura, nunca para o coletor dos
+  servidores já cadastrados e nunca apaga dado. A única consequência é
+  `POST /api/servers` recusar (403) o cadastro de servidores **novos**, com
+  o motivo em texto claro. Instalação sem licença entra em cortesia:
+  1 servidor por 30 dias a contar da instalação.
+- `tools/issue-license.py` — emissão e conferência de licenças (uso
+  interno). `new-key` gera o par de assinatura, `issue` emite o token,
+  `verify` confere contra a mesma chave pública que o backend usa. A chave
+  privada mora fora do repositório (default `~/.mailiq/license-signing-key.pem`).
+- `tests/test_license.sh` (no CI): token válido, payload adulterado,
+  assinatura de outra chave, vencida, vencendo em ≤14 dias, teto de
+  servidores (N passa, N+1 recusa) e as duas pontas da cortesia.
 - `deploy/` — pacote de deploy autocontido: roda o painel a partir de
   imagens versionadas do ghcr.io, sem código-fonte na máquina. Inclui
   `docker-compose.yml` (imagens `${MAILIQ_VERSION}`), `install.sh`,

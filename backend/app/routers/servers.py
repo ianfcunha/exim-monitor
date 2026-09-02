@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_current_user, require_admin
 from ..crypto import SecretDecryptionError, encrypt_secret
+from ..license import license_status
 from ..database import (
     Server, User, build_server_cfg, get_db, get_server_owned_by,
     get_servers_for_user, to_utc_iso,
@@ -112,6 +113,14 @@ def create_server(
     current_user: User = Depends(require_admin),
 ):
     from ..ssh import SSHError, deploy_script
+
+    # Licença: o ÚNICO ponto do painel que ela bloqueia. Servidor já
+    # cadastrado nunca para de ser coletado por causa de licença — ver a
+    # política em app/license.py.
+    lic = license_status(db)
+    reason = lic.block_reason()
+    if reason:
+        raise HTTPException(status_code=403, detail=reason)
 
     # T4: root exige escolha explícita — nunca é o default nem um
     # acidente de deixar o campo em branco.

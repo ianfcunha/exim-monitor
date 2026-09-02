@@ -58,6 +58,7 @@ OLD_PG="$(_get POSTGRES_PASSWORD)"
 OLD_JWT="$(_get JWT_SECRET)"
 OLD_SSHK="$(_get SSH_ENCRYPTION_KEY)"
 OLD_VERSION="$(_get MAILIQ_VERSION)"
+OLD_LIC="$(_get MAILIQ_LICENSE)"
 if [[ -n "$OLD_PG" || -n "$OLD_SSHK" ]]; then
   warn "Instalação anterior detectada — reaproveitando senha do banco, chave"
   warn "de cifra SSH e JWT do .env existente (trocá-los quebraria o que já roda)."
@@ -91,6 +92,19 @@ while true; do
   warn "Senhas vazias ou diferentes. De novo."
 done
 
+echo ""
+ask "5. Licença (opcional agora)"
+if [[ -n "$OLD_LIC" ]]; then
+  ok "Licença já presente no .env — mantida."
+  LICENSE="$OLD_LIC"
+else
+  ask "   Cole o token recebido na contratação, ou deixe em branco para"
+  ask "   instalar em cortesia (1 servidor por 30 dias). Pode ser preenchido"
+  ask "   depois, editando o .env e rodando: ${COMPOSE} up -d backend"
+  read -rp "   MAILIQ_LICENSE: " LICENSE
+  LICENSE="$(echo "${LICENSE:-}" | tr -d '[:space:]')"
+fi
+
 PG_PASS="${OLD_PG:-$(openssl rand -base64 24 | tr -d '=+/' | head -c 24)}"
 JWT_SECRET="${OLD_JWT:-$(openssl rand -hex 32)}"
 SSH_KEY="${OLD_SSHK:-$(openssl rand -base64 32 | tr '+/' '-_')}"
@@ -114,6 +128,9 @@ SSH_ENCRYPTION_KEY=${SSH_KEY}
 JWT_EXPIRE_MINUTES=480
 
 CORS_ORIGINS=["https://${DOMAIN}"]
+
+# Vazio = cortesia de instalação (1 servidor / 30 dias). Ver .env.example.
+MAILIQ_LICENSE=${LICENSE}
 
 QUICK_INTERVAL=30
 FULL_INTERVAL=300

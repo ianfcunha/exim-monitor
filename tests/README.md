@@ -18,6 +18,9 @@ um defeito real e cita, no cabeçalho, o dado que o causou.
   contra fixtures, sem Exim.
 - `test_check_sanity.sh` — sanidade das checagens DNSBL/cert do script;
   tolera falta de rede (cai em `desconhecido`).
+- `test_license.sh` — assinatura, estados e o único bloqueio da licença
+  (`license.py` só usa `cryptography`; assina com uma chave de teste
+  gerada na hora, então não depende da chave de produção).
 
 ## O que NÃO roda no CI (e por quê)
 

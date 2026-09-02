@@ -24,7 +24,7 @@ from .database import run_retention
 from .limiter import limiter
 from .monthly_report import monthly_report_loop
 from .reports import weekly_report_loop
-from .routers import actions, auth, history, incidents, messages, reputation, security, servers, status, users
+from .routers import actions, auth, history, incidents, license, messages, reputation, security, servers, status, users
 from .routers import settings as settings_router
 from .version import APP_VERSION, version_info
 
@@ -1021,6 +1021,20 @@ async def lifespan(app: FastAPI):
         logger.exception("Falha ao garantir o usuario admin (seguindo mesmo assim)")
     logger.info("Banco de dados pronto")
 
+    # Estado da licenca explicito no log de boot — quem abre o log de um
+    # painel de cliente ve na hora se a licenca vence, venceu ou nem existe.
+    # Nao bloqueia nada: falha aqui e so ausencia de log, nunca boot travado.
+    try:
+        from .database import SessionLocal
+        from .license import log_license_state
+        _db = SessionLocal()
+        try:
+            log_license_state(_db)
+        finally:
+            _db.close()
+    except Exception:
+        logger.exception("Falha ao verificar a licenca (seguindo mesmo assim)")
+
     collector_task = asyncio.create_task(background_collector())
     retention_task = asyncio.create_task(retention_loop())
     weekly_report_task = asyncio.create_task(weekly_report_loop())
@@ -1116,6 +1130,7 @@ app.include_router(incidents.router)
 app.include_router(reputation.router)
 app.include_router(security.router)
 app.include_router(history.router)
+app.include_router(license.router)
 app.include_router(messages.router)
 app.include_router(settings_router.router)
 

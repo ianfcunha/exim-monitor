@@ -53,6 +53,12 @@ class Settings(BaseSettings):
     # Em produção restrinja para o domínio real do frontend
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:4173"]
 
+    # ── Licença ──────────────────────────────────────────────────────
+    # Token assinado (Ed25519) emitido por tools/issue-license.py. Vazio =
+    # instalação em cortesia: 1 servidor por 30 dias. Licença vencida ou
+    # ausente NUNCA trava o painel nem para a coleta — ver app/license.py.
+    mailiq_license: str = ""
+
     # ── Intervalos de coleta (segundos) ──────────────────────────────
     quick_interval: int = 30     # heartbeat leve
     full_interval: int = 300     # relatório completo (5 min)

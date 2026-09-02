@@ -15,6 +15,7 @@ CI_SAFE=(
   test_detectors.sh          # detectors.py puro (só stdlib)
   test_log_recognition.sh    # sourcing de diag-exim.sh + fixtures, sem Exim
   test_check_sanity.sh       # sourcing de diag-exim.sh — checagens DNSBL/cert tolerantes a falta de rede
+  test_license.sh            # app/license.py puro (cryptography), sem banco nem rede
 )
 
 fail=0
