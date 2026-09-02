@@ -64,8 +64,8 @@ if [[ -n "$OLD_PG" || -n "$OLD_SSHK" ]]; then
 fi
 
 # ── Perguntas ─────────────────────────────────────────────────────────────
-DEFAULT_VERSION="$(grep -E '^MAILIQ_VERSION=' .env.example | cut -d= -f2)"
-DEFAULT_REGISTRY="$(grep -E '^MAILIQ_REGISTRY=' .env.example | cut -d= -f2)"
+DEFAULT_VERSION="$(grep -E '^MAILIQ_VERSION=' .env.example | cut -d= -f2-)"
+DEFAULT_REGISTRY="$(grep -E '^MAILIQ_REGISTRY=' .env.example | cut -d= -f2-)"
 
 echo ""
 ask "2. Versão a instalar (default: ${OLD_VERSION:-$DEFAULT_VERSION})"

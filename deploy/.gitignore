@@ -1,6 +1,8 @@
-# Configuração real e backups do .env — nunca versionar
+# Configuração real e cópias do .env — nunca versionar
 .env
 .env.bak-*
+.env.pre-restore-*
+.env.from-backup-*
 .env.tmp
 
 # Backups gerados pelo backup.sh

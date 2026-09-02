@@ -10,8 +10,9 @@ deploy/
   .env.example         modelo de configuração — copie para .env
   install.sh           instala o painel (1ª vez)
   upgrade.sh           atualiza para uma versão, com rollback automático
-  backup.sh            dump do banco + .env  (adicionado no T3)
-  restore.sh           restaura um backup     (adicionado no T3)
+  backup.sh            dump do banco + .env, num tarball
+  restore.sh           restaura um backup — valida a chave Fernet antes
+  check-key.py         validador da chave (usado pelo restore.sh)
   docs/
     instalar.md        passo a passo da instalação e do 1º servidor
     atualizar.md       como atualizar, o que o rollback cobre, onde fica o .env
@@ -22,8 +23,9 @@ deploy/
 ```bash
 cp .env.example .env      # preencha DOMAIN, senhas e segredos
 ./install.sh              # instala e sobe
-# ... mais tarde ...
+./backup.sh               # a qualquer momento — tarball em backups/
 ./upgrade.sh 1.1.0        # atualiza (faz backup, verifica saúde, reverte se falhar)
+./restore.sh backups/AAAAMMDD-HHMMSS.mailiq-backup.tar.gz
 ```
 
 O `.env` guarda a chave que decifra as credenciais SSH dos servidores

@@ -15,6 +15,15 @@ bate com a tag git `vX.Y.Z` e com a tag das imagens Docker.
   `docker-compose.yml` (imagens `${MAILIQ_VERSION}`), `install.sh`,
   `upgrade.sh` com verificação de saúde e rollback automático da imagem,
   `.env.example` e `docs/`.
+- `deploy/backup.sh` — tarball com dump do Postgres + `.env` (a chave
+  Fernet vai junta, sem ela o dump é inútil). Não-interativo; o
+  `upgrade.sh` o executa antes de atualizar.
+- `deploy/restore.sh` — restaura um backup. **Antes de tocar em qualquer
+  coisa**, valida (via `deploy/check-key.py`, rodado na imagem do backend)
+  que a `SSH_ENCRYPTION_KEY` do backup decifra os segredos do dump; se não
+  decifra, aborta. Recria o banco, aplica o dump e injeta só a chave
+  Fernet no `.env` atual (mantém `POSTGRES_PASSWORD`/`DOMAIN` da máquina).
+  Preserva o volume do Caddy.
 - CI publica as imagens no **GitHub Container Registry** (`ghcr.io`): tag
   git `vX.Y.Z` → `:X.Y.Z`, `:X.Y` e `:latest`; push na `main` → `:main`
   e `:sha-<curto>`; PR → build de validação sem push. O SHA do commit
