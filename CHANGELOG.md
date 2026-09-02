@@ -9,6 +9,23 @@ bate com a tag git `vX.Y.Z` e com a tag das imagens Docker.
 
 ## [Não lançado]
 
+### Adicionado
+- `deploy/` — pacote de deploy autocontido: roda o painel a partir de
+  imagens versionadas do ghcr.io, sem código-fonte na máquina. Inclui
+  `docker-compose.yml` (imagens `${MAILIQ_VERSION}`), `install.sh`,
+  `upgrade.sh` com verificação de saúde e rollback automático da imagem,
+  `.env.example` e `docs/`.
+- CI publica as imagens no **GitHub Container Registry** (`ghcr.io`): tag
+  git `vX.Y.Z` → `:X.Y.Z`, `:X.Y` e `:latest`; push na `main` → `:main`
+  e `:sha-<curto>`; PR → build de validação sem push. O SHA do commit
+  entra na imagem via `MAILIQ_BUILD_SHA` (aparece em `/api/version`).
+- A imagem do backend passa a embutir `diag-exim/` em `/app/diag-exim/`
+  (o CI copia antes do build) — necessário para o deploy sem repositório.
+
+### Alterado
+- CI migrado do Docker Hub para o `ghcr.io` (pacotes privados de graça,
+  autenticação pelo `GITHUB_TOKEN` nativo).
+
 ## [1.0.0] — 2026-09-02
 
 Primeira versão numerada. O painel já rodava em produção no piloto

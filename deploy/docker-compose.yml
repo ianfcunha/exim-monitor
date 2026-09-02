@@ -1,0 +1,87 @@
+# deploy/docker-compose.yml — Mail IQ em produção, a partir de imagens
+# versionadas (ghcr.io), sem código-fonte na máquina.
+#
+# Este diretório é autocontido: você só precisa de `docker-compose.yml`,
+# `.env`, `install.sh`, `upgrade.sh` e `docs/`. Nada aqui referencia o
+# repositório do código. Instalação e atualização: veja docs/instalar.md
+# e docs/atualizar.md.
+#
+#   MAILIQ_VERSION   — tag das imagens (ex.: 1.0.0). Nunca use "latest"
+#                      aqui: o upgrade.sh troca este valor de propósito,
+#                      para que o rollback seja só voltar a tag anterior.
+#   MAILIQ_REGISTRY  — namespace do registry. Default: ghcr.io/ianfcunha
+#   DOMAIN           — FQDN do painel; o Caddy emite o certificado TLS.
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       exim_monitor
+      POSTGRES_USER:     exim
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U exim -d exim_monitor"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    command: >
+      postgres
+        -c max_connections=50
+        -c shared_buffers=128MB
+        -c effective_cache_size=512MB
+        -c work_mem=4MB
+        -c checkpoint_completion_target=0.9
+        -c wal_buffers=16MB
+        -c random_page_cost=1.1
+
+  backend:
+    image: ${MAILIQ_REGISTRY:-ghcr.io/ianfcunha}/exim-monitor-backend:${MAILIQ_VERSION:?defina MAILIQ_VERSION no .env}
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ~/.ssh:/root/.ssh:ro   # chaves SSH do host (fallback); o painel gera as suas próprias por servidor
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://exim:${POSTGRES_PASSWORD}@postgres:5432/exim_monitor
+    expose:
+      - "8000"
+    ports:
+      - "127.0.0.1:8000:8000"   # só localhost — health check e depuração; tráfego externo entra pelo Caddy
+
+  frontend:
+    image: ${MAILIQ_REGISTRY:-ghcr.io/ianfcunha}/exim-monitor-frontend:${MAILIQ_VERSION:?defina MAILIQ_VERSION no .env}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    expose:
+      - "80"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+      - frontend
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+
+volumes:
+  pg_data:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,8 @@
+# Configuração real e backups do .env — nunca versionar
+.env
+.env.bak-*
+.env.tmp
+
+# Backups gerados pelo backup.sh
+backups/
+*.mailiq-backup.tar.gz

@@ -31,3 +31,8 @@ Thumbs.db
 # Artefato vazio que aparece em backend/ ao recriar o container backend
 # (bind mount de ./diag-exim.sh:/app/diag-exim.sh) — não rastrear.
 /backend/diag-exim.sh
+
+# O CI copia diag-exim/ -> backend/diag-exim/ para embutir na imagem do
+# backend (ver .github/workflows/docker-build.yml). Se você rodar o build
+# localmente, essa cópia não deve ser rastreada.
+/backend/diag-exim/

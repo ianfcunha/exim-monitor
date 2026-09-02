@@ -1,9 +1,16 @@
 # .github/workflows/docker-build.yml
-# Publica imagens no Docker Hub a cada push na branch main.
+# Publica as imagens do painel no GitHub Container Registry (ghcr.io).
 #
-# Setup necessario (GitHub → Settings → Secrets and variables → Actions):
-#   DOCKERHUB_USERNAME  — seu usuario no Docker Hub
-#   DOCKERHUB_TOKEN     — Access Token gerado em hub.docker.com/settings/security
+# - push na branch main  → tags moveis :main e :sha-<curto>  (dev/homolog)
+# - tag git vX.Y.Z       → tags versionadas :X.Y.Z, :X.Y e :latest  (release)
+# - pull request         → build de validacao, sem push
+#
+# Registry: ghcr.io/<owner>/exim-monitor-backend e -frontend. Os pacotes
+# nascem privados; o CI autentica com o GITHUB_TOKEN nativo (nenhum secret
+# a configurar). Para o cliente puxar, ver deploy/docs/instalar.md
+# (um Personal Access Token read-only, documentado no guia).
+#
+# Deploy a partir destas imagens: deploy/docker-compose.yml + deploy/upgrade.sh.
 
 name: Build & Push Docker Images
 
@@ -14,22 +21,35 @@ on:
   pull_request:
     branches: [main]
 
-env:
-  REGISTRY: docker.io
-
 jobs:
-  build-backend:
-    name: Backend
+  build:
+    name: ${{ matrix.component }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [backend, frontend]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Log in to Docker Hub
+      # diag-exim/ (pacote open-core) fica na raiz do repo, fora do contexto
+      # de build do backend. A imagem precisa carrega-lo em /app/diag-exim/
+      # para o deploy sem codigo-fonte (o ssh.py o envia por SFTP ao servidor
+      # monitorado). No compose de dev o volume ./diag-exim sobrepoe esta copia.
+      - name: Stage diag-exim into backend build context
+        if: matrix.component == 'backend'
+        run: cp -r diag-exim backend/diag-exim
+
+      - name: Log in to ghcr.io
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up QEMU (multi-arch)
         uses: docker/setup-qemu-action@v3
@@ -41,61 +61,23 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/exim-monitor-backend
+          images: ghcr.io/${{ github.repository }}-${{ matrix.component }}
           tags: |
             type=ref,event=branch
+            type=sha,prefix=sha-,format=short
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
-      - name: Build & Push backend
+      - name: Build & Push ${{ matrix.component }}
         uses: docker/build-push-action@v5
         with:
-          context: ./backend
+          context: ./${{ matrix.component }}
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to:   type=gha,mode=max
-
-  build-frontend:
-    name: Frontend
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Log in to Docker Hub
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/exim-monitor-frontend
-          tags: |
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix=sha-,format=short
-
-      - name: Build & Push frontend
-        uses: docker/build-push-action@v5
-        with:
-          context: ./frontend
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            MAILIQ_BUILD_SHA=${{ github.sha }}
           cache-from: type=gha
           cache-to:   type=gha,mode=max

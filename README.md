@@ -161,8 +161,13 @@ diag-exim/              pacote open-core (MIT — ver diag-exim/LICENSE), autôn
 mailiq-bootstrap.sh    roda uma vez, como root, NO SERVIDOR MONITORADO —
                        cria o usuário mailiq, instala a chave, escreve o
                        sudoers mínimo
-install.sh             instalador do painel (gera .env, sobe Docker Compose,
-                       configura proxy) — não toca em nenhum servidor EXIM
+install.sh             instalador do painel A PARTIR DO CÓDIGO (gera .env,
+                       builda e sobe Docker Compose) — não toca em nenhum
+                       servidor EXIM
+deploy/                deploy a partir de imagens versionadas (ghcr.io),
+                       sem código-fonte na máquina — compose + install.sh +
+                       upgrade.sh (com rollback) + docs. É o pacote que o
+                       cliente recebe; autocontido, com README próprio
 LICENSE                comercial — cobre tudo neste repositório EXCETO diag-exim/
 docs/
   manual.md             manual do painel — cada tela e os conceitos por
