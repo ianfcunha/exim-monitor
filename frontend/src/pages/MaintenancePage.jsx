@@ -17,6 +17,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { fetchQuarantine, planAction, restoreQuarantine, runAction } from '../api/client'
 import { Button } from '@/components/ui/button'
+import DiagnosticPackageCard from '../components/DiagnosticPackageCard'
 import { useServer } from '../contexts/ServerContext'
 import { useToast } from '../contexts/ToastContext'
 
@@ -112,6 +113,12 @@ export default function MaintenancePage() {
       >
         <ArrowLeft size={14} /> Configurações
       </button>
+
+      {/* Antes da "Zona de risco", e fora dela: gerar diagnóstico não
+          altera nada, no painel nem nos servidores. Herdar o
+          enquadramento de perigo faria o cliente hesitar justamente na
+          ação que a gente quer que ele faça antes de abrir chamado. */}
+      <DiagnosticPackageCard />
 
       <p style={{ fontSize: 10, letterSpacing: '0.30em', textTransform: 'uppercase', color: 'var(--danger)', fontWeight: 700 }}>
         Zona de risco

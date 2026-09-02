@@ -37,6 +37,7 @@ test_dnsbl_hysteresis     test_health_single_source   test_incident_impact
 test_incident_notify      test_incident_report        test_incidents_api
 test_monthly_report       test_no_test_residue        test_reputation_api
 test_server_privilege_api test_server_scope           test_alert_channels
+test_diagnostic_package
 ```
 
 **Precisam de Exim / iptables / SSH reais** — removem mensagem de fila,
@@ -66,6 +67,15 @@ bash tests/test_migrations.sh
 docker compose up -d
 bash tests/test_incidents_api.sh
 ```
+
+## Vazamento no pacote de diagnóstico
+
+`test_diagnostic_package.sh` é o único teste adversarial da suíte: ele
+PLANTA canários reconhecíveis em todos os campos de credencial do banco,
+gera o pacote e falha se algum aparecer. Precisa do stack de dev; restaura
+o banco no fim. Conferir "o campo está vazio?" não serviria — num painel
+recém-instalado quase todo campo de credencial está vazio, e o teste
+passaria sem ter testado nada.
 
 ## Testes que criam servidor descartável
 

@@ -24,7 +24,7 @@ from .database import run_retention
 from .limiter import limiter
 from .monthly_report import monthly_report_loop
 from .reports import weekly_report_loop
-from .routers import actions, auth, history, incidents, license, messages, reputation, security, servers, status, users
+from .routers import actions, auth, history, incidents, license, messages, reputation, security, servers, status, support, users
 from .routers import settings as settings_router
 from .version import APP_VERSION, version_info
 
@@ -1132,6 +1132,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(servers.router)
 app.include_router(status.router)
+app.include_router(support.router)
 app.include_router(actions.router)
 app.include_router(incidents.router)
 app.include_router(reputation.router)

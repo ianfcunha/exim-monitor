@@ -242,4 +242,13 @@ export const fetchVersion = () => api.get('/version').then(r => r.data)
 // o que o botão desabilitado diz é exatamente o que a API responderia.
 export const fetchLicense = () => api.get('/license').then(r => r.data)
 
+// ── Suporte (T10) ──────────────────────────────────────────────────────────
+// O pacote sai da máquina do cliente, então ele tem que poder LER antes de
+// enviar — a prévia devolve exatamente o mesmo conteúdo do download.
+export const fetchDiagnosticPreview = () =>
+  api.get('/support/diagnostic-preview', { transformResponse: r => r }).then(r => r.data)
+
+export const downloadDiagnosticPackage = () =>
+  api.get('/support/diagnostic-package', { responseType: 'blob' })
+
 export default api

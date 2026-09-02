@@ -39,3 +39,4 @@ Thumbs.db
 # backend (ver .github/workflows/docker-build.yml). Se você rodar o build
 # localmente, essa cópia não deve ser rastreada.
 /backend/diag-exim/
+/diagnostico/

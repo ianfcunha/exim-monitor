@@ -89,7 +89,7 @@ propósito — ninguém abre um painel de e-mail quando está tudo bem.
 | **Métricas** | Volume de fila e taxa de entrega ao longo das horas, funil de entrega, maiores ofensores do momento, recursos do Exim e visualizador de log. |
 | **Plano de correção** | O mesmo fluxo de correção da Triagem, apresentado como um plano por incidente — com etapas, linha do tempo e histórico dos planos encerrados. |
 | **Reputação** | Estado de blocklists, SPF/DKIM/DMARC e certificado TLS por servidor, com histórico de entrada e saída de cada lista. |
-| **Configurações** | Licença, alertas, servidores, usuários, histórico de auditoria e manutenção. Só Admin. |
+| **Configurações** | Licença, alertas, servidores, usuários, histórico de auditoria, manutenção e o pacote de diagnóstico. Só Admin. |
 
 O painel clássico de fila ainda existe, agora como a aba **Fila** —
 gráficos históricos e atalhos extras aparecem quando o "modo avançado" é
@@ -494,7 +494,45 @@ Exportável em CSV e JSON, por servidor e por período.
 
 ## Configurações → Manutenção
 
-Duas coisas moram aqui porque são pesadas demais para o fluxo normal:
+O primeiro bloco é o **pacote de diagnóstico**. Os outros dois são pesados
+demais para o fluxo normal e ficam na "Zona de risco".
+
+### Pacote de diagnóstico
+
+Um arquivo com o estado do painel, para anexar ao abrir um chamado. Gerar
+não altera nada — nem no painel, nem nos servidores monitorados.
+
+Vai dentro: versão em execução, estado do coletor e do watchdog, estado da
+licença, servidores cadastrados e suas checagens, quais canais de alerta
+estão ligados e completos, e os incidentes recentes com as linhas de log
+que os provam.
+
+**Não vai dentro**, nunca: senha nenhuma, chave de criptografia nenhuma,
+nenhum token de bot ou credencial de e-mail, e nem os segredos SSH dos
+servidores monitorados (nem cifrados). As partes locais dos endereços de
+e-mail que aparecem em linhas de log são substituídas por pseudônimos —
+`joao@empresa.com.br` vira `conta#7f2a91@empresa.com.br`. O domínio é
+mantido de propósito: é ele que explica um problema de entrega, e sozinho
+não identifica ninguém.
+
+O botão **"Ver o conteúdo antes"** mostra exatamente o mesmo arquivo que o
+download, na tela. Use antes de enviar: é um arquivo de texto legível, e
+você tem todo o direito de conferir o que está mandando.
+
+Quando o painel **não está no ar** — e portanto não consegue gerar o
+próprio diagnóstico — quem tem acesso à máquina roda, na pasta de
+instalação:
+
+```bash
+./diagnostic.sh
+```
+
+Isso empacota o que o painel não enxerga de si mesmo: containers de pé ou
+reiniciando, log do backend, disco, memória, versão do Docker, portas em
+escuta e o estado do certificado. O `.env` **não** entra — só a lista de
+variáveis definidas, sem os valores.
+
+### Zona de risco
 
 - **Limpar toda a fila** — a única ação que atinge a fila inteira, sem
   filtro. Mesmo preview, mesmo identificador de 5 minutos, mesma

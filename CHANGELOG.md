@@ -10,6 +10,39 @@ bate com a tag git `vX.Y.Z` e com a tag das imagens Docker.
 ## [Não lançado]
 
 ### Adicionado
+- **Pacote de diagnóstico** (Configurações → Manutenção, admin only):
+  um arquivo com versão em execução, estado do coletor e do watchdog,
+  licença, servidores e checagens, quais canais de alerta estão ligados e
+  completos, e os incidentes recentes com as linhas de log que os provam.
+  O chamado típico gastava três mensagens só para levantar isso.
+  Como o arquivo **sai da máquina do cliente**, ele tem duas garantias:
+  · Segredo nenhum. Os campos sensíveis não entram, E o JSON final passa
+    por uma limpeza que remove por VALOR qualquer segredo conhecido
+    (chave Fernet, JWT, senha do banco e do admin, token da licença,
+    credenciais de canal) mais qualquer token Fernet. Se um campo novo
+    vazar amanhã, a segunda camada ainda pega — e loga um aviso pedindo
+    para corrigir a origem.
+  · Dado pessoal pseudonimizado. As linhas de mainlog carregam remetente
+    e destinatário, que num painel de hospedagem são os clientes finais
+    do cliente. A parte local vira `conta#a1b2c3` (HMAC com chave que
+    nunca sai da instalação: estável entre pacotes do mesmo painel,
+    inútil fora dele, irreversível por dicionário) e **o domínio fica**,
+    porque é ele que explica o problema de entrega e sozinho não
+    identifica pessoa.
+  Botão "Ver o conteúdo antes" mostra o mesmo arquivo na tela: pedir para
+  o cliente enviar algo sem poder ler o que envia não é aceitável.
+  O download fica registrado no histórico de auditoria.
+- `deploy/diagnostic.sh` — o que o painel não enxerga de si mesmo:
+  containers, log de cada serviço, disco, memória, Docker, portas em
+  escuta e certificado. É o que resta quando o painel está fora do ar e
+  por isso não consegue gerar o próprio diagnóstico. O `.env` não entra —
+  só a lista de variáveis definidas, sem os valores. Avisa se um segredo
+  do `.env` aparecer dentro de algum log capturado.
+- `tests/test_diagnostic_package.sh` — teste adversarial: planta canários
+  em todos os campos de credencial do banco e falha se qualquer um sair
+  no pacote. Canário porque, num painel recém-instalado, quase todo campo
+  de credencial está vazio e um teste de "campo vazio" passaria sem
+  testar nada. 17 asserções.
 - **Watchdog do coletor** — o painel inteiro dependia de uma
   `asyncio.Task` continuar rodando. Se ela morresse ou travasse, as telas
   seguiam servindo o último snapshot, o selo de saúde seguia verde e

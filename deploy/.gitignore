@@ -8,3 +8,7 @@
 # Backups gerados pelo backup.sh
 backups/
 *.mailiq-backup.tar.gz
+
+# Pacotes gerados pelo diagnostic.sh
+diagnostico/
+*.mailiq-diagnostico.tar.gz
