@@ -10,6 +10,21 @@ bate com a tag git `vX.Y.Z` e com a tag das imagens Docker.
 ## [Não lançado]
 
 ### Adicionado
+- **`EULA.md`** — minuta do contrato de licença de uso do painel, em
+  português, para revisão jurídica antes da primeira venda. Cobre
+  concessão de licença, o comportamento soft do token (`MAILIQ_LICENSE`
+  vencido nunca trava o painel), responsabilidades do cliente (revisar o
+  Plano antes de aplicar cada ação), limitação de responsabilidade — com
+  ênfase nas ações destrutivas e na não entrega de e-mail —, suporte
+  best-effort sem SLA, tratamento de dados (remete a `docs/dados.md`,
+  inclui o pacote de diagnóstico) e foro na comarca do cliente. Aviso no
+  topo de que não substitui advogado; marcadores para razão social,
+  CNPJ e endereço.
+- **`docs/suporte.md`** — como o suporte funciona: best-effort, horário
+  comercial, sem SLA; o que fazer antes de abrir chamado; o pacote de
+  diagnóstico; o que está e o que não está no escopo; a rede de
+  segurança (quarentena, bloqueio com TTL, preview) que torna a maior
+  parte das reversões self-service.
 - **Pacote de diagnóstico** (Configurações → Manutenção, admin only):
   um arquivo com versão em execução, estado do coletor e do watchdog,
   licença, servidores e checagens, quais canais de alerta estão ligados e
@@ -139,6 +154,22 @@ bate com a tag git `vX.Y.Z` e com a tag das imagens Docker.
   por que os demais (stack de dev / Exim real) não rodam ainda.
 
 ### Alterado
+- **`LICENSE`** reescrito como aviso que remete ao `EULA.md`: mantém a
+  fronteira open-core (`diag-exim/` é MIT e sobrevive ao término),
+  descreve a verificação offline do token e o comportamento soft, e
+  torna explícito que o cliente é responsável por revisar o Plano de
+  cada ação — a limitação de responsabilidade deixou de ser uma linha
+  genérica.
+- **`docs/dados.md`** atualizado para o estado atual: nova seção "A
+  licença" (o `.env` guarda `MAILIQ_LICENSE` com o nome do cliente;
+  verificação local, sem phone-home); nova seção "O pacote de
+  diagnóstico" (o único dado que sai da infra do cliente, e só por ação
+  dele); a afirmação "nada sai para nós" passou a nomear essa exceção em
+  vez de ser absoluta.
+- `README.md` — licenciamento remete ao `EULA.md` e descreve o token
+  soft; a seção "o que executa no seu servidor" nomeia o pacote de
+  diagnóstico como a única saída de dados; `EULA.md` e `docs/suporte.md`
+  entram na listagem de estrutura.
 - `decrypt_secret()` falha alto desde a Sessão 1, mas isso só resolve se
   TODO chamador tratar — e o bloco de tratamento estava copiado em quatro
   routers e **ausente em dois**. `messages.py` (Log Viewer) e `status.py`

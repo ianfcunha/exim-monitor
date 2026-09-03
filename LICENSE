@@ -2,38 +2,75 @@ Mail IQ — Commercial License
 
 Copyright (c) 2026 AVILI. All rights reserved.
 
-This repository is open-core. The license below applies to everything
-in this repository EXCEPT the `diag-exim/` directory, which is
-licensed separately and permissively — see `diag-exim/LICENSE` (MIT).
+This repository is open-core. This license applies to everything in this
+repository EXCEPT the `diag-exim/` directory, which is licensed
+separately and permissively — see `diag-exim/LICENSE` (MIT). The
+`diag-exim/` license is self-standing and survives termination of any
+agreement covering the rest of the repository.
 
 Scope of this license: the panel backend (`backend/`), the panel
-frontend (`frontend/`), fleet aggregation, incident history, alerting,
-and reporting — everything that requires the Mail IQ panel to be
-running to have any effect.
+frontend (`frontend/`), fleet aggregation, the incident engine, incident
+history, alerting, and reporting — everything that requires the Mail IQ
+panel to be running to have any effect.
 
 Terms:
 
-1. This software is proprietary and confidential. No license, right,
-   or interest in this software is granted except as expressly stated
-   in a separate written agreement with AVILI (a commercial license,
-   a support contract, or explicit written permission).
+1. This software is proprietary and confidential. No license, right, or
+   interest in this software is granted except as expressly stated in a
+   written agreement with AVILI (a commercial license, a support
+   contract, or explicit written permission).
 
 2. You may not copy, modify, merge, publish, distribute, sublicense,
-   or sell copies of this software, or use it to provide a competing
-   hosted or managed service, without such a written agreement.
+   rent, lend, or sell copies of this software, or use it to provide a
+   competing hosted or managed service to third parties, without such a
+   written agreement.
 
 3. You may run this software for your own internal operational use
-   (self-hosted, on your own infrastructure) under the terms of your
-   commercial agreement with AVILI. Evaluating the software for the
-   purpose of deciding whether to enter such an agreement is
-   permitted.
+   (self-hosted, on your own infrastructure), monitoring up to the
+   number of servers stated in your license token (`MAILIQ_LICENSE`),
+   under the terms of your agreement with AVILI. Evaluating the software
+   to decide whether to enter such an agreement is permitted, subject to
+   the built-in courtesy period (1 server / 30 days) described in the
+   EULA.
 
-4. THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-   EXPRESS OR IMPLIED. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
-   HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY
-   ARISING FROM THE USE OF THIS SOFTWARE.
+4. The software verifies its license token OFFLINE, against a public
+   key embedded in the build. It does not contact any licensing server
+   and transmits nothing for that purpose. An expired, invalid, or
+   absent license token NEVER disables the panel, never makes it
+   read-only, never stops collection from already-registered servers,
+   and never deletes data — its only effect is to block registration of
+   NEW servers.
+
+5. THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED. The panel executes state-changing actions on the
+   Exim servers you connect to it; it shows a preview ("Plan") of every
+   action and requires explicit confirmation before applying it. YOU are
+   responsible for reviewing each Plan before confirming, and for the
+   consequences of actions you confirm. IN NO EVENT SHALL AVILI BE
+   LIABLE FOR LOST, DELAYED, OR UNDELIVERED EMAIL, FOR LOST PROFITS OR
+   DATA, OR FOR ANY INDIRECT OR CONSEQUENTIAL DAMAGES ARISING FROM THE
+   USE OF THIS SOFTWARE. AVILI's total liability is capped as set out in
+   the EULA.
+
+6. The binding terms for running the panel — definitions, license
+   grant, your responsibilities, support, the full limitation of
+   liability, data handling, and governing law — are in `EULA.md` and/or
+   the written agreement you signed with AVILI. In case of conflict, a
+   signed agreement prevails over `EULA.md`, and `EULA.md` prevails over
+   this file. `EULA.md` is written in Portuguese, as the governing
+   agreement for Brazilian customers.
+
+Support is provided on a best-effort basis, during business hours, with
+no guaranteed response time (no SLA) unless separately agreed in
+writing. See `docs/suporte.md`.
+
+Data: the software is self-hosted and AVILI operates no infrastructure
+that receives your data. The one exception is the diagnostic package,
+which leaves your infrastructure only when you generate and send it, and
+which carries no secrets and pseudonymizes email local-parts. See
+`docs/dados.md`.
 
 For licensing terms, contact AVILI. If you only need the standalone
 diagnostic script (queue/log diagnosis and manual remediation on a
-single Exim server, no fleet features), see `diag-exim/` instead — it
-is MIT-licensed and does not require this agreement.
+single Exim server, no fleet features), see `diag-exim/` instead — it is
+MIT-licensed and does not require this agreement.

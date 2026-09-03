@@ -30,11 +30,21 @@ próprio. O painel existe pra quem opera mais de um servidor e quer o
 histórico, os alertas e os relatórios prontos sem construir isso por conta
 própria.
 
+Os termos completos de uso do painel — concessão de licença, suas
+responsabilidades, limitação de responsabilidade, suporte, dados e foro —
+estão em [`EULA.md`](EULA.md) (minuta em português, para revisão
+jurídica). A licença é **soft**: um token vencido ou ausente nunca trava
+o painel nem para a coleta — só bloqueia o cadastro de servidores novos.
+Uma instalação sem token roda em cortesia (1 servidor / 30 dias).
+
 ## O que este software executa no seu servidor
 
 Self-hosted é o padrão: você roda o compose na sua própria infraestrutura, e
-suas chaves SSH e seus logs nunca saem dela. Nada aqui é omitido — é a lista
-literal do que roda no servidor monitorado, e por quê.
+suas chaves SSH e seus logs nunca saem dela em operação normal — o painel não
+faz "phone home", nem para checar a licença. A única coisa que sai é o pacote
+de diagnóstico, quando **você** o gera e envia ao suporte, já sem segredos e
+com os e-mails pseudonimizados ([`docs/dados.md`](docs/dados.md)). Nada aqui
+é omitido — abaixo é a lista literal do que roda no servidor monitorado.
 
 **Nunca pedimos a senha de root.** A instalação recomendada
 (`mailiq-bootstrap.sh` — leia o arquivo inteiro antes de rodar) cria um
@@ -169,14 +179,19 @@ deploy/                deploy a partir de imagens versionadas (ghcr.io),
                        upgrade.sh (com rollback) + docs. É o pacote que o
                        cliente recebe; autocontido, com README próprio
 LICENSE                comercial — cobre tudo neste repositório EXCETO diag-exim/
+EULA.md                contrato de licença de uso do painel (minuta pt-BR,
+                       para revisão jurídica) — concessão, responsabilidades,
+                       limitação de responsabilidade, suporte, dados, foro
 docs/
   manual.md             manual do painel — cada tela e os conceitos por
                         trás delas; a doc que você passa a quem vai operar
   seguranca.md          sudoers de referência completo, pra auditar antes
                         de instalar
+  suporte.md            como o suporte funciona — best-effort, sem SLA;
+                        o pacote de diagnóstico; escopo e rede de segurança
   compatibilidade.md    matriz de formatos de log validados vs. inferidos
-  dados.md               que dados o sistema lê, onde ficam, retenção — a
-                        resposta pra pergunta de LGPD antes de ela ser feita
+  dados.md               que dados o sistema lê, onde ficam, retenção, e o
+                        pacote de diagnóstico — a resposta pra LGPD
 tests/                  testes automatizados contra Exim/iptables/API reais
   fixtures/              amostras de mainlog por formato
 ```
